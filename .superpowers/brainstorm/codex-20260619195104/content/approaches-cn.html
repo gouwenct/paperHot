@@ -1,0 +1,89 @@
+<h2>paperHOT 第一版方案选择</h2>
+<p class="subtitle">三种方案都保持“领域可配置”。差别在于第一版要做到多自动、多重。</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A. 手动整理版</div>
+        <div class="mockup-body">
+          <div class="mock-nav">paperHOT | 今日热点 | 标签 | 来源</div>
+          <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-top:12px">
+            <div class="placeholder">手动填写 JSON / Markdown 条目</div>
+            <div class="placeholder">生成每日热点列表</div>
+            <div class="placeholder">生成论文详情页</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. 手动优先的静态站点</h3>
+      <p>最快能做出来。你提供论文或链接，系统负责排版成类似 AIHOT 的卡片列表。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B. 半自动 paperHOT</div>
+        <div class="mockup-body">
+          <div class="mock-nav">数据源 -> 抓取 -> 打分 -> 人工复核 -> 发布</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+            <div class="placeholder">arXiv / bioRxiv / HF Papers</div>
+            <div class="placeholder">RSS / GitHub / 博客</div>
+            <div class="placeholder">LLM 摘要 + 标签 + 推荐理由</div>
+            <div class="placeholder">每日 HOT 页面</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. 半自动混合源系统</h3>
+      <p>推荐方案。自动抓取论文源和少量资讯源，生成摘要、标签和推荐理由，但第一版保留人工复核。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C. 全自动生产系统</div>
+        <div class="mockup-body">
+          <div class="mock-nav">定时任务 | 抓取器 | 数据库 | LLM | 网站 | 后台</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px">
+            <div class="placeholder">多源采集</div>
+            <div class="placeholder">去重数据库</div>
+            <div class="placeholder">热度排序</div>
+            <div class="placeholder">LLM 任务队列</div>
+            <div class="placeholder">审核后台</div>
+            <div class="placeholder">自动部署</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. 全自动生产级流水线</h3>
+      <p>最完整，但第一版偏重：需要定时任务、数据库、登录、后台、失败重试和部署流程。</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>推荐方向</h4>
+      <ul>
+        <li>第一版采用 B，让页面和内容尽快真实可用。</li>
+        <li>把研究领域、关键词、来源权重都放在配置文件里。</li>
+        <li>先用审核文件代替复杂后台，降低实现成本。</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>第一版先不做</h4>
+      <ul>
+        <li>登录系统和完整管理后台。</li>
+        <li>为每个来源单独写很复杂的爬虫。</li>
+        <li>把显微成像规则写死到核心代码里。</li>
+      </ul>
+    </div>
+  </div>
+</div>

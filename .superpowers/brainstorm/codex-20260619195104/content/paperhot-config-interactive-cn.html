@@ -1,0 +1,2022 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>paperHOT 领域配置交互原型</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: #233149;
+      background: linear-gradient(115deg, #f3fbfd 0%, #f8fbfa 43%, #f4f2fb 100%);
+    }
+    button { font: inherit; cursor: pointer; }
+    .app { min-height: 100vh; display: grid; grid-template-columns: 180px 1fr; }
+    .sidebar {
+      padding: 12px 10px;
+      background: rgba(255,255,255,0.76);
+      border-right: 1px solid rgba(207,219,228,0.8);
+    }
+    .brand {
+      height: 70px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #dce7ee;
+      border-radius: 14px;
+      background: #fff;
+      color: #1c2c45;
+      font-weight: 800;
+      letter-spacing: 2px;
+      box-shadow: 0 6px 20px rgba(24,67,101,0.05);
+    }
+    .brand span { color: #0ea6c8; }
+    .nav { margin-top: 16px; display: grid; gap: 8px; }
+    .nav-item {
+      height: 40px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 13px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      background: transparent;
+      color: #6f8096;
+      font-size: 14px;
+      font-weight: 650;
+      text-align: left;
+      text-decoration: none;
+    }
+    .nav-item.active {
+      color: #0b94b2;
+      background: #e8fbff;
+      border-color: #a5e5f0;
+    }
+    .main { padding: 18px 28px 36px; }
+    .hero, .panel, .source-card, .toast {
+      border: 1px solid rgba(222,232,238,0.92);
+      border-radius: 13px;
+      background: rgba(255,255,255,0.84);
+      box-shadow: 0 10px 24px rgba(33,58,82,0.06);
+    }
+    .hero { padding: 18px; margin-bottom: 18px; }
+    .hero-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+    }
+    h1 { margin: 0; color: #24324a; font-size: 28px; font-weight: 720; }
+    h2 { margin: 0; color: #24324a; font-size: 17px; font-weight: 850; }
+    h3 { margin: 0; color: #203049; font-size: 14px; font-weight: 850; }
+    .subtitle { margin-top: 5px; color: #6f8096; font-size: 13px; line-height: 1.55; }
+    .primary-btn {
+      height: 34px;
+      min-width: 78px;
+      padding: 0 14px;
+      border: 1px solid #8bcfdc;
+      border-radius: 18px;
+      background: #dff7fb;
+      color: #207d93;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .ghost-btn {
+      height: 32px;
+      padding: 0 12px;
+      border: 1px solid #d9e3ea;
+      border-radius: 16px;
+      background: #fff;
+      color: #60738b;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .divider { height: 1px; margin: 14px 0 12px; background: #e8eef3; }
+    .focus-row, .button-row, .token-row, .tags { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .focus-label { color: #708096; font-size: 12px; font-weight: 850; }
+    .focus-row .small-text { line-height: 28px; }
+    .chip {
+      padding: 6px 11px;
+      border: 1px solid #b8e9f1;
+      border-radius: 16px;
+      background: #e9fbff;
+      color: #237989;
+      font-size: 12px;
+      font-weight: 780;
+    }
+    button.chip { cursor: pointer; }
+    .chip.selected {
+      border-color: #0fa7c6;
+      background: #0fa7c6;
+      color: #fff;
+    }
+    .chip.muted { border-color: #dce4ea; background: #f3f6f8; color: #79879a; }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 370px;
+      gap: 18px;
+      align-items: start;
+    }
+    .panel { padding: 14px; }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .panel-note { color: #708096; font-size: 12px; }
+    .source-list { display: grid; gap: 10px; }
+    .source-card {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      padding: 12px;
+      background: #fbfdfe;
+      box-shadow: none;
+    }
+    .source-card.editing { grid-template-columns: 1fr; }
+    .source-card.paused { opacity: 0.62; }
+    .source-desc { margin: 5px 0 8px; color: #65758b; font-size: 12px; line-height: 1.55; }
+    .tag {
+      padding: 4px 8px;
+      border-radius: 6px;
+      background: #f0f3f6;
+      color: #708096;
+      font-size: 11px;
+      font-weight: 750;
+    }
+    .source-actions { display: grid; gap: 8px; align-content: start; justify-items: end; }
+    .toggle {
+      min-width: 62px;
+      padding: 5px 10px;
+      border: 1px solid #9ddfca;
+      border-radius: 14px;
+      background: #e8fbf5;
+      color: #148567;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .toggle.paused {
+      border-color: #d8e2e8;
+      background: #f3f6f8;
+      color: #7c8a9b;
+    }
+    .edit-link {
+      border: 0;
+      background: transparent;
+      color: #5d7892;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .source-form {
+      display: grid;
+      gap: 9px;
+    }
+    .source-form label {
+      display: grid;
+      gap: 5px;
+      color: #4f6076;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .source-form input,
+    .source-form textarea {
+      width: 100%;
+      border: 1px solid #d9e2e9;
+      border-radius: 10px;
+      background: #fff;
+      color: #203049;
+      font-size: 12px;
+      padding: 8px 10px;
+      font: inherit;
+      resize: vertical;
+    }
+    .source-form textarea { min-height: 70px; }
+    .source-form-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .add-box {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px dashed #b8dbe3;
+      border-radius: 12px;
+      background: #f6fcfd;
+    }
+    .add-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .example {
+      padding: 10px;
+      border: 1px solid #e1e9ef;
+      border-radius: 10px;
+      background: #fff;
+    }
+    .example strong { display: block; color: #203049; font-size: 13px; margin-bottom: 4px; }
+    .example span { color: #68788e; font-size: 12px; line-height: 1.45; }
+    .config-section {
+      padding: 14px 0;
+      border-bottom: 1px solid #edf2f5;
+    }
+    .config-section:first-of-type { padding-top: 0; }
+    .config-section:last-child { border-bottom: 0; padding-bottom: 0; }
+    .keyword-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 28px;
+      padding: 6px 10px;
+      border: 1px solid var(--chip-border, #d5e0e5);
+      border-radius: 999px;
+      background: var(--chip-bg, #f4f7f8);
+      color: var(--chip-text, #5e7180);
+      font-size: 12px;
+      font-weight: 780;
+      cursor: pointer;
+      transition: opacity 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+      user-select: none;
+    }
+    .keyword-chip.selected { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chip-border, #d5e0e5), #334 18%); }
+    .keyword-chip.paused { opacity: 0.48; filter: saturate(0.75); }
+    .keyword-chip:hover { transform: translateY(-1px); }
+    .focus-row .keyword-chip { cursor: default; }
+    .focus-row .keyword-chip:hover { transform: none; }
+    .keyword-chip.editing {
+      padding: 3px 6px;
+      background: #fff;
+      border-color: #cddae1;
+      cursor: text;
+      box-shadow: 0 0 0 2px rgba(127,154,166,0.12);
+    }
+    .keyword-text { max-width: 180px; overflow-wrap: anywhere; }
+    .keyword-inline-input {
+      width: 170px;
+      height: 26px;
+      border: 1px solid #d4dee5;
+      border-radius: 999px;
+      padding: 0 10px;
+      background: #fff;
+      color: #203049;
+      font-size: 12px;
+      font-weight: 700;
+      outline: none;
+    }
+    .remove {
+      width: 16px;
+      height: 16px;
+      border: 0;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.48);
+      color: inherit;
+      line-height: 16px;
+      padding: 0;
+      font-weight: 900;
+    }
+    .keyword-section-head {
+      display: grid;
+      gap: 3px;
+      margin-bottom: 10px;
+    }
+    .keyword-section-note {
+      color: #75859a;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .input-row { display: flex; gap: 8px; margin-top: 10px; }
+    .input-row input {
+      flex: 1;
+      height: 34px;
+      padding: 0 10px;
+      border: 1px solid #d9e2e9;
+      border-radius: 10px;
+      background: #fff;
+      color: #607087;
+      font-size: 12px;
+    }
+    .toast {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      padding: 10px 14px;
+      color: #168164;
+      font-size: 13px;
+      font-weight: 800;
+      background: #effcf8;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: 160ms ease;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .category-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid rgba(222,232,238,0.92);
+      border-radius: 13px;
+      background: rgba(255,255,255,0.88);
+      box-shadow: 0 10px 24px rgba(33,58,82,0.06);
+    }
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      border: 1px solid rgba(222,232,238,0.92);
+      border-radius: 13px;
+      background: rgba(255,255,255,0.88);
+      color: #64758b;
+      font-size: 12px;
+      font-weight: 760;
+      box-shadow: 0 10px 24px rgba(33,58,82,0.06);
+    }
+    .category-btn {
+      height: 30px;
+      padding: 0 12px;
+      border: 1px solid #d9e3ea;
+      border-radius: 15px;
+      background: #fff;
+      color: #60738b;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .category-btn.active {
+      border-color: #0fa7c6;
+      background: #0fa7c6;
+      color: #fff;
+    }
+    .timeline-list {
+      display: grid;
+      gap: 0;
+      position: relative;
+      padding-left: 18px;
+    }
+    .timeline-list::before {
+      content: "";
+      position: absolute;
+      left: 8px;
+      top: 10px;
+      bottom: 10px;
+      width: 2px;
+      background: #d7e7ee;
+    }
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      gap: 14px;
+      position: relative;
+      padding-bottom: 14px;
+    }
+    .timeline-item::before {
+      content: "";
+      position: absolute;
+      left: -14px;
+      top: 11px;
+      width: 10px;
+      height: 10px;
+      border: 2px solid #0fa7c6;
+      border-radius: 50%;
+      background: #fff;
+    }
+    .timeline-time {
+      padding-top: 4px;
+      color: #5f6f84;
+      font-size: 12px;
+      font-weight: 850;
+      line-height: 1.35;
+    }
+    .timeline-time span {
+      display: block;
+      margin-top: 3px;
+      color: #8a98aa;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .paper-list { display: grid; gap: 12px; }
+    .paper-card {
+      padding: 14px;
+      border: 1px solid rgba(222,232,238,0.92);
+      border-radius: 13px;
+      background: rgba(255,255,255,0.88);
+      box-shadow: 0 10px 24px rgba(33,58,82,0.06);
+    }
+    .paper-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+    .source { color: #75859a; font-size: 12px; }
+    .paper-title { margin: 0 0 8px; color: #1f2a40; font-size: 16px; font-weight: 850; }
+    .paper-summary { margin: 0; color: #5f6f84; font-size: 13px; line-height: 1.7; }
+    .head-actions { display: flex; gap: 7px; align-items: center; white-space: nowrap; }
+    .favorite {
+      height: 26px;
+      padding: 0 10px;
+      border: 1px solid #9ddfca;
+      border-radius: 14px;
+      background: #e8fbf5;
+      color: #148567;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .favorite.saved { border-color: #0f9f78; background: #0f9f78; color: #fff; }
+    .score {
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: #dff9ff;
+      color: #0b99b9;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .reason {
+      margin-top: 10px;
+      padding: 8px 11px;
+      border-radius: 8px;
+      background: #e8fbf5;
+      color: #17966f;
+      font-size: 13px;
+      font-weight: 720;
+    }
+    .token-usage {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+      color: #7b899a;
+      font-size: 12px;
+      font-weight: 760;
+    }
+    .token-usage span {
+      padding: 3px 8px;
+      border: 1px solid #e0e7ed;
+      border-radius: 12px;
+      background: #f7fafb;
+    }
+    .section-title {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 18px 0 10px;
+    }
+    .section-title h2 {
+      margin: 0;
+      color: #1f2a40;
+      font-size: 18px;
+      font-weight: 900;
+    }
+    .section-title span {
+      color: #708096;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .reading-list { display: grid; gap: 10px; }
+    .reading-card {
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: start;
+      padding: 13px;
+      border: 1px solid rgba(222,232,238,0.92);
+      border-radius: 13px;
+      background: rgba(255,255,255,0.88);
+      box-shadow: 0 10px 24px rgba(33,58,82,0.06);
+    }
+    .reading-order {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #e9fbff;
+      color: #0b99b9;
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .reading-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 8px;
+      color: #708096;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .reading-status {
+      height: 26px;
+      padding: 0 10px;
+      border: 1px solid #d9e3ea;
+      border-radius: 14px;
+      background: #fff;
+      color: #60738b;
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+    .reading-status.done {
+      border-color: #0f9f78;
+      background: #0f9f78;
+      color: #fff;
+    }
+    .star-btn {
+      height: 26px;
+      padding: 0 10px;
+      border: 1px solid #ecd58b;
+      border-radius: 14px;
+      background: #fff9df;
+      color: #9a7200;
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+    .star-btn.starred {
+      border-color: #e2a900;
+      background: #e2a900;
+      color: #fff;
+    }
+    .simple-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 18px;
+      align-items: start;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .stat-card {
+      padding: 14px;
+      border: 1px solid rgba(222,232,238,0.92);
+      border-radius: 13px;
+      background: rgba(255,255,255,0.88);
+      box-shadow: 0 10px 24px rgba(33,58,82,0.06);
+    }
+    .stat-label { color: #708096; font-size: 12px; font-weight: 800; }
+    .stat-value { margin-top: 6px; color: #1f2a40; font-size: 26px; font-weight: 900; }
+    .stat-sub { margin-top: 4px; color: #7b899a; font-size: 12px; font-weight: 720; }
+    .chart-list { display: grid; gap: 10px; }
+    .chart-row {
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr) 72px;
+      gap: 10px;
+      align-items: center;
+      color: #60738b;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .bar-track {
+      height: 10px;
+      border-radius: 999px;
+      background: #edf3f6;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      min-width: 2px;
+      border-radius: inherit;
+      background: #0fa7c6;
+    }
+    .daily-bars {
+      display: grid;
+      grid-template-columns: repeat(30, minmax(4px, 1fr));
+      gap: 4px;
+      align-items: end;
+      height: 150px;
+      padding-top: 8px;
+    }
+    .daily-bar {
+      min-height: 2px;
+      border-radius: 6px 6px 0 0;
+      background: #0fa7c6;
+      opacity: 0.82;
+    }
+    .stats-note {
+      margin-top: 10px;
+      color: #708096;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .empty {
+      padding: 26px;
+      border: 1px dashed #bddde2;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.65);
+      color: #60748c;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+    @media (max-width: 1080px) {
+      .layout { grid-template-columns: 1fr; }
+      .add-grid { grid-template-columns: 1fr; }
+      .simple-grid { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 820px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .main { padding: 14px; }
+      .hero-top { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">PAPER<span>HOT</span></div>
+      <nav class="nav">
+        <a class="nav-item" href="#today">⚡ 今日论文</a>
+        <a class="nav-item" href="#all">☰ 全部论文</a>
+        <a class="nav-item" href="#favorites">♡ 个人收藏</a>
+        <a class="nav-item active" href="#config">⌘ 领域配置</a>
+        <a class="nav-item" href="#tokens">▥ Token 统计</a>
+        <a class="nav-item" href="#about">ⓘ 关于</a>
+      </nav>
+    </aside>
+
+    <main class="main" id="main-content">
+      <section class="hero">
+        <div class="hero-top">
+          <div>
+            <h1>领域配置</h1>
+            <div class="subtitle">配置可点击、可修改。信源可启用/暂停；关键词和关注领域可点击选中、删除或新增。</div>
+          </div>
+          <button class="primary-btn" id="save-config">保存配置</button>
+        </div>
+        <div class="divider"></div>
+        <div class="focus-row" id="synced-focus-row">
+          <span class="focus-label">与今日论文同步</span>
+        </div>
+      </section>
+
+      <section class="layout">
+        <div>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>信源配置</h2>
+                <div class="panel-note">控制 paperHOT 从哪里找论文、项目和科研动态</div>
+              </div>
+              <button class="primary-btn" id="add-source">添加信源</button>
+            </div>
+
+            <div class="source-list" id="source-list">
+              <article class="source-card">
+                <div>
+                  <h3>Google 搜索</h3>
+                  <p class="source-desc">补充机构新闻、项目主页、论文代码页和 Nature / Science 网页结果。</p>
+                  <div class="tags"><span class="tag">关键词搜索</span><span class="tag">网页结果</span><span class="tag">项目主页</span></div>
+                </div>
+                <div class="source-actions">
+                  <button class="toggle" data-source-toggle>启用</button>
+                  <button class="edit-link" data-edit-source>编辑</button>
+                </div>
+              </article>
+
+              <article class="source-card">
+                <div>
+                  <h3>arXiv</h3>
+                  <p class="source-desc">抓取 cs.CV、eess.IV、cs.AI、q-bio.QM 等分类。</p>
+                  <div class="tags"><span class="tag">论文源</span><span class="tag">每日更新</span><span class="tag">摘要可用</span></div>
+                </div>
+                <div class="source-actions">
+                  <button class="toggle" data-source-toggle>启用</button>
+                  <button class="edit-link" data-edit-source>编辑</button>
+                </div>
+              </article>
+
+              <article class="source-card">
+                <div>
+                  <h3>bioRxiv</h3>
+                  <p class="source-desc">追踪生物图像、显微实验、细胞成像和生物物理预印本。</p>
+                  <div class="tags"><span class="tag">预印本</span><span class="tag">BioImage</span><span class="tag">生命科学</span></div>
+                </div>
+                <div class="source-actions">
+                  <button class="toggle" data-source-toggle>启用</button>
+                  <button class="edit-link" data-edit-source>编辑</button>
+                </div>
+              </article>
+
+              <article class="source-card">
+                <div>
+                  <h3>Nature / Nature Methods</h3>
+                  <p class="source-desc">捕捉高影响力论文、方法文章和期刊新闻。</p>
+                  <div class="tags"><span class="tag">期刊</span><span class="tag">方法文章</span><span class="tag">高权重</span></div>
+                </div>
+                <div class="source-actions">
+                  <button class="toggle" data-source-toggle>启用</button>
+                  <button class="edit-link" data-edit-source>编辑</button>
+                </div>
+              </article>
+            </div>
+
+            <div class="add-box">
+              <h3>添加信源示例</h3>
+              <div class="add-grid">
+                <button class="example" data-add-example="公众号：科研圈">
+                  <strong>添加公众号</strong>
+                  <span>例：公众号“科研圈”或某课题组公众号，用于补充中文动态。</span>
+                </button>
+                <button class="example" data-add-example="期刊：Nature Photonics">
+                  <strong>添加期刊</strong>
+                  <span>例：Nature Photonics / Nature Methods / Optica，按期刊源追踪。</span>
+                </button>
+                <button class="example" data-add-example="网页源：实验室主页">
+                  <strong>添加网页源</strong>
+                  <span>例：某实验室 news 页面、项目主页或 RSS feed。</span>
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <aside class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>领域关键词配置</h2>
+              <div class="panel-note">单击启用/停用，双击直接修改；点击空白处确认</div>
+            </div>
+          </div>
+
+          <div id="keyword-config-panel"></div>
+        </aside>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast">已更新</div>
+
+  <script>
+    const toast = document.getElementById("toast");
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 1200);
+    }
+
+    document.querySelectorAll("[data-source-toggle]").forEach(button => {
+      button.addEventListener("click", () => {
+        const card = button.closest(".source-card");
+        const paused = button.textContent === "暂停";
+        button.textContent = paused ? "启用" : "暂停";
+        button.classList.toggle("paused", !paused);
+        card.classList.toggle("paused", !paused);
+        showToast(paused ? "信源已启用" : "信源已暂停");
+      });
+    });
+
+    document.querySelectorAll("[data-edit-source]").forEach(button => {
+      button.addEventListener("click", () => showToast("这里会打开信源编辑表单"));
+    });
+
+    document.querySelectorAll("[data-add-example]").forEach(button => {
+      button.addEventListener("click", () => {
+        const title = button.getAttribute("data-add-example");
+        const card = document.createElement("article");
+        card.className = "source-card";
+        card.innerHTML = `
+          <div>
+            <h3>${title}</h3>
+            <p class="source-desc">新增示例信源。正式版本中这里会填写 URL、抓取方式、更新频率和领域映射。</p>
+            <div class="tags"><span class="tag">自定义信源</span><span class="tag">待配置</span></div>
+          </div>
+          <div class="source-actions">
+            <button class="toggle" data-source-toggle>启用</button>
+            <button class="edit-link" data-edit-source>编辑</button>
+          </div>
+        `;
+        document.getElementById("source-list").appendChild(card);
+        card.querySelector("[data-source-toggle]").addEventListener("click", event => {
+          const toggle = event.currentTarget;
+          const currentCard = toggle.closest(".source-card");
+          const paused = toggle.textContent === "暂停";
+          toggle.textContent = paused ? "启用" : "暂停";
+          toggle.classList.toggle("paused", !paused);
+          currentCard.classList.toggle("paused", !paused);
+          showToast(paused ? "信源已启用" : "信源已暂停");
+        });
+        card.querySelector("[data-edit-source]").addEventListener("click", () => showToast("这里会打开信源编辑表单"));
+        showToast("已添加示例信源");
+      });
+    });
+
+    document.querySelectorAll("[data-token-group]").forEach(group => {
+      group.addEventListener("click", event => {
+        if (event.target.classList.contains("remove")) {
+          event.stopPropagation();
+          event.target.closest(".keyword-chip").remove();
+          showToast("关键词已删除");
+          return;
+        }
+        const chip = event.target.closest(".keyword-chip");
+        if (chip) {
+          chip.classList.toggle("selected");
+          showToast(chip.classList.contains("selected") ? "关键词已启用" : "关键词已停用");
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-add-token]").forEach(button => {
+      button.addEventListener("click", () => {
+        const row = button.closest(".input-row");
+        const input = row.querySelector("input");
+        const text = input.value.trim() || "新关键词";
+        const group = row.previousElementSibling;
+        const chip = document.createElement("span");
+        chip.className = "keyword-chip selected";
+        chip.innerHTML = `${text} <button class="remove">×</button>`;
+        group.appendChild(chip);
+        input.value = "";
+        showToast("关键词已添加");
+      });
+    });
+
+    document.getElementById("save-config").addEventListener("click", () => showToast("配置已保存（原型演示）"));
+
+    const mainContent = document.getElementById("main-content");
+    const configHTML = mainContent.innerHTML;
+    const paperCategories = [
+      { key: "all", label: "全部" },
+      { key: "classic", label: "偏传统算法" },
+      { key: "neural", label: "带有神经网络算法" },
+      { key: "bio", label: "偏生物结果" },
+      { key: "hardware", label: "偏硬件创新" },
+      { key: "theory", label: "偏理论创新" },
+      { key: "review", label: "综述" }
+    ];
+    let activePaperCategory = "all";
+    const samplePapers = [
+      {
+        id: "p1",
+        time: "09:20",
+        sourceType: "预印本",
+        category: "neural",
+        categoryLabel: "带有神经网络算法",
+        categories: ["neural", "classic", "hardware"],
+        categoryLabels: ["带有神经网络算法", "偏传统算法", "偏硬件创新"],
+        source: "arXiv cs.CV · 计算显微",
+        title: "Diffusion Prior for Robust Microscopy Reconstruction",
+        summary: "该论文把扩散先验引入显微重建，在低信噪比和欠采样条件下保持结构细节。方法用物理前向模型约束生成过程，适合 SIM、RIM、散斑照明等任务扩展。",
+        tags: ["计算显微", "扩散模型", "重建算法"],
+        score: 91,
+        reason: "生成式先验和物理模型结合得比较干净，可作为 RIM/PRIM 重建调研的重点候选。",
+        tokenUsage: { prompt: 0, completion: 0, total: 0, status: "未调用 AI" },
+        journalMetrics: { impactFactor: "", partition: "", source: "", status: "未查询" }
+      },
+      {
+        id: "p2",
+        time: "11:05",
+        sourceType: "预印本",
+        category: "bio",
+        categoryLabel: "偏生物结果",
+        categories: ["bio", "neural"],
+        categoryLabels: ["偏生物结果", "带有神经网络算法"],
+        source: "bioRxiv · BioImage Analysis",
+        title: "Self-supervised Foundation Model for Bioimage Restoration",
+        summary: "研究提出面向生物图像复原的自监督基础模型，在多种显微模态上统一处理去噪、超分辨和结构补全，并给出跨数据集泛化评测。",
+        tags: ["BioImage", "自监督", "图像复原"],
+        score: 84,
+        reason: "跨模态复原模型能帮助判断哪些 AI restoration 思路可迁移到显微重建。",
+        tokenUsage: { prompt: 0, completion: 0, total: 0, status: "未调用 AI" },
+        journalMetrics: { impactFactor: "", partition: "", source: "", status: "未查询" }
+      },
+      {
+        id: "p3",
+        time: "15:40",
+        sourceType: "方法文章",
+        category: "review",
+        categoryLabel: "综述",
+        categories: ["review", "theory"],
+        categoryLabels: ["综述", "偏理论创新"],
+        source: "Nature Methods · 方法文章",
+        title: "Open-source Pipeline for Paper Collection and LLM Review",
+        summary: "项目提供论文抓取、去重、摘要生成、标签提取和人工复核工作流，可作为 paperHOT 数据流设计的参考实现。",
+        tags: ["论文工具", "LLM 摘要", "开源仓库"],
+        score: 78,
+        reason: "它接近 paperHOT 的后端需求，可以优先拆解数据结构和复核流程。",
+        tokenUsage: { prompt: 0, completion: 0, total: 0, status: "未调用 AI" },
+        journalMetrics: { impactFactor: "", partition: "", source: "", status: "未查询" }
+      }
+    ];
+    let todayPapers = samplePapers;
+    let recentPapers = samplePapers;
+    let papers = samplePapers;
+    let paperDataStatus = "正在载入真实论文数据...";
+    let recentDataStatus = "正在载入最近相关论文...";
+    let paperDataMeta = null;
+    let recentDataMeta = null;
+    let tokenStats = null;
+    let tokenStatsStatus = "正在读取本地 Token 统计...";
+    const saved = new Set(["p1"]);
+    const readPapers = new Set();
+    const starredPapers = new Set();
+
+    function paperCard(paper) {
+      const isSaved = saved.has(paper.id);
+      const isStarred = starredPapers.has(paper.id);
+      const paperId = escapeHTML(paper.id);
+      const labelList = paperCategoryLabels(paper);
+      const tokenUsage = paperTokenUsage(paper);
+      const journalMetrics = paperJournalMetrics(paper);
+      return `
+        <article class="paper-card">
+          <div class="paper-head">
+            <div class="source">${escapeHTML(paper.source)}</div>
+            <div class="head-actions">
+              <button class="star-btn ${isStarred ? "starred" : ""}" data-star-toggle="${paperId}">${isStarred ? "已标星" : "☆ 标星"}</button>
+              <button class="favorite ${isSaved ? "saved" : ""}" data-favorite="${paperId}">${isSaved ? "已收藏" : "♡ 加入个人收藏"}</button>
+              <span class="score">${escapeHTML(paper.score)}</span>
+            </div>
+          </div>
+          <div class="tags">${labelList.map(label => `<span class="tag">${escapeHTML(label)}</span>`).join("")}</div>
+          <h2 class="paper-title">${escapeHTML(paper.title)}</h2>
+          <p class="paper-summary">${escapeHTML(paper.summary)}</p>
+          <div class="tags">${paper.tags.map(tag => `<span class="tag">${escapeHTML(tag)}</span>`).join("")}</div>
+          <div class="token-usage">
+            <span>期刊指标：${escapeHTML(journalMetrics.status)}</span>
+            <span>IF ${escapeHTML(journalMetrics.impactFactor || "--")}</span>
+            <span>分区 ${escapeHTML(journalMetrics.partition || "--")}</span>
+            ${journalMetrics.source ? `<span>${escapeHTML(journalMetrics.source)}</span>` : ""}
+          </div>
+          <div class="reason">为什么与你相关：${escapeHTML(paper.reason)}</div>
+          <div class="token-usage">
+            <span>AI Token：${escapeHTML(tokenUsage.total)}</span>
+            <span>输入 ${escapeHTML(tokenUsage.prompt)}</span>
+            <span>输出 ${escapeHTML(tokenUsage.completion)}</span>
+            <span>${escapeHTML(tokenUsage.status)}</span>
+          </div>
+        </article>
+      `;
+    }
+
+    function readingCard(paper, index) {
+      const isRead = readPapers.has(paper.id);
+      const isStarred = starredPapers.has(paper.id);
+      const paperId = escapeHTML(paper.id);
+      return `
+        <article class="reading-card">
+          <div class="reading-order">${index + 1}</div>
+          <div>
+            <div class="source">${escapeHTML(paper.source)} · ${escapeHTML(paperCategoryLabels(paper).join(" / "))}</div>
+            <h2 class="paper-title">${escapeHTML(paper.title)}</h2>
+            <p class="paper-summary">${escapeHTML(paper.summary)}</p>
+            <div class="reading-meta">
+              <span>建议阅读：${paper.score >= 88 ? "优先精读" : "快速浏览"}</span>
+              <span>${escapeHTML(paper.sourceType)}</span>
+              <span>${escapeHTML(paper.tags.slice(0, 2).join(" / "))}</span>
+            </div>
+          </div>
+          <div class="source-actions">
+            <button class="star-btn ${isStarred ? "starred" : ""}" data-star-toggle="${paperId}">${isStarred ? "已标星" : "☆ 标星"}</button>
+            <button class="reading-status ${isRead ? "done" : ""}" data-read-toggle="${paperId}">
+              ${isRead ? "已读" : "待阅读"}
+            </button>
+          </div>
+        </article>
+      `;
+    }
+
+    function bindReadingStatus() {
+      document.querySelectorAll("[data-read-toggle]").forEach(button => {
+        button.addEventListener("click", () => {
+          const id = button.getAttribute("data-read-toggle");
+          if (readPapers.has(id)) readPapers.delete(id);
+          else readPapers.add(id);
+          renderFavorites();
+        });
+      });
+    }
+
+    function bindStarredStatus() {
+      document.querySelectorAll("[data-star-toggle]").forEach(button => {
+        button.addEventListener("click", () => {
+          const id = button.getAttribute("data-star-toggle");
+          if (starredPapers.has(id)) starredPapers.delete(id);
+          else starredPapers.add(id);
+          renderPage(location.hash.replace("#", "") || "today");
+        });
+      });
+    }
+
+    function timelineItem(paper) {
+      return `
+        <div class="timeline-item">
+          <div class="timeline-time">${paper.time}<span>${paper.sourceType}</span></div>
+          ${paperCard(paper)}
+        </div>
+      `;
+    }
+
+    function categoryBar() {
+      return `
+        <div class="category-bar">
+          ${paperCategories.map(category => `
+            <button class="category-btn ${activePaperCategory === category.key ? "active" : ""}" data-paper-category="${category.key}">
+              ${category.label}
+            </button>
+          `).join("")}
+        </div>
+      `;
+    }
+
+    function paperCategoryKeys(paper) {
+      return Array.isArray(paper.categories) && paper.categories.length ? paper.categories : [paper.category].filter(Boolean);
+    }
+
+    function paperCategoryLabels(paper) {
+      return Array.isArray(paper.categoryLabels) && paper.categoryLabels.length ? paper.categoryLabels : [paper.categoryLabel].filter(Boolean);
+    }
+
+    function paperTokenUsage(paper) {
+      const usage = paper.tokenUsage || {};
+      const prompt = Number(usage.prompt || 0);
+      const completion = Number(usage.completion || 0);
+      return {
+        prompt,
+        completion,
+        total: Number(usage.total || prompt + completion),
+        status: usage.status || "未调用 AI"
+      };
+    }
+
+    function paperJournalMetrics(paper) {
+      const metrics = paper.journalMetrics || {};
+      return {
+        impactFactor: metrics.impactFactor || "",
+        partition: metrics.partition || "",
+        source: metrics.source || "",
+        status: metrics.status || "未查询"
+      };
+    }
+
+    function matchesPaperCategory(paper) {
+      return activePaperCategory === "all" || paperCategoryKeys(paper).includes(activePaperCategory);
+    }
+
+    function normalizePaperForView(paper) {
+      return {
+        ...paper,
+        categories: paperCategoryKeys(paper),
+        categoryLabels: paperCategoryLabels(paper),
+        tokenUsage: paperTokenUsage(paper),
+        journalMetrics: paperJournalMetrics(paper)
+      };
+    }
+
+    function bindPaperCategories() {
+      document.querySelectorAll("[data-paper-category]").forEach(button => {
+        button.addEventListener("click", () => {
+          activePaperCategory = button.getAttribute("data-paper-category");
+          renderPage(location.hash.replace("#", "") || "today");
+        });
+      });
+    }
+
+    function bindFavorites() {
+      document.querySelectorAll("[data-favorite]").forEach(button => {
+        button.addEventListener("click", () => {
+          const id = button.getAttribute("data-favorite");
+          if (saved.has(id)) saved.delete(id);
+          else saved.add(id);
+          renderPage(location.hash.replace("#", "") || "today");
+        });
+      });
+    }
+
+    function getEnabledSourceNames() {
+      return sourceState.filter(source => source.enabled).map(source => source.title);
+    }
+
+    function paperStatusBar(mode = "today") {
+      const meta = mode === "recent" ? recentDataMeta : paperDataMeta;
+      const status = mode === "recent" ? recentDataStatus : paperDataStatus;
+      const list = mode === "recent" ? recentPapers : todayPapers;
+      const countText = meta ? `${meta.count || list.length} 篇` : `${list.length} 篇示例`;
+      const dateText = meta?.date ? `日期：${meta.date}` : "当前为本地示例数据";
+      const errorText = meta?.errors?.length ? `；部分信源失败：${meta.errors.map(item => item.source).join("、")}` : "";
+      const actionText = mode === "recent" ? "刷新最近论文" : "刷新今日论文";
+      return `
+        <div class="status-bar">
+          <span>${escapeHTML(status)} · ${escapeHTML(countText)} · ${escapeHTML(dateText + errorText)}</span>
+          <button class="ghost-btn" data-refresh-papers="${mode}">${actionText}</button>
+        </div>
+      `;
+    }
+
+    async function loadPaperData(mode = "today", refresh = false) {
+      if (location.protocol === "file:") {
+        paperDataStatus = "直接打开 HTML 时无法访问后端，正在使用本地示例数据";
+        recentDataStatus = "直接打开 HTML 时无法访问后端，正在使用本地示例数据";
+        renderPage(location.hash.replace("#", "") || "today");
+        return;
+      }
+
+      if (mode === "recent") recentDataStatus = refresh ? "正在刷新最近相关论文..." : "正在载入最近相关论文...";
+      else paperDataStatus = refresh ? "正在刷新今日论文..." : "正在载入真实论文数据...";
+      renderPage(location.hash.replace("#", "") || "today");
+
+      try {
+        const endpoint = refresh ? "/api/papers/refresh" : (mode === "recent" ? "/api/papers/recent" : "/api/papers/today");
+        const options = refresh
+          ? {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                mode,
+                keywords: getAllEnabledKeywords(),
+                sources: getEnabledSourceNames()
+              })
+            }
+          : {};
+        const response = await fetch(endpoint, options);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        if (Array.isArray(payload.papers) && payload.papers.length) {
+          const normalizedPapers = payload.papers.map(normalizePaperForView);
+          if (mode === "recent") {
+            recentPapers = normalizedPapers;
+            recentDataMeta = payload;
+            recentDataStatus = refresh ? "已刷新最近相关论文" : "已载入最近相关论文";
+          } else {
+            todayPapers = normalizedPapers;
+            paperDataMeta = payload;
+            paperDataStatus = refresh ? "已刷新今日真实论文" : "已载入今日真实论文";
+          }
+        } else {
+          if (mode === "recent") {
+            recentDataMeta = payload;
+            recentPapers = [];
+            recentDataStatus = "后端没有匹配到最近相关论文";
+          } else {
+            paperDataMeta = payload;
+            todayPapers = [];
+            paperDataStatus = "今天没有匹配到当前领域论文";
+          }
+        }
+      } catch (error) {
+        if (mode === "recent") recentDataStatus = `后端接口暂不可用，正在使用本地示例数据：${error.message}`;
+        else paperDataStatus = `后端接口暂不可用，正在使用本地示例数据：${error.message}`;
+      }
+      renderPage(location.hash.replace("#", "") || "today");
+    }
+
+    function bindPaperRefresh() {
+      document.querySelectorAll("[data-refresh-papers]").forEach(button => {
+        button.addEventListener("click", () => loadPaperData(button.getAttribute("data-refresh-papers") || "today", true));
+      });
+    }
+
+    function pageShell(title, subtitle, body, side = "") {
+      return `
+        <section class="hero">
+          <div class="hero-top">
+            <div>
+              <h1>${title}</h1>
+              <div class="subtitle">${subtitle}</div>
+            </div>
+          </div>
+        </section>
+        ${side ? `<section class="simple-grid"><div>${body}</div><aside class="panel">${side}</aside></section>` : body}
+      `;
+    }
+
+    function renderToday() {
+      papers = todayPapers;
+      const filteredPapers = activePaperCategory === "all"
+        ? papers
+        : papers.filter(matchesPaperCategory);
+      const timeline = filteredPapers.length
+        ? `<div class="timeline-list">${filteredPapers.map(timelineItem).join("")}</div>`
+        : `<div class="empty">当前分类暂时没有论文。可以切回“全部”，或在“领域配置”中增加相关关键词和信源。</div>`;
+      const body = `${paperStatusBar("today")}${categoryBar()}${timeline}`;
+      const focusKeywords = [...getEnabledKeywords("primary"), ...getEnabledKeywords("secondary")];
+      const sideChips = focusKeywords.length
+        ? focusKeywords.map(keyword => `<span class="chip selected">${escapeHTML(keyword)}</span>`).join("")
+        : `<span class="small-text">还没有启用的关注领域，请到“领域配置”中添加。</span>`;
+      const side = `<h2>当前关注领域</h2><div class="token-row" style="margin-top:12px">${sideChips}</div>`;
+      mainContent.innerHTML = pageShell("今日论文", "只展示当前关注领域里今天最值得读的相关论文。", body, side);
+      bindPaperRefresh();
+      bindPaperCategories();
+      bindFavorites();
+      bindStarredStatus();
+    }
+
+    function renderAll() {
+      papers = recentPapers;
+      const filteredPapers = activePaperCategory === "all"
+        ? papers
+        : papers.filter(matchesPaperCategory);
+      const list = filteredPapers.length
+        ? `<div class="paper-list">${filteredPapers.map(paperCard).join("")}</div>`
+        : `<div class="empty">${papers.length ? "当前分类暂时没有论文。可以切回“全部”，或在“领域配置”中增加相关关键词和信源。" : "最近相关论文池为空。可以到“领域配置”增加关键词，或点击上方刷新。"}</div>`;
+      const body = `${paperStatusBar("recent")}${categoryBar()}${list}`;
+      const focusKeywords = [...getEnabledKeywords("primary"), ...getEnabledKeywords("secondary")];
+      const focusChips = focusKeywords.map(keyword => `<span class="chip selected">${escapeHTML(keyword)}</span>`).join("");
+      const side = `<h2>全部论文筛选</h2><div class="token-row" style="margin-top:12px"><span class="chip selected">全部</span><span class="chip">已收藏</span><span class="chip">带代码</span><span class="chip">Nature</span>${focusChips}</div>`;
+      mainContent.innerHTML = pageShell("全部论文", "展示当前关注领域的完整论文池，支持后续按来源、标签、收藏状态筛选。", body, side);
+      bindPaperRefresh();
+      bindPaperCategories();
+      bindFavorites();
+      bindStarredStatus();
+    }
+
+    function renderFavorites() {
+      papers = recentPapers.length ? recentPapers : todayPapers;
+      const favoritePapers = papers.filter(paper => saved.has(paper.id));
+      const unreadPapers = favoritePapers.filter(paper => !readPapers.has(paper.id));
+      const readPaperList = favoritePapers.filter(paper => readPapers.has(paper.id));
+      const starredPaperList = favoritePapers.filter(paper => starredPapers.has(paper.id));
+      const favoriteSection = favoritePapers.length
+        ? `
+          <div class="section-title">
+            <h2>已收藏论文</h2>
+            <span>${favoritePapers.length} 篇</span>
+          </div>
+          <div class="paper-list">${favoritePapers.map(paperCard).join("")}</div>
+        `
+        : `<div class="empty">还没有个人收藏。回到“今日论文”或“全部论文”，点击论文卡片右上角的“加入个人收藏”。</div>`;
+      const readingSection = favoritePapers.length
+        ? `
+          <div class="section-title">
+            <h2>阅读板块</h2>
+            <span>${unreadPapers.length} 篇待阅读</span>
+          </div>
+          ${unreadPapers.length
+            ? `<div class="reading-list">${unreadPapers.map(readingCard).join("")}</div>`
+            : `<div class="empty">当前没有待阅读论文。</div>`}
+        `
+        : "";
+      const readSection = readPaperList.length
+        ? `
+          <div class="section-title">
+            <h2>已阅读论文</h2>
+            <span>${readPaperList.length} 篇</span>
+          </div>
+          <div class="reading-list">${readPaperList.map(readingCard).join("")}</div>
+        `
+        : `
+          <div class="section-title">
+            <h2>已阅读论文</h2>
+            <span>0 篇</span>
+          </div>
+          <div class="empty">读完论文后，点“待阅读”按钮会移动到这里。</div>
+        `;
+      const starredSection = starredPaperList.length
+        ? `
+          <div class="section-title">
+            <h2>标星论文</h2>
+            <span>${starredPaperList.length} 篇</span>
+          </div>
+          <div class="reading-list">${starredPaperList.map(readingCard).join("")}</div>
+        `
+        : `
+          <div class="section-title">
+            <h2>标星论文</h2>
+            <span>0 篇</span>
+          </div>
+          <div class="empty">对重点论文点“标星”，会集中显示在这里。</div>
+        `;
+      const body = favoritePapers.length ? `${favoriteSection}${readingSection}${readSection}${starredSection}` : favoriteSection;
+      mainContent.innerHTML = pageShell("个人收藏", "保存待读论文、可复现代码和组会候选材料。", body);
+      bindFavorites();
+      bindReadingStatus();
+      bindStarredStatus();
+    }
+
+    function formatToken(value) {
+      const number = Number(value || 0);
+      return number.toLocaleString("zh-CN");
+    }
+
+    function statCard(label, bucket) {
+      return `
+        <article class="stat-card">
+          <div class="stat-label">${label}</div>
+          <div class="stat-value">${formatToken(bucket?.total)}</div>
+          <div class="stat-sub">输入 ${formatToken(bucket?.prompt)} · 输出 ${formatToken(bucket?.completion)} · ${formatToken(bucket?.papers)} 篇</div>
+        </article>
+      `;
+    }
+
+    function modelChartRows(stats) {
+      const models = stats?.byModel || [];
+      if (!models.length) return `<div class="empty">还没有模型调用记录。接入 AI 阅读层后，这里会按模型统计 Token 消耗。</div>`;
+      const maxTotal = Math.max(...models.map(item => item.total), 1);
+      return `<div class="chart-list">${models.map(item => `
+        <div class="chart-row">
+          <span>${escapeHTML(item.model)}</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, Math.round(item.total / maxTotal * 100))}%"></div></div>
+          <span>${formatToken(item.total)}</span>
+        </div>
+      `).join("")}</div>`;
+    }
+
+    function dailyBars(stats) {
+      const days = stats?.daily || [];
+      const maxTotal = Math.max(...days.map(item => item.total), 1);
+      return `
+        <div class="daily-bars">
+          ${days.map(item => `<div class="daily-bar" title="${escapeHTML(item.date)}：${formatToken(item.total)} Token" style="height:${Math.max(2, Math.round(item.total / maxTotal * 100))}%"></div>`).join("")}
+        </div>
+      `;
+    }
+
+    async function loadTokenStats() {
+      if (location.protocol === "file:") {
+        tokenStatsStatus = "直接打开 HTML 时无法读取后端统计";
+        tokenStats = null;
+        renderTokenStats();
+        return;
+      }
+      try {
+        const response = await fetch("/api/token/stats");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        tokenStats = await response.json();
+        tokenStatsStatus = `统计时间：${tokenStats.generatedAt ? new Date(tokenStats.generatedAt).toLocaleString("zh-CN") : "本地缓存"}`;
+      } catch (error) {
+        tokenStats = null;
+        tokenStatsStatus = `Token 统计接口暂不可用：${error.message}`;
+      }
+      renderTokenStats();
+    }
+
+    function renderTokenStats() {
+      const stats = tokenStats || {};
+      const body = `
+        <section class="stats-grid">
+          ${statCard("今日 Token", stats.today)}
+          ${statCard("近 7 天 Token", stats.last7Days)}
+          ${statCard("近 30 天 Token", stats.last30Days)}
+        </section>
+        <section class="simple-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>近 30 天趋势</h2>
+                <div class="panel-note">按本地论文缓存文件日期汇总</div>
+              </div>
+            </div>
+            ${dailyBars(stats)}
+            <div class="stats-note">${escapeHTML(tokenStatsStatus)}</div>
+          </div>
+          <aside class="panel">
+            <h2>模型消耗</h2>
+            <div class="panel-note" style="margin-top:4px">按 tokenUsage.model 汇总</div>
+            <div style="margin-top:12px">${modelChartRows(stats)}</div>
+          </aside>
+        </section>
+      `;
+      mainContent.innerHTML = pageShell("Token 统计", "统计每天、近 7 天、近 30 天的 AI Token 消耗，并按模型展示分布。", body);
+    }
+
+    function renderAbout() {
+      const body = `
+        <section class="panel">
+          <h2>paperHOT 是什么</h2>
+          <p class="small-text" style="margin-top:10px">paperHOT 是面向科研领域的论文热点入口。它根据领域配置收集论文和科研动态，生成摘要、标签、相关性解释，并支持个人收藏。</p>
+        </section>
+      `;
+      mainContent.innerHTML = pageShell("关于", "当前是本地 HTML 原型，后续实现时会接入真实信源、摘要生成和收藏持久化。", body);
+    }
+
+    function setActiveNav(page) {
+      document.querySelectorAll(".nav-item").forEach(item => {
+        item.classList.toggle("active", item.getAttribute("href") === `#${page}`);
+      });
+    }
+
+    const keywordStorageKey = "paperhot.keywordConfig.v1";
+    const keywordGroups = [
+      {
+        key: "primary",
+        title: "主要领域",
+        note: "当前课题的核心入口，用于决定今日论文的主检索范围。",
+        placeholder: "新增主要领域，例如 computational microscopy"
+      },
+      {
+        key: "secondary",
+        title: "次要领域",
+        note: "与主方向相邻的方法、模态或应用场景，用于扩展候选论文池。",
+        placeholder: "新增次要领域，例如 structured illumination"
+      },
+      {
+        key: "inspiration",
+        title: "启发性领域",
+        note: "不一定直接相关，但可能提供算法、硬件或生物实验启发。",
+        placeholder: "新增启发性领域，例如 diffusion prior"
+      }
+    ];
+    const defaultKeywordState = {
+      primary: [
+        { text: "计算显微", enabled: true },
+        { text: "computational microscopy", enabled: true },
+        { text: "microscopy reconstruction", enabled: true }
+      ],
+      secondary: [
+        { text: "SIM", enabled: true },
+        { text: "RIM", enabled: true },
+        { text: "PRIM", enabled: true },
+        { text: "speckle illumination", enabled: false },
+        { text: "structured illumination", enabled: false }
+      ],
+      inspiration: [
+        { text: "物理先验重建", enabled: true },
+        { text: "diffusion prior", enabled: true },
+        { text: "self-supervised restoration", enabled: false },
+        { text: "deconvolution", enabled: false }
+      ]
+    };
+    const legacyKeywordGroupMap = { main: "primary", focus: "secondary", methods: "inspiration" };
+    const keywordPalettes = {
+      primary: [
+        { bg: "#dceff2", border: "#bddde3", text: "#446c75" },
+        { bg: "#e4f3ef", border: "#c5e3d9", text: "#4d7269" },
+        { bg: "#d9edf0", border: "#b9d9df", text: "#496d78" },
+        { bg: "#e7f2f0", border: "#cadfda", text: "#58736e" }
+      ],
+      secondary: [
+        { bg: "#e6e9f6", border: "#ccd2e9", text: "#5d6688" },
+        { bg: "#edf0fa", border: "#d4d9ec", text: "#68708c" },
+        { bg: "#e5edf8", border: "#cad8ec", text: "#5e718d" },
+        { bg: "#ece8f5", border: "#d7cee8", text: "#6a6284" }
+      ],
+      inspiration: [
+        { bg: "#edf0e4", border: "#d6ddc8", text: "#65714f" },
+        { bg: "#f1eee2", border: "#ded7bf", text: "#71694e" },
+        { bg: "#e8efe5", border: "#cfddca", text: "#5e7258" },
+        { bg: "#f0f1e8", border: "#dadcc9", text: "#6d7058" }
+      ]
+    };
+
+    function cloneKeywordItems(items) {
+      return items.map(item => ({ text: item.text, enabled: item.enabled !== false }));
+    }
+
+    function loadKeywordState() {
+      const state = {};
+      keywordGroups.forEach(group => {
+        state[group.key] = cloneKeywordItems(defaultKeywordState[group.key]);
+      });
+      try {
+        const savedKeywords = JSON.parse(localStorage.getItem(keywordStorageKey) || "{}");
+        Object.entries(legacyKeywordGroupMap).forEach(([legacyKey, nextKey]) => {
+          if (!Array.isArray(savedKeywords[legacyKey]) || Array.isArray(savedKeywords[nextKey])) return;
+          savedKeywords[nextKey] = savedKeywords[legacyKey];
+        });
+        keywordGroups.forEach(group => {
+          if (!Array.isArray(savedKeywords[group.key])) return;
+          const cleanItems = savedKeywords[group.key]
+            .map(item => ({
+              text: String(item.text || "").trim(),
+              enabled: item.enabled !== false
+            }))
+            .filter(item => item.text);
+          if (cleanItems.length) state[group.key] = cleanItems;
+        });
+      } catch (error) {
+        console.warn("Keyword config load failed", error);
+      }
+      return state;
+    }
+
+    let keywordState = loadKeywordState();
+    let userProfile = null;
+    let activeKeywordEdit = null;
+    let keywordClickTimer = null;
+
+    function saveKeywordStateLocal() {
+      try {
+        localStorage.setItem(keywordStorageKey, JSON.stringify(keywordState));
+      } catch (error) {
+        console.warn("Keyword config save failed", error);
+      }
+    }
+
+    function escapeHTML(value) {
+      return String(value).replace(/[&<>"']/g, character => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;"
+      }[character]));
+    }
+
+    function getEnabledKeywords(groupKey) {
+      return (keywordState[groupKey] || []).filter(item => item.enabled).map(item => item.text);
+    }
+
+    function getAllEnabledKeywords() {
+      return keywordGroups.flatMap(group => getEnabledKeywords(group.key));
+    }
+
+    function currentUserConfig() {
+      return {
+        keywords: keywordState,
+        sources: sourceState
+      };
+    }
+
+    async function saveUserConfig() {
+      saveKeywordStateLocal();
+      saveSourceStateLocal();
+      if (location.protocol === "file:") return;
+      try {
+        const response = await fetch("/api/user/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(currentUserConfig())
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      } catch (error) {
+        console.warn("User config save failed", error);
+      }
+    }
+
+    function keywordStyle(groupKey, index) {
+      const palette = keywordPalettes[groupKey] || keywordPalettes.primary;
+      const color = palette[index % palette.length];
+      return `--chip-bg:${color.bg};--chip-border:${color.border};--chip-text:${color.text}`;
+    }
+
+    function renderSyncedFocusRow() {
+      const row = document.getElementById("synced-focus-row");
+      if (!row) return;
+      const enabledItems = keywordGroups.flatMap(group => (
+        (keywordState[group.key] || [])
+          .map((item, index) => ({ ...item, groupKey: group.key, index }))
+          .filter(item => item.enabled)
+      ));
+      const chips = enabledItems.length
+        ? enabledItems.map(item => `<span class="keyword-chip selected" style="${keywordStyle(item.groupKey, item.index)}">${escapeHTML(item.text)}</span>`).join("")
+        : `<span class="small-text">右侧还没有启用的关键词。</span>`;
+      row.innerHTML = `<span class="focus-label">与今日论文同步</span>${chips}`;
+    }
+
+    function renderKeywordConfig() {
+      const panel = document.getElementById("keyword-config-panel");
+      renderSyncedFocusRow();
+      if (!panel) return;
+
+      panel.innerHTML = keywordGroups.map(group => {
+        const items = keywordState[group.key] || [];
+        const chips = items.length
+          ? items.map((item, index) => `
+              <span class="keyword-chip ${item.enabled ? "selected" : "paused"}" style="${keywordStyle(group.key, index)}" data-keyword-toggle data-keyword-index="${index}" title="单击启用/停用，双击修改">
+                <span class="keyword-text">${escapeHTML(item.text)}</span>
+                <button class="remove" data-keyword-remove="${index}" title="删除关键词">×</button>
+              </span>
+            `).join("")
+          : `<span class="small-text">还没有关键词，请在下方添加。</span>`;
+
+        return `
+          <div class="config-section" data-keyword-section="${group.key}">
+            <div class="keyword-section-head">
+              <h3>${group.title}</h3>
+              <div class="keyword-section-note">${group.note}</div>
+            </div>
+            <div class="token-row">${chips}</div>
+            <div class="input-row">
+              <input data-keyword-input placeholder="${escapeHTML(group.placeholder)}">
+              <button class="ghost-btn" data-keyword-add>添加</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      panel.onclick = handleKeywordClick;
+      panel.ondblclick = handleKeywordDblClick;
+      panel.onkeydown = handleKeywordKeydown;
+    }
+
+    function addKeyword(section) {
+      const key = section.getAttribute("data-keyword-section");
+      const input = section.querySelector("[data-keyword-input]");
+      const text = input.value.trim();
+      if (!text) {
+        showToast("请先输入关键词");
+        input.focus();
+        return;
+      }
+      if (keywordState[key].some(item => item.text.toLowerCase() === text.toLowerCase())) {
+        showToast("关键词已存在");
+        input.focus();
+        return;
+      }
+      keywordState[key].push({ text, enabled: true });
+      saveUserConfig();
+      renderKeywordConfig();
+      showToast("关键词已添加");
+    }
+
+    function startKeywordEdit(section, index) {
+      finishActiveKeywordEdit();
+      const key = section.getAttribute("data-keyword-section");
+      const chip = section.querySelector(`[data-keyword-index="${index}"]`);
+      const item = keywordState[key][index];
+      if (!chip || !item) return;
+      chip.removeAttribute("data-keyword-toggle");
+      chip.classList.add("editing");
+      chip.innerHTML = `
+        <input class="keyword-inline-input" data-keyword-edit-input data-keyword-edit-index="${index}" value="${escapeHTML(item.text)}">
+      `;
+      activeKeywordEdit = { key, index };
+      const input = chip.querySelector("[data-keyword-edit-input]");
+      input.focus();
+      input.select();
+    }
+
+    function saveKeywordEdit(key, index, input) {
+      const text = input.value.trim();
+      if (!text) {
+        renderKeywordConfig();
+        activeKeywordEdit = null;
+        return;
+      }
+      const duplicate = keywordState[key].some((item, itemIndex) => (
+        itemIndex !== index && item.text.toLowerCase() === text.toLowerCase()
+      ));
+      if (duplicate) {
+        showToast("关键词已存在");
+        input.focus();
+        return;
+      }
+      keywordState[key][index].text = text;
+      saveUserConfig();
+      renderKeywordConfig();
+      activeKeywordEdit = null;
+      showToast("关键词已修改");
+    }
+
+    function finishActiveKeywordEdit() {
+      if (!activeKeywordEdit) return;
+      const { key, index } = activeKeywordEdit;
+      const section = document.querySelector(`[data-keyword-section="${key}"]`);
+      const input = section?.querySelector(`[data-keyword-edit-index="${index}"]`);
+      if (input) saveKeywordEdit(key, index, input);
+      else activeKeywordEdit = null;
+    }
+
+    function cancelKeywordEdit() {
+      activeKeywordEdit = null;
+      renderKeywordConfig();
+    }
+
+    function handleKeywordClick(event) {
+      if (event.target.matches("[data-keyword-edit-input]")) return;
+      const section = event.target.closest("[data-keyword-section]");
+      if (!section) return;
+      const key = section.getAttribute("data-keyword-section");
+
+      const addButton = event.target.closest("[data-keyword-add]");
+      if (addButton) {
+        addKeyword(section);
+        return;
+      }
+
+      const removeButton = event.target.closest("[data-keyword-remove]");
+      if (removeButton) {
+        event.stopPropagation();
+        activeKeywordEdit = null;
+        keywordState[key].splice(Number(removeButton.getAttribute("data-keyword-remove")), 1);
+        saveUserConfig();
+        renderKeywordConfig();
+        showToast("关键词已删除");
+        return;
+      }
+
+      const chip = event.target.closest("[data-keyword-toggle]");
+      if (chip) {
+        if (keywordClickTimer) clearTimeout(keywordClickTimer);
+        const index = Number(chip.getAttribute("data-keyword-index"));
+        keywordClickTimer = setTimeout(() => {
+          finishActiveKeywordEdit();
+          keywordState[key][index].enabled = !keywordState[key][index].enabled;
+          saveUserConfig();
+          renderKeywordConfig();
+          showToast(keywordState[key][index].enabled ? "关键词已启用" : "关键词已停用");
+          keywordClickTimer = null;
+        }, 180);
+      }
+    }
+
+    function handleKeywordDblClick(event) {
+      const chip = event.target.closest("[data-keyword-toggle]");
+      const section = event.target.closest("[data-keyword-section]");
+      if (!chip || !section || event.target.closest("[data-keyword-remove]")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (keywordClickTimer) {
+        clearTimeout(keywordClickTimer);
+        keywordClickTimer = null;
+      }
+      startKeywordEdit(section, Number(chip.getAttribute("data-keyword-index")));
+    }
+
+    function handleKeywordKeydown(event) {
+      const section = event.target.closest("[data-keyword-section]");
+      if (!section) return;
+      if (event.key === "Enter" && event.target.matches("[data-keyword-input]")) {
+        addKeyword(section);
+      }
+      if (event.key === "Enter" && event.target.matches("[data-keyword-edit-input]")) {
+        event.preventDefault();
+        saveKeywordEdit(section.getAttribute("data-keyword-section"), Number(event.target.getAttribute("data-keyword-edit-index")), event.target);
+      }
+      if (event.key === "Escape" && event.target.matches("[data-keyword-edit-input]")) {
+        event.preventDefault();
+        cancelKeywordEdit();
+      }
+    }
+
+    const sourceStorageKey = "paperhot.sourceConfig.v1";
+    const defaultSourceState = [
+      {
+        title: "Google 搜索",
+        desc: "补充机构新闻、项目主页、论文代码页和 Nature / Science 网页结果。",
+        tags: ["关键词搜索", "网页结果", "项目主页"],
+        enabled: true
+      },
+      {
+        title: "arXiv",
+        desc: "抓取 cs.CV、eess.IV、cs.AI、q-bio.QM 等分类。",
+        tags: ["论文源", "每日更新", "摘要可用"],
+        enabled: true
+      },
+      {
+        title: "bioRxiv",
+        desc: "追踪生物图像、显微实验、细胞成像和生物物理预印本。",
+        tags: ["预印本", "BioImage", "生命科学"],
+        enabled: true
+      },
+      {
+        title: "Nature / Nature Methods",
+        desc: "捕捉高影响力论文、方法文章和期刊新闻。",
+        tags: ["期刊", "方法文章", "高权重"],
+        enabled: true
+      }
+    ];
+    let editingSourceIndex = null;
+
+    function cloneSourceItems(items) {
+      return items.map(item => ({
+        title: item.title,
+        desc: item.desc,
+        tags: [...item.tags],
+        enabled: item.enabled !== false
+      }));
+    }
+
+    function loadSourceState() {
+      try {
+        const savedSources = JSON.parse(localStorage.getItem(sourceStorageKey) || "[]");
+        if (!Array.isArray(savedSources) || !savedSources.length) return cloneSourceItems(defaultSourceState);
+        return savedSources
+          .map(item => ({
+            title: String(item.title || "").trim(),
+            desc: String(item.desc || "").trim(),
+            tags: Array.isArray(item.tags) ? item.tags.map(tag => String(tag).trim()).filter(Boolean) : [],
+            enabled: item.enabled !== false
+          }))
+          .filter(item => item.title);
+      } catch (error) {
+        console.warn("Source config load failed", error);
+        return cloneSourceItems(defaultSourceState);
+      }
+    }
+
+    let sourceState = loadSourceState();
+
+    function saveSourceStateLocal() {
+      try {
+        localStorage.setItem(sourceStorageKey, JSON.stringify(sourceState));
+      } catch (error) {
+        console.warn("Source config save failed", error);
+      }
+    }
+
+    function applyUserState(state) {
+      if (!state || typeof state !== "object") return;
+      userProfile = state.profile || null;
+      if (state.config?.keywords) keywordState = state.config.keywords;
+      if (Array.isArray(state.config?.sources)) sourceState = state.config.sources;
+      saveKeywordStateLocal();
+      saveSourceStateLocal();
+    }
+
+    async function loadUserState() {
+      if (location.protocol === "file:") return;
+      try {
+        const response = await fetch("/api/user/state");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        applyUserState(await response.json());
+      } catch (error) {
+        console.warn("User state load failed", error);
+      }
+    }
+
+    function renderSourceConfig() {
+      const list = document.getElementById("source-list");
+      if (!list) return;
+
+      list.innerHTML = sourceState.map((source, index) => {
+        if (editingSourceIndex === index) {
+          return `
+            <article class="source-card editing" data-source-index="${index}">
+              <div class="source-form">
+                <label>信源名称
+                  <input data-source-field="title" value="${escapeHTML(source.title)}">
+                </label>
+                <label>说明
+                  <textarea data-source-field="desc">${escapeHTML(source.desc)}</textarea>
+                </label>
+                <label>标签，用顿号、逗号或空格分隔
+                  <input data-source-field="tags" value="${escapeHTML(source.tags.join("、"))}">
+                </label>
+                <div class="source-form-actions">
+                  <button class="ghost-btn" data-source-cancel>取消</button>
+                  <button class="primary-btn" data-source-save>保存</button>
+                </div>
+              </div>
+            </article>
+          `;
+        }
+
+        return `
+          <article class="source-card ${source.enabled ? "" : "paused"}" data-source-index="${index}">
+            <div>
+              <h3>${escapeHTML(source.title)}</h3>
+              <p class="source-desc">${escapeHTML(source.desc)}</p>
+              <div class="tags">${source.tags.map(tag => `<span class="tag">${escapeHTML(tag)}</span>`).join("")}</div>
+            </div>
+            <div class="source-actions">
+              <button class="toggle ${source.enabled ? "" : "paused"}" data-source-toggle>${source.enabled ? "暂停" : "启用"}</button>
+              <button class="edit-link" data-edit-source>编辑</button>
+            </div>
+          </article>
+        `;
+      }).join("");
+
+      list.onclick = handleSourceClick;
+      list.onkeydown = handleSourceKeydown;
+    }
+
+    function parseSourceTags(value) {
+      return value.split(/[、,\s]+/).map(tag => tag.trim()).filter(Boolean);
+    }
+
+    function saveSourceEdit(card) {
+      const index = Number(card.getAttribute("data-source-index"));
+      const title = card.querySelector('[data-source-field="title"]').value.trim();
+      const desc = card.querySelector('[data-source-field="desc"]').value.trim();
+      const tags = parseSourceTags(card.querySelector('[data-source-field="tags"]').value);
+      if (!title) {
+        showToast("请填写信源名称");
+        card.querySelector('[data-source-field="title"]').focus();
+        return;
+      }
+      sourceState[index] = {
+        ...sourceState[index],
+        title,
+        desc: desc || "待补充信源说明。",
+        tags: tags.length ? tags : ["待配置"]
+      };
+      editingSourceIndex = null;
+      saveUserConfig();
+      renderSourceConfig();
+      showToast("信源已保存");
+    }
+
+    function addExampleSource(title) {
+      sourceState.push({
+        title,
+        desc: "新增示例信源。这里可以填写 URL、抓取方式、更新频率和领域映射。",
+        tags: ["自定义信源", "待配置"],
+        enabled: true
+      });
+      editingSourceIndex = sourceState.length - 1;
+      saveUserConfig();
+      renderSourceConfig();
+      showToast("已添加信源，请继续编辑");
+    }
+
+    function handleSourceClick(event) {
+      const card = event.target.closest("[data-source-index]");
+      if (!card) return;
+      const index = Number(card.getAttribute("data-source-index"));
+
+      if (event.target.closest("[data-source-toggle]")) {
+        sourceState[index].enabled = !sourceState[index].enabled;
+        saveUserConfig();
+        renderSourceConfig();
+        showToast(sourceState[index].enabled ? "信源已启用" : "信源已暂停");
+        return;
+      }
+
+      if (event.target.closest("[data-edit-source]")) {
+        editingSourceIndex = index;
+        renderSourceConfig();
+        return;
+      }
+
+      if (event.target.closest("[data-source-save]")) {
+        saveSourceEdit(card);
+        return;
+      }
+
+      if (event.target.closest("[data-source-cancel]")) {
+        editingSourceIndex = null;
+        renderSourceConfig();
+      }
+    }
+
+    function handleSourceKeydown(event) {
+      if (event.key !== "Enter" || !event.ctrlKey) return;
+      const card = event.target.closest("[data-source-index]");
+      if (card) saveSourceEdit(card);
+    }
+
+    function renderConfig() {
+      mainContent.innerHTML = configHTML;
+      editingSourceIndex = null;
+      renderSourceConfig();
+      renderKeywordConfig();
+      document.querySelectorAll("[data-add-example]").forEach(button => {
+        button.addEventListener("click", () => addExampleSource(button.getAttribute("data-add-example")));
+      });
+      document.querySelectorAll("[data-token-group]").forEach(group => {
+        group.addEventListener("click", event => {
+          if (event.target.classList.contains("remove")) {
+            event.stopPropagation();
+            event.target.closest(".keyword-chip").remove();
+            showToast("关键词已删除");
+            return;
+          }
+          const chip = event.target.closest(".keyword-chip");
+          if (chip) {
+            chip.classList.toggle("selected");
+            showToast(chip.classList.contains("selected") ? "关键词已启用" : "关键词已停用");
+          }
+        });
+      });
+      document.querySelectorAll("[data-add-token]").forEach(button => {
+        button.addEventListener("click", () => {
+          const row = button.closest(".input-row");
+          const input = row.querySelector("input");
+          const text = input.value.trim() || "新关键词";
+          const group = row.previousElementSibling;
+          const chip = document.createElement("span");
+          chip.className = "keyword-chip selected";
+          chip.innerHTML = `${text} <button class="remove">×</button>`;
+          group.appendChild(chip);
+          input.value = "";
+          showToast("关键词已添加");
+        });
+      });
+      const save = document.getElementById("save-config");
+      if (save) save.addEventListener("click", () => {
+        saveUserConfig();
+        showToast("配置已保存到本地浏览器");
+      });
+    }
+
+    function renderPage(page) {
+      const normalized = ["today", "all", "favorites", "config", "tokens", "about"].includes(page) ? page : "today";
+      setActiveNav(normalized);
+      if (normalized === "today") renderToday();
+      if (normalized === "all") renderAll();
+      if (normalized === "favorites") renderFavorites();
+      if (normalized === "config") renderConfig();
+      if (normalized === "tokens") {
+        renderTokenStats();
+        loadTokenStats();
+      }
+      if (normalized === "about") renderAbout();
+    }
+
+    document.addEventListener("click", event => {
+      if (!activeKeywordEdit) return;
+      if (event.target.closest("#keyword-config-panel")) return;
+      finishActiveKeywordEdit();
+    });
+    window.addEventListener("hashchange", () => renderPage(location.hash.replace("#", "")));
+    async function startApp() {
+      await loadUserState();
+      renderPage(location.hash.replace("#", "") || "today");
+      loadPaperData("today", false);
+      loadPaperData("recent", false);
+    }
+    startApp();
+  </script>
+</body>
+</html>

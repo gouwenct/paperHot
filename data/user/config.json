@@ -1,0 +1,110 @@
+{
+  "keywords": {
+    "primary": [
+      {
+        "text": "计算显微",
+        "enabled": true
+      },
+      {
+        "text": "computational microscopy",
+        "enabled": true
+      },
+      {
+        "text": "microscopy reconstruction",
+        "enabled": true
+      }
+    ],
+    "secondary": [
+      {
+        "text": "SIM",
+        "enabled": true
+      },
+      {
+        "text": "RIM",
+        "enabled": true
+      },
+      {
+        "text": "PRIM",
+        "enabled": true
+      },
+      {
+        "text": "speckle illumination",
+        "enabled": false
+      },
+      {
+        "text": "structured illumination",
+        "enabled": false
+      }
+    ],
+    "inspiration": [
+      {
+        "text": "物理先验重建",
+        "enabled": true
+      },
+      {
+        "text": "diffusion prior",
+        "enabled": true
+      },
+      {
+        "text": "self-supervised restoration",
+        "enabled": false
+      },
+      {
+        "text": "deconvolution",
+        "enabled": false
+      }
+    ]
+  },
+  "sources": [
+    {
+      "title": "Google 搜索",
+      "desc": "补充机构新闻、项目主页、论文代码页和 Nature / Science 网页结果。",
+      "tags": [
+        "关键词搜索",
+        "网页结果",
+        "项目主页"
+      ],
+      "enabled": true
+    },
+    {
+      "title": "arXiv",
+      "desc": "抓取 cs.CV、eess.IV、cs.AI、q-bio.QM 等分类。",
+      "tags": [
+        "论文源",
+        "每日更新",
+        "摘要可用"
+      ],
+      "enabled": true
+    },
+    {
+      "title": "bioRxiv",
+      "desc": "追踪生物图像、显微实验、细胞成像和生物物理预印本。",
+      "tags": [
+        "预印本",
+        "BioImage",
+        "生命科学"
+      ],
+      "enabled": true
+    },
+    {
+      "title": "Semantic Scholar",
+      "desc": "补充跨期刊论文、引用信息、开放 PDF 链接和相关研究条目。",
+      "tags": [
+        "论文数据库",
+        "引用信息",
+        "开放 PDF"
+      ],
+      "enabled": true
+    },
+    {
+      "title": "Nature / Nature Methods",
+      "desc": "捕捉高影响力论文、方法文章和期刊新闻。",
+      "tags": [
+        "期刊",
+        "方法文章",
+        "高权重"
+      ],
+      "enabled": true
+    }
+  ]
+}

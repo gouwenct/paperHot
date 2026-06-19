@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>paperHOT 首页布局草图</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: #223047;
+      background: linear-gradient(115deg, #f5fbfd 0%, #f8fbfb 42%, #f4f2fb 100%);
+    }
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 172px 1fr;
+    }
+    .sidebar {
+      background: rgba(255,255,255,0.72);
+      border-right: 1px solid rgba(205,218,229,0.75);
+      padding: 12px 10px;
+    }
+    .brand {
+      height: 70px;
+      border: 1px solid #dce6ed;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      letter-spacing: 2px;
+      color: #1b2b45;
+      background: #fff;
+      box-shadow: 0 6px 20px rgba(24, 67, 101, 0.05);
+    }
+    .brand span { color: #0ea6c8; }
+    .nav { margin-top: 16px; display: grid; gap: 8px; }
+    .nav-item {
+      height: 40px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 13px;
+      color: #71819a;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .nav-item.active {
+      color: #0c95b6;
+      background: #e9fbff;
+      border: 1px solid #a9e6f2;
+    }
+    .main {
+      padding: 18px 28px 36px;
+      overflow: hidden;
+    }
+    .top-card {
+      min-height: 136px;
+      background: rgba(255,255,255,0.75);
+      border: 1px solid rgba(222,232,238,0.88);
+      border-radius: 12px;
+      box-shadow: 0 14px 32px rgba(33, 58, 82, 0.07);
+      padding: 18px 18px 16px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 650;
+      letter-spacing: 0;
+      color: #24324a;
+    }
+    .subtitle {
+      margin-top: 4px;
+      font-size: 13px;
+      color: #708096;
+    }
+    .divider {
+      height: 1px;
+      background: #e8eef3;
+      margin: 12px 0 8px;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+    .tabs {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      height: 34px;
+      padding: 3px;
+      border: 1px solid #d4dde5;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.72);
+    }
+    .tab {
+      min-width: 64px;
+      padding: 6px 14px;
+      border-radius: 16px;
+      text-align: center;
+      font-size: 12px;
+      color: #96a0ad;
+    }
+    .tab.active {
+      color: #0b8fb0;
+      background: #e8fbff;
+      border: 1px solid #94dbe9;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.8);
+    }
+    .search {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .search input {
+      width: 174px;
+      height: 38px;
+      border: 1px solid #d9e2e9;
+      border-radius: 10px;
+      padding: 0 12px;
+      color: #708096;
+      background: #fff;
+      font-size: 12px;
+    }
+    .search button {
+      height: 34px;
+      min-width: 74px;
+      border-radius: 18px;
+      border: 1px solid #8bcfdc;
+      background: #dff7fb;
+      color: #207d93;
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .feed {
+      display: grid;
+      grid-template-columns: 92px 1fr;
+      column-gap: 18px;
+      margin-top: 18px;
+    }
+    .date {
+      padding-top: 3px;
+      color: #62748b;
+      font-size: 15px;
+      font-weight: 700;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .timeline {
+      position: relative;
+      padding-left: 20px;
+    }
+    .timeline:before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #c9d7df;
+    }
+    .item-row {
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      column-gap: 22px;
+      margin-bottom: 12px;
+      position: relative;
+    }
+    .dot {
+      position: absolute;
+      left: -24px;
+      top: 21px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #64dcc7;
+      box-shadow: 0 0 0 3px rgba(100,220,199,0.12);
+    }
+    .time {
+      padding-top: 15px;
+      text-align: right;
+      font-size: 20px;
+      font-weight: 800;
+      color: #1f2a40;
+    }
+    .paper-card {
+      min-height: 172px;
+      border-radius: 14px;
+      border: 1px solid #e3eaf0;
+      background: rgba(255,255,255,0.86);
+      padding: 15px 16px 14px;
+      box-shadow: 0 8px 18px rgba(35, 58, 78, 0.05);
+    }
+    .paper-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+    .source {
+      color: #75859a;
+      font-size: 12px;
+    }
+    .badges {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .badge-choice {
+      color: #ad6500;
+      background: #fff2d8;
+      border: 1px solid #ffd391;
+      border-radius: 12px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .score {
+      color: #0b99b9;
+      background: #dff9ff;
+      border-radius: 12px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .paper-title {
+      font-size: 16px;
+      color: #1f2a40;
+      font-weight: 800;
+      margin: 0 0 8px;
+    }
+    .summary {
+      color: #5f6f84;
+      font-size: 13px;
+      line-height: 1.7;
+      margin: 0;
+    }
+    .tags {
+      display: flex;
+      gap: 7px;
+      margin: 8px 0 12px;
+      flex-wrap: wrap;
+    }
+    .tag {
+      background: #f0f3f6;
+      color: #708096;
+      border-radius: 5px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .reason {
+      border-top: 1px solid #edf1f4;
+      padding-top: 10px;
+    }
+    .reason-inner {
+      border-radius: 8px;
+      background: #e8fbf5;
+      color: #17966f;
+      padding: 8px 11px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    @media (max-width: 920px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .main { padding: 14px; }
+      .toolbar { align-items: flex-start; flex-direction: column; }
+      .feed { grid-template-columns: 1fr; }
+      .date { justify-content: flex-start; margin-bottom: 10px; }
+      .item-row { grid-template-columns: 54px 1fr; column-gap: 14px; }
+      .time { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">PAPER<span>HOT</span></div>
+      <nav class="nav">
+        <div class="nav-item active">⚡ 精选</div>
+        <div class="nav-item">☰ 全部论文动态</div>
+        <div class="nav-item">▣ 领域日报</div>
+        <div class="nav-item">⌘ 数据源</div>
+        <div class="nav-item">♡ 关于</div>
+        <div class="nav-item">↺ 更新日志</div>
+        <div class="nav-item">＋ 信源提报</div>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <section class="top-card">
+        <h1>精选</h1>
+        <div class="subtitle">自动筛选高价值科研论文与技术动态</div>
+        <div class="divider"></div>
+        <div class="toolbar">
+          <div class="tabs">
+            <div class="tab active">全部</div>
+            <div class="tab">模型</div>
+            <div class="tab">成像</div>
+            <div class="tab">算法</div>
+            <div class="tab">论文</div>
+            <div class="tab">工具</div>
+          </div>
+          <div class="search">
+            <input value="" placeholder="搜索标题/摘要..." />
+            <button>搜索</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="feed">
+        <div class="date">6月19日⌄</div>
+        <div class="timeline">
+          <div class="item-row">
+            <div class="dot"></div>
+            <div class="time">18:01</div>
+            <article class="paper-card">
+              <div class="paper-head">
+                <div class="source">arXiv cs.CV · 计算成像</div>
+                <div class="badges"><span class="badge-choice">精选</span><span class="score">87</span></div>
+              </div>
+              <h2 class="paper-title">Diffusion Prior for Robust Microscopy Reconstruction</h2>
+              <p class="summary">该论文将扩散先验引入显微重建，在低信噪比和欠采样条件下保持结构细节。方法用可配置的物理前向模型约束生成过程，适合 SIM、RIM、散斑照明等计算显微任务扩展。</p>
+              <div class="tags"><span class="tag">计算显微</span><span class="tag">扩散模型</span><span class="tag">重建算法</span></div>
+              <div class="reason"><div class="reason-inner">推荐理由：它把生成式先验和物理模型结合得比较干净，对你后续做 RIM/PRIM 重建方法调研很有参考价值。</div></div>
+            </article>
+          </div>
+
+          <div class="item-row">
+            <div class="dot"></div>
+            <div class="time">15:55</div>
+            <article class="paper-card">
+              <div class="paper-head">
+                <div class="source">bioRxiv · BioImage Analysis</div>
+                <div class="badges"><span class="badge-choice">精选</span><span class="score">79</span></div>
+              </div>
+              <h2 class="paper-title">Self-supervised Foundation Model for Bioimage Restoration</h2>
+              <p class="summary">研究提出面向生物图像复原的自监督基础模型，在多种显微模态上统一处理去噪、超分辨和缺失结构补全，并给出跨数据集泛化评测。</p>
+              <div class="tags"><span class="tag">BioImage</span><span class="tag">自监督</span><span class="tag">图像复原</span></div>
+              <div class="reason"><div class="reason-inner">推荐理由：如果 paperHOT 要覆盖显微 AI，这类跨模态基础模型应进入每日重点池。</div></div>
+            </article>
+          </div>
+
+          <div class="item-row">
+            <div class="dot"></div>
+            <div class="time">13:29</div>
+            <article class="paper-card">
+              <div class="paper-head">
+                <div class="source">GitHub Trending · 开源工具</div>
+                <div class="badges"><span class="badge-choice">精选</span><span class="score">73</span></div>
+              </div>
+              <h2 class="paper-title">Open-source Pipeline for Paper Collection and LLM Review</h2>
+              <p class="summary">项目提供论文抓取、去重、摘要生成、标签提取和人工复核工作流，可作为 paperHOT 数据流设计的参考实现。</p>
+              <div class="tags"><span class="tag">论文工具</span><span class="tag">LLM 摘要</span><span class="tag">开源仓库</span></div>
+              <div class="reason"><div class="reason-inner">推荐理由：它接近 paperHOT 的后端需求，可以优先拆解其数据结构和复核流程。</div></div>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

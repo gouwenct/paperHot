@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>paperHOT 科研入口布局草图 v3</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: #233149;
+      background: linear-gradient(115deg, #f3fbfd 0%, #f8fbfa 43%, #f4f2fb 100%);
+    }
+    .app { min-height: 100vh; display: grid; grid-template-columns: 180px 1fr; }
+    .sidebar {
+      padding: 12px 10px;
+      background: rgba(255,255,255,0.76);
+      border-right: 1px solid rgba(207,219,228,0.8);
+    }
+    .brand {
+      height: 70px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #dce7ee;
+      border-radius: 14px;
+      background: #fff;
+      color: #1c2c45;
+      font-weight: 800;
+      letter-spacing: 2px;
+      box-shadow: 0 6px 20px rgba(24,67,101,0.05);
+    }
+    .brand span { color: #0ea6c8; }
+    .nav { margin-top: 16px; display: grid; gap: 8px; }
+    .nav-item {
+      height: 40px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 13px;
+      border-radius: 12px;
+      color: #6f8096;
+      font-size: 14px;
+      font-weight: 650;
+    }
+    .nav-item.active {
+      color: #0b94b2;
+      background: #e8fbff;
+      border: 1px solid #a5e5f0;
+    }
+    .main { padding: 18px 28px 36px; }
+    .hero {
+      padding: 18px;
+      border: 1px solid rgba(222,232,238,0.92);
+      border-radius: 13px;
+      background: rgba(255,255,255,0.78);
+      box-shadow: 0 14px 32px rgba(33,58,82,0.07);
+    }
+    .hero-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+    }
+    h1 { margin: 0; font-size: 28px; font-weight: 700; color: #24324a; }
+    .subtitle { margin-top: 5px; color: #6f8096; font-size: 13px; line-height: 1.5; }
+    .search { display: flex; gap: 8px; align-items: center; }
+    .search input {
+      width: 230px;
+      height: 38px;
+      padding: 0 12px;
+      border: 1px solid #d9e2e9;
+      border-radius: 10px;
+      background: #fff;
+      color: #718098;
+      font-size: 12px;
+    }
+    .search button {
+      height: 34px;
+      min-width: 74px;
+      border: 1px solid #8bcfdc;
+      border-radius: 18px;
+      background: #dff7fb;
+      color: #207d93;
+      font-weight: 800;
+      font-size: 12px;
+    }
+    .divider { height: 1px; margin: 14px 0 12px; background: #e8eef3; }
+    .focus-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .focus-label { margin-right: 2px; color: #708096; font-size: 12px; font-weight: 800; }
+    .chip {
+      padding: 6px 11px;
+      border: 1px solid #b8e9f1;
+      border-radius: 16px;
+      background: #e9fbff;
+      color: #237989;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .chip.muted { border-color: #dce4ea; background: #f3f6f8; color: #79879a; }
+    .mode-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .mode {
+      min-height: 82px;
+      padding: 13px;
+      border: 1px solid #e1e9ef;
+      border-radius: 11px;
+      background: rgba(255,255,255,0.85);
+    }
+    .mode.active { border-color: #9ee2ee; background: #ecfbfe; }
+    .mode-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 7px;
+      color: #203049;
+      font-size: 14px;
+      font-weight: 850;
+    }
+    .mode-pill {
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: #ddf8ff;
+      color: #0b99b9;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .mode-text { margin: 0; color: #68788e; font-size: 12px; line-height: 1.55; }
+    .tabs {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      height: 34px;
+      padding: 3px;
+      border: 1px solid #d4dde5;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.72);
+    }
+    .tab {
+      min-width: 62px;
+      padding: 6px 13px;
+      border-radius: 16px;
+      text-align: center;
+      color: #96a0ad;
+      font-size: 12px;
+    }
+    .tab.active {
+      border: 1px solid #94dbe9;
+      background: #e8fbff;
+      color: #0b8fb0;
+    }
+    .content {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 290px;
+      gap: 18px;
+      margin-top: 18px;
+    }
+    .feed { display: grid; grid-template-columns: 92px 1fr; column-gap: 18px; }
+    .date {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding-top: 3px;
+      color: #62748b;
+      font-size: 15px;
+      font-weight: 750;
+    }
+    .timeline { position: relative; padding-left: 20px; }
+    .timeline:before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #c9d7df;
+    }
+    .item-row {
+      position: relative;
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      column-gap: 22px;
+      margin-bottom: 12px;
+    }
+    .dot {
+      position: absolute;
+      left: -24px;
+      top: 21px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #64dcc7;
+      box-shadow: 0 0 0 3px rgba(100,220,199,0.12);
+    }
+    .time {
+      padding-top: 15px;
+      text-align: right;
+      color: #1f2a40;
+      font-size: 20px;
+      font-weight: 850;
+    }
+    .paper-card {
+      min-height: 182px;
+      padding: 15px 16px 14px;
+      border: 1px solid #e3eaf0;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.88);
+      box-shadow: 0 8px 18px rgba(35,58,78,0.05);
+    }
+    .paper-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+    .source { color: #75859a; font-size: 12px; }
+    .head-actions {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      white-space: nowrap;
+    }
+    .badge-choice {
+      padding: 2px 8px;
+      border: 1px solid #ffd391;
+      border-radius: 12px;
+      background: #fff2d8;
+      color: #ad6500;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .score {
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: #dff9ff;
+      color: #0b99b9;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .favorite {
+      height: 26px;
+      padding: 0 10px;
+      border: 1px solid #9ddfca;
+      border-radius: 14px;
+      background: #e8fbf5;
+      color: #148567;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .paper-title { margin: 0 0 8px; color: #1f2a40; font-size: 16px; font-weight: 850; }
+    .summary { margin: 0; color: #5f6f84; font-size: 13px; line-height: 1.7; }
+    .tags { display: flex; flex-wrap: wrap; gap: 7px; margin: 8px 0 12px; }
+    .tag {
+      padding: 4px 8px;
+      border-radius: 5px;
+      background: #f0f3f6;
+      color: #708096;
+      font-size: 11px;
+      font-weight: 750;
+    }
+    .reason { padding-top: 10px; border-top: 1px solid #edf1f4; }
+    .reason-inner {
+      padding: 8px 11px;
+      border-radius: 8px;
+      background: #e8fbf5;
+      color: #17966f;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+    .action {
+      padding: 5px 9px;
+      border: 1px solid #dbe5ec;
+      border-radius: 7px;
+      background: #fff;
+      color: #60738b;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .side-panel { display: grid; gap: 12px; align-content: start; }
+    .panel {
+      padding: 14px;
+      border: 1px solid #e1e9ef;
+      border-radius: 13px;
+      background: rgba(255,255,255,0.82);
+      box-shadow: 0 8px 18px rgba(35,58,78,0.04);
+    }
+    .panel h3 { margin: 0 0 10px; color: #24324a; font-size: 15px; }
+    .mini-list { display: grid; gap: 8px; }
+    .mini {
+      padding: 9px;
+      border-radius: 9px;
+      background: #f5f8fa;
+      color: #63748a;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .mini strong { display: block; margin-bottom: 2px; color: #24324a; }
+    @media (max-width: 1120px) {
+      .content { grid-template-columns: 1fr; }
+      .side-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .mode-row { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 820px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .main { padding: 14px; }
+      .hero-top { flex-direction: column; }
+      .feed { grid-template-columns: 1fr; }
+      .date { justify-content: flex-start; margin-bottom: 10px; }
+      .item-row { grid-template-columns: 54px 1fr; column-gap: 14px; }
+      .side-panel { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">PAPER<span>HOT</span></div>
+      <nav class="nav">
+        <div class="nav-item active">⚡ 今日论文</div>
+        <div class="nav-item">☰ 全部论文</div>
+        <div class="nav-item">♡ 个人收藏</div>
+        <div class="nav-item">⌘ 领域配置</div>
+        <div class="nav-item">ⓘ 关于</div>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <section class="hero">
+        <div class="hero-top">
+          <div>
+            <h1>今日论文</h1>
+            <div class="subtitle">今日论文与全部论文都围绕“当前关注领域”展示相关论文；今日论文偏最新必读，全部论文偏完整检索和回看。</div>
+          </div>
+          <div class="search">
+            <input placeholder="搜索论文/作者/方法/关键词..." />
+            <button>搜索</button>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="focus-row">
+          <span class="focus-label">当前关注领域</span>
+          <span class="chip">计算显微</span>
+          <span class="chip">SIM / RIM / PRIM</span>
+          <span class="chip">生物图像复原</span>
+          <span class="chip">物理先验重建</span>
+          <span class="chip muted">+ 添加领域</span>
+        </div>
+        <div class="mode-row">
+          <div class="mode active">
+            <div class="mode-title">今日论文 <span class="mode-pill">12</span></div>
+            <p class="mode-text">只看当前关注领域里今天最值得读的论文，适合每日快速跟进。</p>
+          </div>
+          <div class="mode">
+            <div class="mode-title">全部论文 <span class="mode-pill">326</span></div>
+            <p class="mode-text">展示当前关注领域的完整论文池，支持按时间、来源、标签和收藏状态筛选。</p>
+          </div>
+        </div>
+        <div class="tabs">
+          <div class="tab active">全部</div>
+          <div class="tab">论文</div>
+          <div class="tab">方法</div>
+          <div class="tab">数据</div>
+          <div class="tab">代码</div>
+          <div class="tab">综述</div>
+        </div>
+      </section>
+
+      <section class="content">
+        <div class="feed">
+          <div class="date">6月19日⌄</div>
+          <div class="timeline">
+            <div class="item-row">
+              <div class="dot"></div>
+              <div class="time">18:01</div>
+              <article class="paper-card">
+                <div class="paper-head">
+                  <div class="source">arXiv cs.CV · 计算显微</div>
+                  <div class="head-actions">
+                    <button class="favorite">♡ 加入个人收藏</button>
+                    <span class="badge-choice">必读</span>
+                    <span class="score">91</span>
+                  </div>
+                </div>
+                <h2 class="paper-title">Diffusion Prior for Robust Microscopy Reconstruction</h2>
+                <p class="summary">该论文把扩散先验引入显微重建，在低信噪比和欠采样条件下保持结构细节。方法用物理前向模型约束生成过程，适合 SIM、RIM、散斑照明等任务扩展。</p>
+                <div class="tags"><span class="tag">计算显微</span><span class="tag">扩散模型</span><span class="tag">重建算法</span></div>
+                <div class="reason"><div class="reason-inner">为什么与你相关：生成式先验和物理模型结合得比较干净，可作为 RIM/PRIM 重建调研的重点候选。</div></div>
+                <div class="actions"><span class="action">看方法</span><span class="action">找代码</span><span class="action">生成速读</span></div>
+              </article>
+            </div>
+
+            <div class="item-row">
+              <div class="dot"></div>
+              <div class="time">15:55</div>
+              <article class="paper-card">
+                <div class="paper-head">
+                  <div class="source">bioRxiv · BioImage Analysis</div>
+                  <div class="head-actions">
+                    <button class="favorite">♡ 加入个人收藏</button>
+                    <span class="badge-choice">方法</span>
+                    <span class="score">84</span>
+                  </div>
+                </div>
+                <h2 class="paper-title">Self-supervised Foundation Model for Bioimage Restoration</h2>
+                <p class="summary">研究提出面向生物图像复原的自监督基础模型，在多种显微模态上统一处理去噪、超分辨和结构补全，并给出跨数据集泛化评测。</p>
+                <div class="tags"><span class="tag">BioImage</span><span class="tag">自监督</span><span class="tag">图像复原</span></div>
+                <div class="reason"><div class="reason-inner">为什么与你相关：跨模态复原模型能帮助判断哪些 AI restoration 思路可迁移到显微重建。</div></div>
+                <div class="actions"><span class="action">看实验</span><span class="action">对比相关工作</span></div>
+              </article>
+            </div>
+
+            <div class="item-row">
+              <div class="dot"></div>
+              <div class="time">13:29</div>
+              <article class="paper-card">
+                <div class="paper-head">
+                  <div class="source">GitHub Trending · 开源工具</div>
+                  <div class="head-actions">
+                    <button class="favorite">♡ 加入个人收藏</button>
+                    <span class="badge-choice">代码</span>
+                    <span class="score">78</span>
+                  </div>
+                </div>
+                <h2 class="paper-title">Open-source Pipeline for Paper Collection and LLM Review</h2>
+                <p class="summary">项目提供论文抓取、去重、摘要生成、标签提取和人工复核工作流，可作为 paperHOT 数据流设计的参考实现。</p>
+                <div class="tags"><span class="tag">论文工具</span><span class="tag">LLM 摘要</span><span class="tag">开源仓库</span></div>
+                <div class="reason"><div class="reason-inner">为什么与你相关：它接近 paperHOT 的后端需求，可以优先拆解数据结构和复核流程。</div></div>
+                <div class="actions"><span class="action">查看仓库</span><span class="action">加入工具箱</span></div>
+              </article>
+            </div>
+          </div>
+        </div>
+
+        <aside class="side-panel">
+          <div class="panel">
+            <h3>领域雷达</h3>
+            <div class="mini-list">
+              <div class="mini"><strong>SIM/RIM 重建</strong>今日新增 4 篇，2 篇带代码。</div>
+              <div class="mini"><strong>物理先验 + 深度学习</strong>近 7 天热度上升，建议做周报汇总。</div>
+              <div class="mini"><strong>BioImage foundation model</strong>出现 1 篇综述，可进入个人收藏。</div>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>收藏入口</h3>
+            <div class="mini-list">
+              <div class="mini"><strong>个人收藏</strong>集中保存待读论文、可复现代码和组会候选材料。</div>
+              <div class="mini"><strong>收藏筛选</strong>全部论文页可按“已收藏 / 未收藏”筛选。</div>
+            </div>
+          </div>
+        </aside>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,89 @@
+<h2>paperHOT first-version approaches</h2>
+<p class="subtitle">All three keep the domain configurable. The difference is how much automation we build first.</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A. Static Curation Board</div>
+        <div class="mockup-body">
+          <div class="mock-nav">paperHOT | Today | Tags | Sources</div>
+          <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-top:12px">
+            <div class="placeholder">Manual JSON / Markdown items</div>
+            <div class="placeholder">Daily list page</div>
+            <div class="placeholder">Detail pages</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Manual-first static site</h3>
+      <p>Fastest to ship. You manually provide papers or links, and the app formats them into AIHOT-like cards.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B. Semi-automated paperHOT</div>
+        <div class="mockup-body">
+          <div class="mock-nav">Sources -> Ingest -> Score -> Review -> Publish</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+            <div class="placeholder">arXiv / bioRxiv / HF Papers</div>
+            <div class="placeholder">RSS / GitHub / blogs</div>
+            <div class="placeholder">LLM summary + tags</div>
+            <div class="placeholder">Daily HOT page</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. Semi-automated mixed-source system</h3>
+      <p>Recommended. Fetches mixed sources, scores candidates, drafts summaries, then keeps a human review step.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C. Fully automated pipeline</div>
+        <div class="mockup-body">
+          <div class="mock-nav">Scheduler | Crawlers | DB | LLM | Web | Admin</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px">
+            <div class="placeholder">Collectors</div>
+            <div class="placeholder">Dedup DB</div>
+            <div class="placeholder">Ranking</div>
+            <div class="placeholder">LLM jobs</div>
+            <div class="placeholder">Review UI</div>
+            <div class="placeholder">Deploy</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. Full production automation</h3>
+      <p>Most complete, but likely too much for the first cut: scheduler, database, auth, admin UI, retries, and deployment.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Recommendation</h4>
+      <ul>
+        <li>Start with B so the output feels real quickly.</li>
+        <li>Keep source and domain rules as config.</li>
+        <li>Use review files instead of a heavy admin backend first.</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Avoid in v1</h4>
+      <ul>
+        <li>Login system and full admin dashboard.</li>
+        <li>One-off crawler complexity for every source.</li>
+        <li>Hardcoding microscopy-specific ranking logic.</li>
+      </ul>
+    </div>
+  </div>
+</div>
