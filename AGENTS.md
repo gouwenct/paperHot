@@ -1,3 +1,8 @@
+## PaperHot 协作规则同步
+
+- `AGENTS.md` 和 `claude.md` 是同一份项目协作规则的两个入口。
+- 修改 `AGENTS.md` 或 `claude.md` 任意一份时，必须同步更新另一份，保持两份文件内容一致。
+
 ## Imported Claude Cowork project instructions
 
 ## PaperHot 元数据修复规则
@@ -40,9 +45,13 @@
 ## PaperHot 发布规则
 
 - 当用户在 Code AI 工具中提出“帮我发布”“发布到 GitHub”“准备 release”等发布请求时，必须先处理 `CHANGELOG.md`。
+- 普通维护者提交功能 PR、修复 PR 或文档 PR 时，只能把变更写入 `CHANGELOG.md` 的 `未发布` 区域，不得自行修改 `package.json` 版本号、不得新增版本标题、不得打 tag。
+- 管理者审核并合并 PR 后，本地发布前应先运行 `git pull origin main`，把 GitHub 远端最新 `main` 同步到本地。
+- 管理者发布新版本时，先按发布目标修改 `package.json` 的 `version`，例如 `0.1.0` -> `0.1.1` 或 `0.2.0`。
 - 发布前应运行 `npm run release:changelog`，把 `未发布` 区域的内容归档到当前 `package.json` 版本号和当天日期下面，例如 `## 0.1.0 - 2026-06-25`。
 - 如果用户指定版本号或发布日期，应运行 `node scripts\release-changelog.cjs <version> <YYYY-MM-DD>`。
 - 归档后，`## 未发布` 应保留为空，供后续新改动继续记录。
+- 发布提交应至少包含 `package.json`、`CHANGELOG.md` 和本次发布需要的代码/文档变更；随后创建对应标签，例如 `v0.1.1`。
 - 发布前还必须检查 `git status --short`，确认真实 API Key、本地论文库、个人资料和其它敏感文件没有被纳入提交。
 
 ## PaperHot 维护者统一任务流程
