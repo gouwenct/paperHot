@@ -10,7 +10,7 @@
 
 2. 复制模板文件：
 
-   `config/journal-metrics.easyscholar.example.json`
+   `config/journal-metrics.example.json`
 
    复制为：
 
@@ -39,7 +39,7 @@
   "provider": "easyscholar",
   "enabled": true,
   "endpoint": "https://easyscholar.cc/open/getPublicationRank",
-  "apiKey": "你的 key",
+  "apiKey": "",
   "minIntervalMs": 500,
   "request": {
     "method": "GET",

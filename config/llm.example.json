@@ -1,0 +1,407 @@
+{
+  "provider": "aliyun-modelstudio",
+  "enabled": false,
+  "activeProviderId": "aliyun-modelstudio",
+  "host": "",
+  "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "dashscopeEndpoint": "https://dashscope.aliyuncs.com/api/v1",
+  "apiKey": "",
+  "model": "qwen-plus",
+  "apiMode": "openai",
+  "contextWindow": 131000,
+  "reasoning": "auto",
+  "providers": [
+    {
+      "id": "aliyun-modelstudio",
+      "name": "aliyun-modelstudio",
+      "desc": "Alibaba Model Studio / DashScope compatible endpoint",
+      "provider": "aliyun-modelstudio",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "dashscopeEndpoint": "https://dashscope.aliyuncs.com/api/v1",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [],
+      "contextWindow": 131000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic (Claude)",
+      "desc": "Official Claude API",
+      "provider": "anthropic",
+      "enabled": false,
+      "apiMode": "anthropic",
+      "host": "",
+      "endpoint": "https://api.anthropic.com",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "claude-3-5-sonnet-latest",
+        "claude-3-5-haiku-latest"
+      ],
+      "contextWindow": 200000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "claude-code-local",
+      "name": "Claude Code CLI (local)",
+      "desc": "Uses the local claude binary -- no API key needed",
+      "provider": "claude-code-local",
+      "enabled": false,
+      "apiMode": "local",
+      "host": "",
+      "endpoint": "",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "local",
+      "modelPresets": [
+        "local"
+      ],
+      "contextWindow": 200000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "codex-cli-local",
+      "name": "Codex CLI (local)",
+      "desc": "Uses the local codex binary -- no API key needed",
+      "provider": "codex-cli-local",
+      "enabled": false,
+      "apiMode": "local",
+      "host": "",
+      "endpoint": "",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "local",
+      "modelPresets": [
+        "local"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI (GPT)",
+      "desc": "Official OpenAI API",
+      "provider": "openai",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://api.openai.com/v1",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "gpt-4.1",
+        "gpt-4.1-mini",
+        "gpt-5"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "gemini",
+      "name": "Google (Gemini)",
+      "desc": "Generative Language API",
+      "provider": "gemini",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "gemini-2.5-pro",
+        "gemini-2.5-flash"
+      ],
+      "contextWindow": 1000000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "desc": "api.deepseek.com",
+      "provider": "deepseek",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://api.deepseek.com/v1",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "deepseek-chat",
+        "deepseek-reasoner"
+      ],
+      "contextWindow": 64000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "groq",
+      "name": "Groq",
+      "desc": "api.groq.com",
+      "provider": "groq",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://api.groq.com/openai/v1",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "llama-3.3-70b-versatile"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "xai",
+      "name": "xAI (Grok)",
+      "desc": "api.x.ai",
+      "provider": "xai",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://api.x.ai/v1",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "grok-4",
+        "grok-3"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "nvidia",
+      "name": "NVIDIA NIM",
+      "desc": "integrate.api.nvidia.com",
+      "provider": "nvidia",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://integrate.api.nvidia.com/v1",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "openai/gpt-oss-120b"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "moonshot-global",
+      "name": "Kimi (Moonshot)",
+      "desc": "api.moonshot.ai",
+      "provider": "moonshot",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://api.moonshot.ai/v1",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "kimi-k2.5",
+        "kimi-latest"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "moonshot-cn",
+      "name": "Kimi (Moonshot, 中国)",
+      "desc": "api.moonshot.cn",
+      "provider": "moonshot-cn",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://api.moonshot.cn/v1",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "kimi-k2.5",
+        "kimi-latest"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "zhipu",
+      "name": "智谱 GLM (Zhipu)",
+      "desc": "open.bigmodel.cn",
+      "provider": "zhipu",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://open.bigmodel.cn/api/paas/v4",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "glm-4.7",
+        "glm-4-flash"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "minimax-global",
+      "name": "MiniMax (Global)",
+      "desc": "api.minimax.io/anthropic",
+      "provider": "minimax-global",
+      "enabled": false,
+      "apiMode": "anthropic",
+      "host": "",
+      "endpoint": "https://api.minimax.io/anthropic",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "MiniMax-M2.5"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "minimax-cn",
+      "name": "MiniMax (中国)",
+      "desc": "api.minimax.com/anthropic",
+      "provider": "minimax-cn",
+      "enabled": false,
+      "apiMode": "anthropic",
+      "host": "",
+      "endpoint": "https://api.minimax.com/anthropic",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "MiniMax-M2.5"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "aliyun-coding",
+      "name": "阿里百炼 Coding Plan",
+      "desc": "dashscope.aliyuncs.com",
+      "provider": "aliyun-modelstudio",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "dashscopeEndpoint": "https://dashscope.aliyuncs.com/api/v1",
+      "apiKey": "",
+      "model": "qwen-plus",
+      "modelPresets": [
+        "qwen-plus",
+        "qwen-max",
+        "qwen3-coder-plus",
+        "qwen3-coder-next"
+      ],
+      "contextWindow": 173000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "xiaomi",
+      "name": "小米 MiMo (Xiaomi)",
+      "desc": "api.xiaomimimo.com",
+      "provider": "xiaomi",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://api.xiaomimimo.com/v1",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "MiMo"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "volcengine",
+      "name": "火山引擎 Ark (Volcengine)",
+      "desc": "ark.cn-beijing.volces.com/api/coding/v3",
+      "provider": "volcengine",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://ark.cn-beijing.volces.com/api/coding/v3",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "Doubao-Seed-2.0-Code",
+      "modelPresets": [
+        "Doubao-Seed-2.0-Code",
+        "Doubao-Seed-2.0-pro",
+        "Doubao-Seed-2.0-lite"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "ollama-local",
+      "name": "Ollama (Local)",
+      "desc": "Self-hosted llama.cpp / Ollama",
+      "provider": "ollama-local",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "http://127.0.0.1:11434/v1",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "qwen2.5",
+        "llama3.1"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "off"
+    },
+    {
+      "id": "ollama-cloud",
+      "name": "Ollama Cloud",
+      "desc": "ollama.com",
+      "provider": "ollama-cloud",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "https://ollama.com/v1",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "",
+      "modelPresets": [
+        "gpt-oss"
+      ],
+      "contextWindow": 128000,
+      "reasoning": "auto"
+    },
+    {
+      "id": "custom",
+      "name": "Custom",
+      "desc": "Any OpenAI- or Anthropic-compatible endpoint",
+      "provider": "custom",
+      "enabled": false,
+      "apiMode": "openai",
+      "host": "",
+      "endpoint": "http://127.0.0.1:8080/v1",
+      "dashscopeEndpoint": "",
+      "apiKey": "",
+      "model": "gpt-5.5",
+      "modelPresets": [
+        "gpt-5.5"
+      ],
+      "contextWindow": 1000000,
+      "reasoning": "medium"
+    }
+  ],
+  "userBackground": "请在页面中填写你的研究背景、关注方向和评分偏好。"
+}

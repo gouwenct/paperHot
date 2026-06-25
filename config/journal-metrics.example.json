@@ -2,7 +2,7 @@
   "provider": "easyscholar",
   "enabled": false,
   "endpoint": "https://easyscholar.cc/open/getPublicationRank",
-  "apiKey": "请填写 EasyScholar Open API Key",
+  "apiKey": "",
   "minIntervalMs": 500,
   "request": {
     "method": "GET",

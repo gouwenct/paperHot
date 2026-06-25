@@ -2,7 +2,10 @@
   "provider": "google-scholar-api",
   "enabled": false,
   "endpoint": "https://serpapi.com/search.json?engine=google_scholar&hl=en",
-  "apiKey": "请填写 Scholar API Key",
+  "apiKey": "",
+  "maxPages": 3,
+  "num": 20,
+  "rollingFetch": true,
   "request": {
     "method": "GET",
     "queryName": "q",

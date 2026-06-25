@@ -52,7 +52,7 @@ paperHOT 后端不需要单独运行这个 Python 脚本，会用下面的 JSON 
   "provider": "google-scholar-api",
   "enabled": true,
   "endpoint": "https://serpapi.com/search.json?engine=google_scholar&hl=en",
-  "apiKey": "你的 key",
+  "apiKey": "",
   "request": {
     "method": "GET",
     "queryName": "q",

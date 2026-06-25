@@ -78,7 +78,7 @@
 用户已经填写阿里云模型接口。曾读取过本地配置确认：
 - active provider：`aliyun-coding`
 - provider：`aliyun-modelstudio`
-- endpoint：`https://ws-yo0l2l0j1634flxf.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`
+- endpoint：`https://dashscope.aliyuncs.com/compatible-mode/v1`
 - model：`qwen-plus`
 - hasApiKey：true
 
@@ -108,7 +108,7 @@
 - `paperhot_backend.cjs`
 - `server.cjs`
 - `test/paperhot_backend.test.cjs`
-- 以及较早已有/相关配置文档：`config/journal-metrics.easyscholar.example.json`, `data/user/config.json`, `docs/easyscholar-config.md`, `config/google-scholar.example.json`, `docs/google-scholar-config.md`, `scripts/`
+- 以及较早已有/相关配置文档：`config/journal-metrics.example.json`, `data/user/config.json`, `docs/easyscholar-config.md`, `config/google-scholar.example.json`, `docs/google-scholar-config.md`, `scripts/`
 
 不要随意 revert 未确认的脏文件。很多改动来自之前连续开发。
 

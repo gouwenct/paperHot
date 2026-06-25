@@ -1762,7 +1762,7 @@ test("writes integration configs and returns masked API keys", async () => {
     llm: {
       enabled: true,
       provider: "aliyun-modelstudio",
-      endpoint: "https://ws-yo0l2l0j1634flxf.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
       apiKey: "llm-secret",
       model: "qwen-plus",
       userBackground: "用户背景：PRIM 伪随机结构光照明显微镜算法\n关注问题：频谱分离、像差鲁棒性"
@@ -1803,7 +1803,7 @@ test("writes integration configs and returns masked API keys", async () => {
   assert.equal(saved.journalMetrics.hasApiKey, true);
 
   const readBack = await readIntegrationConfigs(files);
-  assert.equal(readBack.llm.endpoint, "https://ws-yo0l2l0j1634flxf.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1");
+  assert.equal(readBack.llm.endpoint, "https://dashscope.aliyuncs.com/compatible-mode/v1");
   assert.equal(readBack.llm.userBackground, "用户背景：PRIM 伪随机结构光照明显微镜算法\n关注问题：频谱分离、像差鲁棒性");
   assert.equal(readBack.llm.apiKey, "");
   assert.equal(readBack.llm.hasApiKey, true);
@@ -1879,7 +1879,7 @@ test("tests an LLM provider using saved or submitted configuration", async () =>
           provider: "aliyun-modelstudio",
           enabled: true,
           apiMode: "openai",
-          endpoint: "https://ws-yo0l2l0j1634flxf.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+          endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
           apiKey: "test-key",
           model: "qwen-plus"
         }
@@ -1904,7 +1904,7 @@ test("tests an LLM provider using saved or submitted configuration", async () =>
     }
   });
 
-  assert.equal(seenUrl, "https://ws-yo0l2l0j1634flxf.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/chat/completions");
+  assert.equal(seenUrl, "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
   assert.equal(result.ok, true);
   assert.equal(result.model, "qwen-plus");
   assert.equal(result.llmSummary, "");
@@ -1922,7 +1922,7 @@ test("calls OpenAI-compatible LLM with chat completions path", async () => {
   ], {
     config: {
       enabled: true,
-      endpoint: "https://ws-yo0l2l0j1634flxf.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
       apiKey: "test-key",
       model: "qwen-plus",
       userBackground: "PRIM 伪随机结构光照明显微镜算法"
@@ -1944,7 +1944,7 @@ test("calls OpenAI-compatible LLM with chat completions path", async () => {
     }
   });
 
-  assert.equal(seenUrl, "https://ws-yo0l2l0j1634flxf.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/chat/completions");
+  assert.equal(seenUrl, "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
   assert.equal(papers[0].summary, "A structured illumination microscopy method.");
   assert.equal(papers[0].abstractZh, "原摘要中文翻译");
   assert.equal(papers[0].llmSummary || "", "");

@@ -1,0 +1,17 @@
+{
+  "keywords": {
+    "primary": [
+      { "text": "structured illumination microscopy", "enabled": true },
+      { "text": "SIM", "enabled": true }
+    ],
+    "secondary": [
+      { "text": "super-resolution microscopy", "enabled": false },
+      { "text": "computational imaging", "enabled": false }
+    ],
+    "inspiration": [
+      { "text": "deep learning reconstruction", "enabled": false },
+      { "text": "inverse problem", "enabled": false }
+    ]
+  },
+  "sources": []
+}
