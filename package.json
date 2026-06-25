@@ -1,6 +1,6 @@
 {
   "name": "paper-hot",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Local paper discovery, enrichment, and reading workflow for research fields.",
   "main": "server.cjs",

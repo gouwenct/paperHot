@@ -317,7 +317,9 @@ flowchart TD
 | `data/user/*.example.json` | 可提交的用户配置模板 |
 | `CHANGELOG.md` | 项目更新日志 |
 | `AGENTS.md` | 维护者和 AI 协作规则 |
+| `claude.md` | Claude / Claude Code 使用的协作规则入口；修改 `AGENTS.md` 或 `claude.md` 任意一份时，必须同步另一份 |
 | `BACKUP_FORMAT.md` | 本地数据 ZIP 备份格式、版本号和迁移规则 |
+| `ROADMAP.md` | 后续计划和暂不计划的功能方向 |
 
 ### 主要文件夹
 
@@ -351,6 +353,7 @@ flowchart TD
 - 新增可配置状态时，同步判断是否应进入本地数据 ZIP 导入导出。
 - 涉及论文库增删改、去重、导入导出或 LLM 处理时，同步考虑操作日志和测试。
 - 提交前检查 `git status --short`，不要提交真实 API Key、本地论文库、个人资料或私密导出包。
+- 普通维护者提交 PR 时只更新 `CHANGELOG.md` 的 `未发布` 区域，不修改 `package.json` 版本号、不新增版本标题、不打 tag。
 - 发布前运行发布流程，把 `CHANGELOG.md` 的 `未发布` 内容归档到版本号和日期下面。
 
 常用验证命令：
