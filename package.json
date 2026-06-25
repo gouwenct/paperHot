@@ -1,0 +1,17 @@
+{
+  "name": "paper-hot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local paper discovery, enrichment, and reading workflow for research fields.",
+  "main": "server.cjs",
+  "scripts": {
+    "start": "node server.cjs --port 50751",
+    "release:changelog": "node scripts\\release-changelog.cjs",
+    "test": "npm run test:backend && npm run test:frontend",
+    "test:backend": "node test\\paperhot_backend.test.cjs",
+    "test:frontend": "node test\\paperhot_frontend.test.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

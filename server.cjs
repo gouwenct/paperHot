@@ -5,6 +5,7 @@ const {
   addCandidatePaperToArchive,
   buildTokenStats,
   dedupePaperArchive,
+  exportLocalDataZip,
   fetchLast7DaysPapers,
   fetchRecentPapers,
   fetchTodayPapers,
@@ -17,6 +18,8 @@ const {
   readIntegrationConfigs,
   readIntegrationSecrets,
   readUserState,
+  importLocalData,
+  importLocalDataZip,
   removeCandidatePaperFromArchive,
   refreshArchiveLlmInsights,
   refreshArchivePaperLlmInsight,
@@ -82,6 +85,17 @@ function sendJson(res, status, payload) {
   res.end(body);
 }
 
+function sendBuffer(res, status, buffer, contentType, filename) {
+  res.writeHead(status, {
+    "Content-Type": contentType,
+    "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": "*",
+    "Content-Disposition": `attachment; filename="${filename}"`,
+    "Content-Length": buffer.length
+  });
+  res.end(buffer);
+}
+
 function collectRequestBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -102,7 +116,17 @@ function collectRequestBody(req) {
   });
 }
 
-async function handleApi(req, res, pathname) {
+function collectRawRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", chunk => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+async function handleApi(req, res, url) {
+  const pathname = url.pathname;
   if (req.method === "GET" && pathname === "/api/token/stats") {
     const payload = await buildTokenStats();
     sendJson(res, 200, payload);
@@ -152,6 +176,30 @@ async function handleApi(req, res, pathname) {
     const body = await collectRequestBody(req);
     const config = await writeUserConfig(body);
     sendJson(res, 200, { ok: true, config });
+    return true;
+  }
+
+  if (req.method === "GET" && pathname === "/api/local-data/export") {
+    const includePapers = url.searchParams.get("includePapers") !== "0";
+    const includeProfile = url.searchParams.get("includeProfile") === "1";
+    const includeSecrets = url.searchParams.get("includeSecrets") === "1";
+    const includeStats = url.searchParams.get("includeStats") === "1";
+    const includeLogs = url.searchParams.get("includeLogs") === "1";
+    const buffer = await exportLocalDataZip({ includePapers, includeProfile, includeSecrets, includeStats, includeLogs });
+    const date = new Date().toISOString().slice(0, 10);
+    sendBuffer(res, 200, buffer, "application/zip", `paper-hot-local-data${includeSecrets ? "-with-secrets" : ""}-${date}.zip`);
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/api/local-data/import") {
+    const contentType = String(req.headers["content-type"] || "").toLowerCase();
+    const importOptions = {
+      allowSecrets: url.searchParams.get("allowSecrets") === "1"
+    };
+    const payload = contentType.includes("application/zip") || contentType.includes("application/octet-stream")
+      ? await importLocalDataZip(await collectRawRequestBody(req), importOptions)
+      : await importLocalData(await collectRequestBody(req), importOptions);
+    sendJson(res, 200, payload);
     return true;
   }
 
@@ -382,7 +430,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const handledApi = await handleApi(req, res, url.pathname);
+    const handledApi = await handleApi(req, res, url);
     if (handledApi) return;
 
     if (req.method === "GET" || req.method === "HEAD") {

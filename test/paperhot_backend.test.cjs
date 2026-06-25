@@ -52,6 +52,12 @@ const {
   retryFailedFetchLogEnrichment,
   writeIntegrationConfigs,
   writeUserConfig,
+  writeUserProfile,
+  exportLocalData,
+  exportLocalDataZip,
+  importLocalDataZip,
+  importLocalData,
+  parseZipEntries,
   scorePaper,
   rescorePaperAfterEnrichment
 } = require("../paperhot_backend.cjs");
@@ -2952,6 +2958,7 @@ test("classifies papers with multiple research tags", () => {
 test("keeps user configuration separate from fetched paper data", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-user-config-"));
   const configFile = path.join(tempDir, "config.json");
+  const profileFile = path.join(tempDir, "profile.json");
   const nextConfig = await writeUserConfig({
     keywords: {
       primary: [{ text: "structured illumination microscopy", enabled: true }],
@@ -2963,38 +2970,510 @@ test("keeps user configuration separate from fetched paper data", async () => {
     ],
     papers: [{ title: "should not be stored in user config" }]
   }, configFile);
-  const state = await readUserState({ configFile });
+  const state = await readUserState({ configFile, profileFile });
 
   assert.deepEqual(nextConfig.keywords.primary, [{ text: "structured illumination microscopy", enabled: true }]);
-  assert.equal(state.profile.researchArea, "计算显微与成像重建");
+  assert.equal(state.profile.researchArea, "填写你的研究方向");
   assert.equal(state.config.sources[0].title, "arXiv");
   assert.equal(state.config.papers, undefined);
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
-test("uses SIM-focused keyword defaults when user config is missing", async () => {
+test("exports local research data without API secrets", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-"));
+  const userDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-user-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+      mode: "archive",
+      count: 1,
+      papers: [{ id: "paper-1", title: "Structured illumination microscopy", doi: "10.1000/export" }]
+    }, null, 2)}\n`, "utf8");
+    await fs.writeFile(path.join(tempDir, "favorites.json"), `${JSON.stringify({
+      mode: "favorites",
+      favorites: [{ key: "doi:10.1000/export", keys: ["doi:10.1000/export"], paper: { title: "Structured illumination microscopy" } }]
+    }, null, 2)}\n`, "utf8");
+    await fs.writeFile(path.join(tempDir, "operation-log.jsonl"), `${JSON.stringify({
+      operation: "debug",
+      apiKey: "should-not-export",
+      message: ["Bearer", "shouldNotExportToken123456"].join(" ")
+    })}\n`, "utf8");
+    await writeUserConfig({
+      keywords: { primary: [{ text: "SIM", enabled: true }], secondary: [], inspiration: [] },
+      sources: []
+    }, path.join(userDir, "config.json"));
+    await writeUserProfile({
+      name: "Local Researcher",
+      researchArea: "Private Research Area",
+      background: "Private background"
+    }, path.join(userDir, "profile.json"));
+
+    const exported = await exportLocalData({
+      dataDir: tempDir,
+      userConfigFile: path.join(userDir, "config.json"),
+      userProfileFile: path.join(userDir, "profile.json")
+    });
+    const serialized = JSON.stringify(exported);
+
+    assert.equal(exported.ok, true);
+    assert.equal(exported.data.papers.archive.papers[0].doi, "10.1000/export");
+    assert.equal(exported.data.user.config.keywords.primary[0].text, "SIM");
+    assert.equal(exported.data.user.profile, undefined);
+    assert.equal(exported.data.integrations, undefined);
+    assert.equal(serialized.includes("apiKey"), false);
+    assert.equal(serialized.includes("secret"), false);
+    assert.equal(serialized.includes("should-not-export"), false);
+    assert.equal(serialized.includes("shouldNotExportToken123456"), false);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(userDir, { recursive: true, force: true });
+  }
+});
+
+test("local data export declares a backup format version", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-format-"));
+  const userDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-format-user-"));
+  try {
+    await writeUserConfig({
+      keywords: { primary: [{ text: "SIM", enabled: true }], secondary: [], inspiration: [] },
+      sources: []
+    }, path.join(userDir, "config.json"));
+
+    const exported = await exportLocalData({
+      dataDir: tempDir,
+      userConfigFile: path.join(userDir, "config.json")
+    });
+
+    assert.equal(exported.format, "paperhot-local-data");
+    assert.equal(exported.version, 1);
+    assert.equal(exported.minimumImporterVersion, 1);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(userDir, { recursive: true, force: true });
+  }
+});
+
+test("local data import rejects unsupported backup versions before writing files", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-unsupported-version-"));
+  const userDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-unsupported-version-user-"));
+  try {
+    await assert.rejects(
+      importLocalData({
+        format: "paperhot-local-data",
+        version: 999,
+        data: {
+          user: {
+            config: {
+              keywords: { primary: [{ text: "SHOULD-NOT-WRITE", enabled: true }], secondary: [], inspiration: [] },
+              sources: []
+            }
+          }
+        }
+      }, {
+        dataDir: tempDir,
+        userConfigFile: path.join(userDir, "config.json")
+      }),
+      /不支持的本地数据备份版本/
+    );
+
+    await assert.rejects(fs.readFile(path.join(userDir, "config.json"), "utf8"));
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(userDir, { recursive: true, force: true });
+  }
+});
+
+test("can export optional profile and API secrets when explicitly requested", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-secrets-"));
+  const userDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-secrets-user-"));
+  try {
+    await writeUserConfig({
+      keywords: { primary: [{ text: "RIM", enabled: true }], secondary: [], inspiration: [] },
+      sources: []
+    }, path.join(userDir, "config.json"));
+    await writeUserProfile({
+      name: "Local Researcher",
+      researchArea: "Private Area",
+      background: "Private background"
+    }, path.join(userDir, "profile.json"));
+    await fs.writeFile(path.join(userDir, "llm.json"), JSON.stringify({
+      enabled: true,
+      apiKey: "sk-private-llm-key-123456",
+      providers: [{ id: "custom", apiKey: "sk-private-llm-key-123456" }]
+    }), "utf8");
+    await fs.writeFile(path.join(userDir, "google-scholar.json"), JSON.stringify({
+      enabled: true,
+      apiKey: "serp-private-key"
+    }), "utf8");
+    await fs.writeFile(path.join(userDir, "journal-metrics.json"), JSON.stringify({
+      enabled: true,
+      apiKey: "easyscholar-private-key"
+    }), "utf8");
+
+    const exported = await exportLocalData({
+      dataDir: tempDir,
+      userConfigFile: path.join(userDir, "config.json"),
+      userProfileFile: path.join(userDir, "profile.json"),
+      llmConfigFile: path.join(userDir, "llm.json"),
+      googleScholarConfigFile: path.join(userDir, "google-scholar.json"),
+      journalMetricsConfigFile: path.join(userDir, "journal-metrics.json"),
+      includeProfile: true,
+      includeSecrets: true
+    });
+
+    assert.equal(exported.data.user.profile.background, "Private background");
+    assert.equal(exported.data.integrations.llm.apiKey, "sk-private-llm-key-123456");
+    assert.equal(exported.data.integrations.llm.providers[0].apiKey, "sk-private-llm-key-123456");
+    assert.equal(exported.data.integrations.googleScholar.apiKey, "serp-private-key");
+    assert.equal(exported.data.integrations.journalMetrics.apiKey, "easyscholar-private-key");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(userDir, { recursive: true, force: true });
+  }
+});
+
+test("exports local research data as zip without API secrets by default", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-zip-"));
+  const userDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-zip-user-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+      mode: "archive",
+      count: 1,
+      papers: [{ id: "paper-zip-1", title: "Structured illumination microscopy", doi: "10.1000/exportzip" }]
+    }, null, 2)}\n`, "utf8");
+    await fs.writeFile(path.join(tempDir, "operation-log.jsonl"), `${JSON.stringify({
+      operation: "debug",
+      apiKey: "should-not-export",
+      message: ["Bearer", "shouldNotExportToken123456"].join(" ")
+    })}\n`, "utf8");
+    await writeUserConfig({
+      keywords: { primary: [{ text: "SIM", enabled: true }], secondary: [], inspiration: [] },
+      sources: []
+    }, path.join(userDir, "config.json"));
+    await writeUserProfile({
+      name: "Local Researcher",
+      researchArea: "Private Research Area",
+      background: "Private background"
+    }, path.join(userDir, "profile.json"));
+
+    const zip = await exportLocalDataZip({
+      dataDir: tempDir,
+      userConfigFile: path.join(userDir, "config.json"),
+      userProfileFile: path.join(userDir, "profile.json")
+    });
+    const entries = parseZipEntries(zip);
+    const serialized = Buffer.concat(Object.values(entries)).toString("utf8");
+
+    assert.ok(Buffer.isBuffer(zip));
+    assert.deepEqual(Object.keys(entries).sort(), [
+      "data/papers/archive.json",
+      "data/papers/favorites.json",
+      "data/papers/paper-notes.json",
+      "data/user/config.json",
+      "paperhot-local-data.json"
+    ].sort());
+    assert.equal(JSON.parse(entries["data/user/config.json"].toString("utf8")).keywords.primary[0].text, "SIM");
+    assert.equal(JSON.parse(entries["data/papers/archive.json"].toString("utf8")).papers[0].doi, "10.1000/exportzip");
+    assert.equal(entries["data/user/profile.json"], undefined);
+    assert.equal(entries["config/llm.json"], undefined);
+    assert.equal(entries["data/papers/fetch-log.json"], undefined);
+    assert.equal(entries["data/papers/operation-log.jsonl"], undefined);
+    assert.equal(entries["data/papers/journal-metrics-cache.json"], undefined);
+    assert.equal(serialized.includes("apiKey"), false);
+    assert.equal(serialized.includes("secret"), false);
+    assert.equal(serialized.includes("should-not-export"), false);
+    assert.equal(serialized.includes("shouldNotExportToken123456"), false);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(userDir, { recursive: true, force: true });
+  }
+});
+
+test("can export optional stats and logs in zip when selected", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-zip-stats-"));
+  const userDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-zip-stats-user-"));
+  try {
+    await writeUserConfig({
+      keywords: { primary: [{ text: "SIM", enabled: true }], secondary: [], inspiration: [] },
+      sources: []
+    }, path.join(userDir, "config.json"));
+    await fs.writeFile(path.join(tempDir, "2026-06-25.json"), `${JSON.stringify({
+      date: "2026-06-25",
+      papers: [{ id: "cache-paper", tokenUsage: { total: 12, prompt: 7, completion: 5, model: "test-model" } }]
+    }, null, 2)}\n`, "utf8");
+    await fs.writeFile(path.join(tempDir, "fetch-log.json"), `${JSON.stringify({
+      logs: [{ id: "fetch-log-1", mode: "recent" }]
+    }, null, 2)}\n`, "utf8");
+    await fs.writeFile(path.join(tempDir, "operation-log.jsonl"), `${JSON.stringify({ operation: "manual", action: "modify" })}\n`, "utf8");
+    await fs.writeFile(path.join(tempDir, "journal-metrics-cache.json"), `${JSON.stringify({
+      updatedAt: "2026-06-25T00:00:00.000Z",
+      journals: {
+        "nature methods": {
+          journal: "Nature Methods",
+          metrics: { impactFactor: "32", status: "已查询" }
+        }
+      }
+    }, null, 2)}\n`, "utf8");
+    await fs.writeFile(path.join(tempDir, "google-rolling-cursors.json"), `${JSON.stringify({
+      cursors: { "SIM::googlescholar": { nextStart: 200 } }
+    }, null, 2)}\n`, "utf8");
+
+    const zip = await exportLocalDataZip({
+      dataDir: tempDir,
+      userConfigFile: path.join(userDir, "config.json"),
+      includeStats: true,
+      includeLogs: true
+    });
+    const entries = parseZipEntries(zip);
+
+    assert.ok(entries["data/papers/fetch-log.json"]);
+    assert.ok(entries["data/papers/operation-log.jsonl"]);
+    assert.ok(entries["data/papers/journal-metrics-cache.json"]);
+    assert.ok(entries["data/papers/google-rolling-cursors.json"]);
+    assert.ok(entries["data/papers/2026-06-25.json"]);
+    assert.equal(JSON.parse(entries["data/papers/google-rolling-cursors.json"].toString("utf8")).cursors["SIM::googlescholar"].nextStart, 200);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(userDir, { recursive: true, force: true });
+  }
+});
+
+test("can export optional profile and API secrets in zip when explicitly requested", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-zip-secrets-"));
+  const userDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-zip-secrets-user-"));
+  try {
+    await writeUserConfig({
+      keywords: { primary: [{ text: "RIM", enabled: true }], secondary: [], inspiration: [] },
+      sources: []
+    }, path.join(userDir, "config.json"));
+    await writeUserProfile({
+      name: "Local Researcher",
+      researchArea: "Private Area",
+      background: "Private background"
+    }, path.join(userDir, "profile.json"));
+    await fs.writeFile(path.join(userDir, "llm.json"), JSON.stringify({
+      enabled: true,
+      apiKey: "sk-private-llm-key-123456",
+      providers: [{ id: "custom", apiKey: "sk-private-llm-key-123456" }]
+    }), "utf8");
+    await fs.writeFile(path.join(userDir, "google-scholar.json"), JSON.stringify({
+      enabled: true,
+      apiKey: "serp-private-key"
+    }), "utf8");
+    await fs.writeFile(path.join(userDir, "journal-metrics.json"), JSON.stringify({
+      enabled: true,
+      apiKey: "easyscholar-private-key"
+    }), "utf8");
+
+    const zip = await exportLocalDataZip({
+      dataDir: tempDir,
+      userConfigFile: path.join(userDir, "config.json"),
+      userProfileFile: path.join(userDir, "profile.json"),
+      llmConfigFile: path.join(userDir, "llm.json"),
+      googleScholarConfigFile: path.join(userDir, "google-scholar.json"),
+      journalMetricsConfigFile: path.join(userDir, "journal-metrics.json"),
+      includeProfile: true,
+      includeSecrets: true
+    });
+    const entries = parseZipEntries(zip);
+
+    assert.equal(JSON.parse(entries["data/user/profile.json"].toString("utf8")).background, "Private background");
+    assert.equal(JSON.parse(entries["config/llm.json"].toString("utf8")).apiKey, "sk-private-llm-key-123456");
+    assert.equal(JSON.parse(entries["config/google-scholar.json"].toString("utf8")).apiKey, "serp-private-key");
+    assert.equal(JSON.parse(entries["config/journal-metrics.json"].toString("utf8")).apiKey, "easyscholar-private-key");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(userDir, { recursive: true, force: true });
+  }
+});
+
+test("skips imported API configs by default and reports the skip", async () => {
+  const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-skip-secrets-source-"));
+  const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-skip-secrets-target-"));
+  const sourceUserDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-skip-secrets-source-user-"));
+  const targetUserDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-skip-secrets-target-user-"));
+  try {
+    await writeUserConfig({ keywords: { primary: [], secondary: [], inspiration: [] }, sources: [] }, path.join(sourceUserDir, "config.json"));
+    await fs.writeFile(path.join(sourceUserDir, "llm.json"), JSON.stringify({ enabled: true, apiKey: "imported-llm-secret" }), "utf8");
+    await fs.writeFile(path.join(sourceUserDir, "google-scholar.json"), JSON.stringify({ enabled: true, apiKey: "imported-serp-secret" }), "utf8");
+    await fs.writeFile(path.join(sourceUserDir, "journal-metrics.json"), JSON.stringify({ enabled: true, apiKey: "imported-easy-secret" }), "utf8");
+
+    const zip = await exportLocalDataZip({
+      dataDir: sourceDir,
+      userConfigFile: path.join(sourceUserDir, "config.json"),
+      llmConfigFile: path.join(sourceUserDir, "llm.json"),
+      googleScholarConfigFile: path.join(sourceUserDir, "google-scholar.json"),
+      journalMetricsConfigFile: path.join(sourceUserDir, "journal-metrics.json"),
+      includeSecrets: true
+    });
+    const imported = await importLocalDataZip(zip, {
+      dataDir: targetDir,
+      userConfigFile: path.join(targetUserDir, "config.json"),
+      llmConfigFile: path.join(targetUserDir, "llm.json"),
+      googleScholarConfigFile: path.join(targetUserDir, "google-scholar.json"),
+      journalMetricsConfigFile: path.join(targetUserDir, "journal-metrics.json")
+    });
+
+    assert.deepEqual(imported.skipped, ["integrations"]);
+    assert.equal(imported.imported.includes("integrations"), false);
+    await assert.rejects(fs.readFile(path.join(targetUserDir, "llm.json"), "utf8"));
+    await assert.rejects(fs.readFile(path.join(targetUserDir, "google-scholar.json"), "utf8"));
+    await assert.rejects(fs.readFile(path.join(targetUserDir, "journal-metrics.json"), "utf8"));
+  } finally {
+    await fs.rm(sourceDir, { recursive: true, force: true });
+    await fs.rm(targetDir, { recursive: true, force: true });
+    await fs.rm(sourceUserDir, { recursive: true, force: true });
+    await fs.rm(targetUserDir, { recursive: true, force: true });
+  }
+});
+
+test("imports API configs from zip only when explicitly allowed", async () => {
+  const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-allow-secrets-source-"));
+  const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-allow-secrets-target-"));
+  const sourceUserDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-allow-secrets-source-user-"));
+  const targetUserDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-allow-secrets-target-user-"));
+  try {
+    await writeUserConfig({ keywords: { primary: [], secondary: [], inspiration: [] }, sources: [] }, path.join(sourceUserDir, "config.json"));
+    await fs.writeFile(path.join(sourceUserDir, "llm.json"), JSON.stringify({ enabled: true, apiKey: "imported-llm-secret" }), "utf8");
+    await fs.writeFile(path.join(sourceUserDir, "google-scholar.json"), JSON.stringify({ enabled: true, apiKey: "imported-serp-secret" }), "utf8");
+    await fs.writeFile(path.join(sourceUserDir, "journal-metrics.json"), JSON.stringify({ enabled: true, apiKey: "imported-easy-secret" }), "utf8");
+
+    const zip = await exportLocalDataZip({
+      dataDir: sourceDir,
+      userConfigFile: path.join(sourceUserDir, "config.json"),
+      llmConfigFile: path.join(sourceUserDir, "llm.json"),
+      googleScholarConfigFile: path.join(sourceUserDir, "google-scholar.json"),
+      journalMetricsConfigFile: path.join(sourceUserDir, "journal-metrics.json"),
+      includeSecrets: true
+    });
+    const imported = await importLocalDataZip(zip, {
+      dataDir: targetDir,
+      userConfigFile: path.join(targetUserDir, "config.json"),
+      llmConfigFile: path.join(targetUserDir, "llm.json"),
+      googleScholarConfigFile: path.join(targetUserDir, "google-scholar.json"),
+      journalMetricsConfigFile: path.join(targetUserDir, "journal-metrics.json"),
+      allowSecrets: true
+    });
+
+    assert.equal(imported.imported.includes("integrations"), true);
+    assert.deepEqual(imported.skipped, []);
+    assert.equal(JSON.parse(await fs.readFile(path.join(targetUserDir, "llm.json"), "utf8")).apiKey, "imported-llm-secret");
+    assert.equal(JSON.parse(await fs.readFile(path.join(targetUserDir, "google-scholar.json"), "utf8")).apiKey, "imported-serp-secret");
+    assert.equal(JSON.parse(await fs.readFile(path.join(targetUserDir, "journal-metrics.json"), "utf8")).apiKey, "imported-easy-secret");
+  } finally {
+    await fs.rm(sourceDir, { recursive: true, force: true });
+    await fs.rm(targetDir, { recursive: true, force: true });
+    await fs.rm(sourceUserDir, { recursive: true, force: true });
+    await fs.rm(targetUserDir, { recursive: true, force: true });
+  }
+});
+
+test("imports local research data through a whitelist", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-"));
+  const userDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-user-"));
+  try {
+    const imported = await importLocalData({
+      user: {
+        config: {
+          keywords: { primary: [{ text: "RIM", enabled: true }], secondary: [], inspiration: [] },
+          sources: []
+        },
+        profile: { name: "Local Researcher", researchArea: "SIM", locale: "zh-CN" }
+      },
+      papers: {
+        archive: { mode: "archive", papers: [{ id: "paper-2", title: "Random illumination microscopy", doi: "10.1000/import" }] },
+        favorites: { favorites: [{ key: "doi:10.1000/import", keys: ["doi:10.1000/import"], paper: { title: "Random illumination microscopy" } }] },
+        notes: { notes: [{ key: "doi:10.1000/import", keys: ["doi:10.1000/import"], shortTitle: "2026@RIM", read: true, starred: true }] },
+        operationLog: [{ operation: "manual-import", action: "import" }],
+        fetchLog: { logs: [{ id: "fetch-1", mode: "recent" }] },
+        journalMetricsCache: { journals: { "Nature Methods": { impactFactor: "32" } } }
+      },
+      integrations: { llm: { apiKey: "must-not-import" } }
+    }, {
+      dataDir: tempDir,
+      userConfigFile: path.join(userDir, "config.json"),
+      userProfileFile: path.join(userDir, "profile.json")
+    });
+
+    assert.equal(imported.ok, true);
+    assert.deepEqual(imported.imported.sort(), ["archive", "favorites", "fetchLog", "journalMetricsCache", "notes", "operationLog", "userConfig", "userProfile"].sort());
+    assert.equal((await readArchivePayload({ dataDir: tempDir })).papers[0].doi, "10.1000/import");
+    assert.equal((await readFavoritesPayload({ dataDir: tempDir })).favorites.length, 1);
+    assert.equal((await readPaperNotesPayload({ dataDir: tempDir })).notes[0].shortTitle, "2026@RIM");
+    assert.equal((await readUserState({ configFile: path.join(userDir, "config.json"), profileFile: path.join(userDir, "profile.json") })).config.keywords.primary[0].text, "RIM");
+    await assert.rejects(fs.readFile(path.join(userDir, "llm.json"), "utf8"));
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(userDir, { recursive: true, force: true });
+  }
+});
+
+test("imports local research data from zip through a whitelist", async () => {
+  const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-zip-source-"));
+  const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-zip-target-"));
+  const sourceUserDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-zip-source-user-"));
+  const targetUserDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-import-zip-target-user-"));
+  try {
+    await writeUserConfig({
+      keywords: { primary: [{ text: "RIM", enabled: true }], secondary: [], inspiration: [] },
+      sources: []
+    }, path.join(sourceUserDir, "config.json"));
+    await writeUserProfile({
+      name: "Local Researcher",
+      researchArea: "SIM",
+      locale: "zh-CN"
+    }, path.join(sourceUserDir, "profile.json"));
+    await fs.writeFile(path.join(sourceDir, "archive.json"), `${JSON.stringify({
+      mode: "archive",
+      papers: [{ id: "paper-zip-2", title: "Random illumination microscopy", doi: "10.1000/importzip" }]
+    }, null, 2)}\n`, "utf8");
+    await fs.writeFile(path.join(sourceDir, "favorites.json"), `${JSON.stringify({
+      favorites: [{ key: "doi:10.1000/importzip", keys: ["doi:10.1000/importzip"], paper: { title: "Random illumination microscopy" } }]
+    }, null, 2)}\n`, "utf8");
+    await fs.writeFile(path.join(sourceDir, "paper-notes.json"), `${JSON.stringify({
+      notes: [{ key: "doi:10.1000/importzip", keys: ["doi:10.1000/importzip"], shortTitle: "2026@RIM", read: true, starred: true }]
+    }, null, 2)}\n`, "utf8");
+
+    const zip = await exportLocalDataZip({
+      dataDir: sourceDir,
+      userConfigFile: path.join(sourceUserDir, "config.json"),
+      userProfileFile: path.join(sourceUserDir, "profile.json"),
+      includeProfile: true,
+      includeStats: true,
+      includeLogs: true
+    });
+    const imported = await importLocalDataZip(zip, {
+      dataDir: targetDir,
+      userConfigFile: path.join(targetUserDir, "config.json"),
+      userProfileFile: path.join(targetUserDir, "profile.json")
+    });
+
+    assert.equal(imported.ok, true);
+    assert.deepEqual(imported.imported.sort(), ["archive", "favorites", "fetchLog", "googleRollingCursors", "journalMetricsCache", "notes", "operationLog", "userConfig", "userProfile"].sort());
+    assert.equal((await readArchivePayload({ dataDir: targetDir })).papers[0].doi, "10.1000/importzip");
+    assert.equal((await readPaperNotesPayload({ dataDir: targetDir })).notes[0].shortTitle, "2026@RIM");
+    assert.equal((await readUserState({ configFile: path.join(targetUserDir, "config.json"), profileFile: path.join(targetUserDir, "profile.json") })).config.keywords.primary[0].text, "RIM");
+    await assert.rejects(fs.readFile(path.join(targetUserDir, "llm.json"), "utf8"));
+  } finally {
+    await fs.rm(sourceDir, { recursive: true, force: true });
+    await fs.rm(targetDir, { recursive: true, force: true });
+    await fs.rm(sourceUserDir, { recursive: true, force: true });
+    await fs.rm(targetUserDir, { recursive: true, force: true });
+  }
+});
+
+test("uses empty keyword defaults when user config is missing", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-default-config-"));
   const configFile = path.join(tempDir, "config.json");
+  const profileFile = path.join(tempDir, "profile.json");
 
-  const state = await readUserState({ configFile });
+  const state = await readUserState({ configFile, profileFile });
 
   assert.deepEqual(state.config.keywords, {
-    primary: [
-      { text: "structured illumination microscopy", enabled: true },
-      { text: "SIM", enabled: true }
-    ],
-    secondary: [
-      { text: "SIM", enabled: false },
-      { text: "speckle illumination", enabled: false },
-      { text: "structured illumination", enabled: false }
-    ],
-    inspiration: [
-      { text: "物理先验重建", enabled: false },
-      { text: "diffusion prior", enabled: false },
-      { text: "self-supervised restoration", enabled: false },
-      { text: "deconvolution", enabled: false }
-    ]
+    primary: [],
+    secondary: [],
+    inspiration: []
   });
+  assert.ok(state.config.sources.length > 0);
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 

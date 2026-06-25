@@ -408,6 +408,46 @@
       white-space: nowrap;
     }
     .secret-toggle:hover { border-color: #0ea5b7; color: #0b95a6; }
+    .help-btn {
+      width: 24px;
+      height: 24px;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid #cfe0ea;
+      border-radius: 50%;
+      background: #fff;
+      color: #60738b;
+      font-size: 13px;
+      font-weight: 900;
+      cursor: pointer;
+      vertical-align: middle;
+    }
+    .help-btn:hover { border-color: #0ea5b7; color: #0b95a6; }
+    .field-title-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .help-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(19, 30, 45, .42);
+    }
+    .help-modal {
+      width: min(520px, 100%);
+      padding: 18px;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 20px 60px rgba(15, 23, 42, .24);
+    }
+    .help-modal h3 { margin: 0 0 8px; color: #203049; font-size: 18px; }
+    .help-modal p { margin: 0 0 12px; color: #60738b; line-height: 1.6; }
+    .help-modal ol { margin: 0 0 14px 18px; padding: 0; color: #334155; line-height: 1.7; }
+    .help-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
     .llm-test-result {
       min-height: 22px;
       color: #60738b;
@@ -676,6 +716,19 @@
       border-radius: 13px;
       background: rgba(255,255,255,0.88);
       box-shadow: 0 10px 24px rgba(33,58,82,0.06);
+    }
+    .paper-card.saved-muted {
+      opacity: .68;
+      background: rgba(255,255,255,0.56);
+      transition: opacity .18s ease, background .18s ease;
+    }
+    .paper-card.saved-muted:hover {
+      opacity: .86;
+    }
+    .paper-card.pending-read { animation: favoriteReadFade 3s ease forwards; }
+    @keyframes favoriteReadFade {
+      from { opacity: 1; }
+      to { opacity: .22; }
     }
     .paper-head {
       display: grid;
@@ -1474,6 +1527,8 @@
         </div>
       </section>
 
+      <section class="panel setup-status-panel" id="setup-status-panel"></section>
+
       <section class="layout">
         <div>
           <section class="panel">
@@ -1489,12 +1544,36 @@
             <div class="add-box" id="integration-config-panel">
               <div class="panel-head">
                 <div>
-                  <h2>外部接口配置</h2>
+                  <h2>外部接口配置 <button class="help-btn" type="button" data-api-help="easyscholar" title="如何获取 EasyScholar API">?</button></h2>
                   <div class="panel-note">API Key 只写入本机后端配置；留空表示保留已有密钥</div>
                 </div>
                 <button class="primary-btn" id="save-integrations">保存接口</button>
               </div>
               <div id="integration-config-form"></div>
+            </div>
+          </section>
+
+          <section class="panel" style="margin-top:16px">
+            <div class="panel-head">
+              <div>
+                <h2>本地数据</h2>
+                <div class="panel-note">默认导出不包含 API Key 和个人研究背景；需要迁移到自己设备时可手动勾选。</div>
+              </div>
+            </div>
+            <div class="config-section" style="margin-top:12px">
+              <label><span><input type="checkbox" data-export-include-papers checked> 包含本地论文库、收藏、待读、已读和标星</span></label>
+              <label><span><input type="checkbox" data-export-include-stats> 包含统计缓存和抓取进度缓存</span></label>
+              <label><span><input type="checkbox" data-export-include-logs> 包含抓取日志和操作日志</span></label>
+              <label><span><input type="checkbox" data-export-include-profile> 包含用户资料和研究背景</span></label>
+              <label><span><input type="checkbox" data-export-include-secrets> 包含 API Key 和外部接口配置</span></label>
+              <div class="small-text">包含 API Key 的导出文件只能保存在自己的设备中，不要上传 GitHub 或发给他人。</div>
+              <label><span><input type="checkbox" data-import-allow-secrets> 允许导入并覆盖本机 API Key</span></label>
+              <div class="small-text">默认导入会跳过 ZIP/JSON 里的 API 配置；只有勾选后才会覆盖本机接口配置。</div>
+            </div>
+            <div class="source-form-actions">
+              <button class="ghost-btn" type="button" data-export-local>导出本地数据</button>
+              <label class="ghost-btn" for="local-data-import-input">导入本地数据</label>
+              <input id="local-data-import-input" type="file" accept="application/zip,.zip,application/json,.json" data-import-local hidden>
             </div>
           </section>
         </div>
@@ -1635,6 +1714,7 @@
     let favoritePapersCache = [];
     let favoriteStatus = "正在载入个人收藏...";
     let favoriteActiveTab = "reading";
+    const pendingFavoriteReadTimers = new Map();
     const paperNoteByKey = new Map();
     let paperNotesStatus = "正在载入论文标注...";
 
@@ -1918,8 +1998,9 @@
       return paperNoteFor(paper).starred === true;
     }
 
-    function paperLlmRefreshButton(paper) {
-      if (location.hash.replace("#", "") !== "all") return "";
+    function paperLlmRefreshButton(paper, scope = "") {
+      const page = location.hash.replace("#", "");
+      if (page !== "all" && scope !== "favorites") return "";
       const key = paperStableKey(paper);
       if (!key) return "";
       const loading = archiveLlmRefreshingKeys.has(key);
@@ -1939,9 +2020,13 @@
 
     function favoritePaperWorkflowButton(paper, scope = "") {
       if (scope !== "favorites") return "";
-      const key = escapeHTML(paperStableKey(paper) || paper.id || "");
+      const rawKey = paperStableKey(paper) || paper.id || "";
+      const key = escapeHTML(rawKey);
       if (!key) return "";
       if (favoriteActiveTab === "reading") {
+        if (pendingFavoriteReadTimers.has(rawKey)) {
+          return `<button class="ghost-btn" type="button" data-favorite-undo-read="${key}">撤销</button>`;
+        }
         return `<button class="ghost-btn" type="button" data-favorite-mark-read="${key}">标记已读</button>`;
       }
       if (favoriteActiveTab === "read") {
@@ -1957,6 +2042,9 @@
       const isSaved = isFavoritePaper(paper);
       const isStarred = isStarredPaper(paper);
       const paperId = escapeHTML(paper.id);
+      const stableKey = paperStableKey(paper) || paper.id || "";
+      const isPendingFavoriteRead = scope === "favorites" && favoriteActiveTab === "reading" && pendingFavoriteReadTimers.has(stableKey);
+      const isSavedMuted = isSaved && scope !== "favorites";
       const labelList = paperCategoryLabels(paper);
       const tokenUsage = paperTokenUsage(paper);
       const journalMetrics = paperJournalMetrics(paper);
@@ -1966,7 +2054,7 @@
       const abstractBlock = paperAbstractBlock(paper);
       const reasonBlock = paperReasonBlock(paper);
       return `
-        <article class="paper-card">
+        <article class="paper-card ${isPendingFavoriteRead ? "pending-read" : ""} ${isSavedMuted ? "saved-muted" : ""}">
           <div class="paper-head">
             <div>
               <div class="paper-source-row">
@@ -1976,8 +2064,8 @@
               </div>
             </div>
             <div class="head-actions">
-              ${paperLlmRefreshButton(paper)}
-              ${favoritePaperWorkflowButton(paper, scope)}
+              ${scope === "favorites" ? favoritePaperWorkflowButton(paper, scope) : paperLlmRefreshButton(paper, scope)}
+              ${scope === "favorites" ? paperLlmRefreshButton(paper, scope) : favoritePaperWorkflowButton(paper, scope)}
               <button class="star-btn ${isStarred ? "starred" : ""}" data-star-toggle="${paperId}">${isStarred ? "已标星" : "☆ 标星"}</button>
               <button class="favorite ${isSaved ? "saved" : ""}" data-favorite="${paperId}">${isSaved ? "已收藏" : "♡ 加入个人收藏"}</button>
             </div>
@@ -2051,13 +2139,39 @@
         || todayPapers.find(item => paperStableKey(item) === key || item.id === key);
     }
 
+    function scheduleFavoriteMarkRead(paper) {
+      const key = paperStableKey(paper) || paper.id || "";
+      if (!key || pendingFavoriteReadTimers.has(key)) return;
+      const timer = setTimeout(async () => {
+        pendingFavoriteReadTimers.delete(key);
+        await updatePaperNote(paper, { read: true });
+      }, 3000);
+      pendingFavoriteReadTimers.set(key, timer);
+      showToast("3 秒内可撤销标记已读");
+      renderFavorites();
+    }
+
+    function undoFavoriteMarkRead(key) {
+      const timer = pendingFavoriteReadTimers.get(key);
+      if (!timer) return;
+      clearTimeout(timer);
+      pendingFavoriteReadTimers.delete(key);
+      showToast("已撤销标记已读");
+      renderFavorites();
+    }
+
     function bindFavoriteWorkflowActions() {
       document.querySelectorAll("[data-favorite-mark-read]").forEach(button => {
-        button.addEventListener("click", async () => {
+        button.addEventListener("click", () => {
           const key = button.getAttribute("data-favorite-mark-read");
           const paper = findPaperForFavoriteWorkflow(key);
           if (!paper) return;
-          await updatePaperNote(paper, { read: true });
+          scheduleFavoriteMarkRead(paper);
+        });
+      });
+      document.querySelectorAll("[data-favorite-undo-read]").forEach(button => {
+        button.addEventListener("click", () => {
+          undoFavoriteMarkRead(button.getAttribute("data-favorite-undo-read"));
         });
       });
       document.querySelectorAll("[data-favorite-mark-unread]").forEach(button => {
@@ -3340,7 +3454,9 @@
 
     async function refreshOnePaperLlm(key) {
       const paper = recentPapers.find(item => paperStableKey(item) === key)
-        || todayPapers.find(item => paperStableKey(item) === key);
+        || todayPapers.find(item => paperStableKey(item) === key)
+        || favoritePapersCache.find(item => paperStableKey(item) === key)
+        || papers.find(item => paperStableKey(item) === key);
       if (!paper) return;
       if (location.protocol === "file:") {
         showToast("直接打开 HTML 时无法访问后端");
@@ -4109,37 +4225,25 @@
         key: "primary",
         title: "主要领域",
         note: "当前课题的核心入口，用于决定今日论文的主检索范围。",
-        placeholder: "新增主要领域，例如 computational microscopy"
+        placeholder: "新增主要领域，例如 your core topic"
       },
       {
         key: "secondary",
         title: "次要领域",
         note: "与主方向相邻的方法、模态或应用场景，用于扩展候选论文池。",
-        placeholder: "新增次要领域，例如 structured illumination"
+        placeholder: "新增次要领域，例如 related method"
       },
       {
         key: "inspiration",
         title: "启发性领域",
         note: "不一定直接相关，但可能提供算法、硬件或生物实验启发。",
-        placeholder: "新增启发性领域，例如 diffusion prior"
+        placeholder: "新增启发性领域，例如 inspiration topic"
       }
     ];
     const defaultKeywordState = {
-      primary: [
-        { text: "structured illumination microscopy", enabled: true },
-        { text: "SIM", enabled: true }
-      ],
-      secondary: [
-        { text: "SIM", enabled: false },
-        { text: "speckle illumination", enabled: false },
-        { text: "structured illumination", enabled: false }
-      ],
-      inspiration: [
-        { text: "物理先验重建", enabled: false },
-        { text: "diffusion prior", enabled: false },
-        { text: "self-supervised restoration", enabled: false },
-        { text: "deconvolution", enabled: false }
-      ]
+      primary: [],
+      secondary: [],
+      inspiration: []
     };
     const legacyKeywordGroupMap = { main: "primary", focus: "secondary", methods: "inspiration" };
     const keywordPalettes = {
@@ -4268,9 +4372,39 @@
       row.innerHTML = `<span class="focus-label">与今日论文同步</span>${chips}`;
     }
 
+    function renderSetupStatus() {
+      const panel = document.getElementById("setup-status-panel");
+      if (!panel) return;
+      const enabledSources = sourceState.filter(source => source.enabled);
+      const primaryKeywords = (keywordState.primary || []).filter(item => item.enabled !== false).length;
+      const hasEnabledLlm = integrationState.llm.enabled !== false && Boolean(integrationState.llm.activeProviderId);
+      const hasGoogleKey = integrationState.googleScholar.hasApiKey || Boolean(integrationState.googleScholar.apiKey);
+      const hasJournalKey = integrationState.journalMetrics.hasApiKey || Boolean(integrationState.journalMetrics.apiKey);
+      const googleEnabled = enabledSources.some(source => /google/i.test(source.title));
+      const items = [
+        { label: "关键词", ok: primaryKeywords > 0, detail: `${primaryKeywords} 个主要关键词` },
+        { label: "信源", ok: enabledSources.length > 0, detail: `${enabledSources.length} 个信源已启用` },
+        { label: "LLM", ok: hasEnabledLlm, detail: hasEnabledLlm ? "已选择模型" : "未启用模型" },
+        { label: "Google / SerpApi", ok: hasGoogleKey || !googleEnabled, detail: hasGoogleKey ? "已保存密钥" : "启用 Google 信源时需要填写" },
+        { label: "EasyScholar", ok: hasJournalKey || !integrationState.journalMetrics.enabled, detail: hasJournalKey ? "已保存密钥" : "启用期刊指标时需要填写" }
+      ];
+      panel.innerHTML = `
+        <div class="panel-head">
+          <div>
+            <h2>首次配置状态</h2>
+            <div class="panel-note">下载项目后，先填写关键词、启用信源，并在需要时填写 LLM、SerpApi 和 EasyScholar。</div>
+          </div>
+        </div>
+        <div class="tags">
+          ${items.map(item => `<span class="tag ${item.ok ? "selected" : ""}">${item.ok ? "✓" : "!"} ${escapeHTML(item.label)} · ${escapeHTML(item.detail)}</span>`).join("")}
+        </div>
+      `;
+    }
+
     function renderKeywordConfig() {
       const panel = document.getElementById("keyword-config-panel");
       renderSyncedFocusRow();
+      renderSetupStatus();
       if (!panel) return;
 
       panel.innerHTML = keywordGroups.map(group => {
@@ -4553,7 +4687,7 @@
           { id: "ollama-cloud", name: "Ollama Cloud", desc: "ollama.com", provider: "ollama-cloud", enabled: false, apiMode: "openai", endpoint: "https://ollama.com/v1", apiKey: "", model: "", modelPresets: ["gpt-oss"], contextWindow: 128000, reasoning: "auto" },
           { id: "custom", name: "Custom", desc: "Any OpenAI- or Anthropic-compatible endpoint", provider: "custom", enabled: false, apiMode: "openai", endpoint: "http://127.0.0.1:8080/v1", apiKey: "", model: "gpt-5.5", modelPresets: ["gpt-5.5"], contextWindow: 262000, reasoning: "auto" }
         ],
-        userBackground: "用户背景：3D-SIM、多层聚焦结构光照明 MPSIM、RIM、PRIM、2D-SIM；当前正在做 PRIM 伪随机的结构光照明显微镜算法。"
+        userBackground: "请在页面中填写你的研究背景、关注方向和评分偏好。"
       },
       googleScholar: {
         provider: "google-scholar-api",
@@ -4699,7 +4833,7 @@
             <label>Endpoint
               <input data-source-integration-field="endpoint" value="${escapeHTML(google.endpoint)}" placeholder="https://serpapi.com/search.json">
             </label>
-            <label>API Key
+            <label><span class="field-title-row">API Key <button class="help-btn" type="button" data-api-help="serpapi" title="如何获取 SerpApi API Key">?</button></span>
               ${sourceSecretField("googleScholar", google)}
             </label>
             <div class="input-row">
@@ -4770,6 +4904,73 @@
 
     function integrationSecretText(item) {
       return item.hasApiKey ? "已保存密钥；留空不覆盖" : "尚未保存密钥";
+    }
+
+    const apiHelpContent = {
+      llm: {
+        title: "如何获取 LLM API Key",
+        url: "https://help.aliyun.com/zh/model-studio/get-api-key",
+        steps: [
+          "选择一个 LLM 服务商，例如阿里百炼、OpenAI、DeepSeek、Moonshot 或本地 Ollama。",
+          "进入服务商控制台，创建 API Key。",
+          "回到本页面，选择对应模型提供商，填写 Endpoint、API Key 和模型名，然后点击测试。"
+        ],
+        note: "不同服务商的 Endpoint 不完全一样；如果使用 OpenAI 兼容接口，请选择 OpenAI 兼容模式。"
+      },
+      serpapi: {
+        title: "如何获取 SerpApi API Key",
+        url: "https://serpapi.com/users/sign_up",
+        steps: [
+          "打开 SerpApi 注册页面并创建账号。",
+          "进入 Dashboard，复制 API Key。",
+          "在 Google Scholar 或 Google 搜索信源里填写 API Key，Endpoint 通常保持 https://serpapi.com/search.json。"
+        ],
+        note: "Google Scholar 抓取建议控制页数，避免过快消耗额度或触发限制。"
+      },
+      easyscholar: {
+        title: "如何获取 EasyScholar API Key",
+        url: "https://www.easyscholar.cc/console/user/open",
+        steps: [
+          "打开 EasyScholar 开放接口控制台。",
+          "登录后开通或查看 Open API Key。",
+          "在期刊指标配置里填写 API Key，用于查询影响因子和分区。"
+        ],
+        note: "EasyScholar 用于期刊指标增强；没有配置时不影响基础论文抓取。"
+      }
+    };
+
+    function closeApiHelp() {
+      document.querySelector(".help-modal-backdrop")?.remove();
+      document.removeEventListener("keydown", handleApiHelpKeydown);
+    }
+
+    function handleApiHelpKeydown(event) {
+      if (event.key === "Escape") closeApiHelp();
+    }
+
+    function openApiHelp(kind) {
+      const help = apiHelpContent[kind];
+      if (!help) return;
+      closeApiHelp();
+      const backdrop = document.createElement("div");
+      backdrop.className = "help-modal-backdrop";
+      backdrop.innerHTML = `
+        <div class="help-modal" role="dialog" aria-modal="true" aria-label="${escapeHTML(help.title)}">
+          <h3>${escapeHTML(help.title)}</h3>
+          <ol>${help.steps.map(step => `<li>${escapeHTML(step)}</li>`).join("")}</ol>
+          <p>${escapeHTML(help.note)}</p>
+          <div class="help-modal-actions">
+            <button class="ghost-btn" type="button" data-close-api-help>关闭</button>
+            <a class="primary-btn" href="${escapeHTML(help.url)}" target="_blank" rel="noopener noreferrer">打开网站</a>
+          </div>
+        </div>
+      `;
+      backdrop.addEventListener("click", event => {
+        if (event.target === backdrop || event.target.closest("[data-close-api-help]")) closeApiHelp();
+      });
+      document.body.appendChild(backdrop);
+      document.addEventListener("keydown", handleApiHelpKeydown);
+      backdrop.querySelector("[data-close-api-help]")?.focus();
     }
 
     function llmProviderBody(provider) {
@@ -4856,7 +5057,7 @@
       form.innerHTML = `
         <div class="config-section" data-integration-section="llm">
           <div class="keyword-section-head">
-            <h3>LLM 模型</h3>
+            <h3>LLM 模型 <button class="help-btn" type="button" data-api-help="llm" title="如何获取 LLM API Key">?</button></h3>
             <div class="keyword-section-note">每个厂商一条独立配置；右侧开关负责启用，左侧箭头只展开/收缩。填写完成后点击该模型的确定按钮保存。</div>
           </div>
           ${renderLlmProviderList(llm)}
@@ -5035,12 +5236,102 @@
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         applyIntegrationState(await response.json());
         renderIntegrationConfig();
+        renderSetupStatus();
         bindIntegrationAutosave();
         showToast("配置已保存");
       } catch (error) {
         console.warn("Integration config save failed", error);
         showToast("配置保存失败");
       }
+    }
+
+    async function exportLocalData() {
+      if (location.protocol === "file:") {
+        showToast("请通过本地服务页面导出数据");
+        return;
+      }
+      try {
+        const includePapers = document.querySelector("[data-export-include-papers]")?.checked !== false;
+        const includeStats = document.querySelector("[data-export-include-stats]")?.checked === true;
+        const includeLogs = document.querySelector("[data-export-include-logs]")?.checked === true;
+        const includeProfile = document.querySelector("[data-export-include-profile]")?.checked === true;
+        const includeSecrets = document.querySelector("[data-export-include-secrets]")?.checked === true;
+        const params = new URLSearchParams();
+        if (!includePapers) params.set("includePapers", "0");
+        if (includeStats) params.set("includeStats", "1");
+        if (includeLogs) params.set("includeLogs", "1");
+        if (includeProfile) params.set("includeProfile", "1");
+        if (includeSecrets) params.set("includeSecrets", "1");
+        const query = params.toString();
+        const response = await fetch(`/api/local-data/export${query ? `?${query}` : ""}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        const disposition = response.headers.get("Content-Disposition") || "";
+        const matchedFileName = disposition.match(/filename="?([^"]+)"?/i)?.[1];
+        const date = new Date().toISOString().slice(0, 10);
+        link.href = url;
+        link.download = matchedFileName || `paper-hot-local-data${includeSecrets ? "-with-secrets" : ""}-${date}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        showToast(includeSecrets ? "本地数据已导出，包含 API Key，请勿上传或分享" : "本地数据已导出，不包含 API Key");
+      } catch (error) {
+        console.warn("Local data export failed", error);
+        showToast("本地数据导出失败");
+      }
+    }
+
+    async function importLocalDataFromFile(file) {
+      if (!file) return;
+      if (location.protocol === "file:") {
+        showToast("请通过本地服务页面导入数据");
+        return;
+      }
+      try {
+        const isZip = /\.zip$/i.test(file.name) || file.type === "application/zip";
+        const allowSecrets = document.querySelector("[data-import-allow-secrets]")?.checked === true;
+        const body = isZip ? await file.arrayBuffer() : JSON.stringify(JSON.parse(await file.text()));
+        const headers = isZip
+          ? { "Content-Type": "application/zip" }
+          : { "Content-Type": "application/json" };
+        const response = await fetch(`/api/local-data/import${allowSecrets ? "?allowSecrets=1" : ""}`, {
+          method: "POST",
+          headers,
+          body
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result.ok === false) throw new Error(result.error || `HTTP ${response.status}`);
+        await Promise.all([loadUserState(), loadIntegrationConfig(), loadFavoritesData(), loadPaperNotesData()]);
+        renderConfig();
+        const skippedIntegrations = Array.isArray(result.skipped) && result.skipped.includes("integrations");
+        const suffix = skippedIntegrations ? "，API 配置已跳过" : "";
+        showToast(`本地数据已导入：${(result.imported || []).length} 项${suffix}`);
+      } catch (error) {
+        console.warn("Local data import failed", error);
+        showToast("本地数据导入失败，请检查 ZIP/JSON 文件");
+      }
+    }
+
+    function bindLocalDataActions() {
+      const exportButton = document.querySelector("[data-export-local]");
+      const importInput = document.querySelector("[data-import-local]");
+      if (exportButton) exportButton.addEventListener("click", exportLocalData);
+      if (importInput) importInput.addEventListener("change", event => {
+        importLocalDataFromFile(event.target.files?.[0]);
+        event.target.value = "";
+      });
+    }
+
+    function handleApiHelpClick(event) {
+      const help = event.target.closest("[data-api-help]");
+      if (!help) return false;
+      event.preventDefault();
+      event.stopPropagation();
+      openApiHelp(help.getAttribute("data-api-help"));
+      return true;
     }
 
     function scheduleIntegrationSave() {
@@ -5096,6 +5387,7 @@
     }
 
     function handleIntegrationClick(event) {
+      if (handleApiHelpClick(event)) return;
       const secretToggle = event.target.closest("[data-secret-toggle]");
       if (secretToggle) {
         event.preventDefault();
@@ -5173,6 +5465,7 @@
     }
 
     function handleSourceClick(event) {
+      if (handleApiHelpClick(event)) return;
       const card = event.target.closest("[data-source-index]");
       if (!card) return;
       const index = Number(card.getAttribute("data-source-index"));
@@ -5220,6 +5513,7 @@
       editingSourceIndex = null;
       renderSourceConfig();
       renderIntegrationConfig();
+      renderSetupStatus();
       bindIntegrationAutosave();
       renderKeywordConfig();
       document.querySelectorAll("[data-token-group]").forEach(group => {
@@ -5258,6 +5552,10 @@
       });
       const saveIntegrations = document.getElementById("save-integrations");
       if (saveIntegrations) saveIntegrations.addEventListener("click", saveIntegrationConfig);
+      bindLocalDataActions();
+      mainContent.querySelectorAll("[data-api-help]").forEach(button => {
+        button.addEventListener("click", handleApiHelpClick);
+      });
     }
 
     function renderPage(page) {

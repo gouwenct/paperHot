@@ -157,6 +157,13 @@ test("favorites page uses backend json persistence", async () => {
   assert.match(html, /favoriteKeys/);
 });
 
+test("saved papers are visually muted outside the favorites page", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /\.paper-card\.saved-muted/);
+  assert.match(html, /const isSavedMuted = isSaved && scope !== "favorites"/);
+  assert.match(html, /isSavedMuted \? "saved-muted" : ""/);
+});
+
 test("favorites page uses tabbed reading views and defaults to unread", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /let favoriteActiveTab = "reading"/);
@@ -172,16 +179,28 @@ test("favorites page uses tabbed reading views and defaults to unread", async ()
 test("favorites page exposes mark-read and remove actions for reading workflow", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /favoritePaperWorkflowButton/);
+  assert.match(html, /paperLlmRefreshButton\(paper, scope\)/);
+  assert.match(html, /scope === "favorites" \? favoritePaperWorkflowButton\(paper, scope\) : paperLlmRefreshButton\(paper, scope\)/);
+  assert.match(html, /scope === "favorites" \? paperLlmRefreshButton\(paper, scope\) : favoritePaperWorkflowButton\(paper, scope\)/);
   assert.match(html, /data-favorite-mark-read/);
+  assert.match(html, /data-favorite-undo-read/);
   assert.match(html, /data-favorite-mark-unread/);
   assert.match(html, /data-favorite-remove-read/);
   assert.match(html, /标记已读/);
+  assert.match(html, /撤销/);
   assert.match(html, /未阅读/);
   assert.match(html, /删除/);
   assert.match(html, /bindFavoriteWorkflowActions/);
+  assert.match(html, /pendingFavoriteReadTimers/);
+  assert.match(html, /scheduleFavoriteMarkRead/);
+  assert.match(html, /undoFavoriteMarkRead/);
+  assert.match(html, /setTimeout\(async \(\) =>/);
+  assert.match(html, /}, 3000\)/);
+  assert.match(html, /favoriteReadFade 3s ease forwards/);
   assert.match(html, /updatePaperNote\(paper, \{ read: true \}\)/);
   assert.match(html, /updatePaperNote\(paper, \{ read: false \}\)/);
   assert.match(html, /updateFavorite\(paper, false\)/);
+  assert.match(html, /favoritePapersCache\.find\(item => paperStableKey\(item\) === key\)/);
 });
 
 test("paper notes use backend json persistence for short title, read, and starred state", async () => {
@@ -199,6 +218,59 @@ test("user background editor keeps multiline formatting readable", async () => {
   assert.match(html, /data-integration-field="userBackground"/);
   assert.match(html, /white-space:\s*pre-wrap/);
   assert.match(html, /line-height:\s*1\.6/);
+});
+
+test("config page exposes first-run status and local data import export", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /setup-status-panel/);
+  assert.match(html, /renderSetupStatus/);
+  assert.match(html, /data-export-local/);
+  assert.match(html, /data-import-local/);
+  assert.match(html, /data-import-allow-secrets/);
+  assert.match(html, /data-export-include-profile/);
+  assert.match(html, /data-export-include-secrets/);
+  assert.match(html, /data-export-include-papers/);
+  assert.match(html, /data-export-include-stats/);
+  assert.match(html, /data-export-include-logs/);
+  assert.match(html, /\/api\/local-data\/export/);
+  assert.match(html, /includeProfile/);
+  assert.match(html, /includeSecrets/);
+  assert.match(html, /includePapers/);
+  assert.match(html, /includeStats/);
+  assert.match(html, /includeLogs/);
+  assert.match(html, /allowSecrets/);
+  assert.match(html, /\/api\/local-data\/import/);
+  assert.match(html, /不包含 API Key/);
+});
+
+test("local data export and import use zip files", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /accept="[^"]*application\/zip[^"]*\.zip/);
+  assert.match(html, /response\.blob\(\)/);
+  assert.match(html, /paper-hot-local-data[\s\S]*\.zip/);
+  assert.match(html, /Content-Type": "application\/zip"/);
+  assert.match(html, /file\.arrayBuffer\(\)/);
+  assert.match(html, /ZIP\/JSON 文件/);
+  assert.match(html, /API 配置已跳过/);
+  assert.match(html, /允许导入并覆盖本机 API Key/);
+});
+
+test("keyword defaults are empty for open-source first run", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /const defaultKeywordState = \{\s*primary: \[\],\s*secondary: \[\],\s*inspiration: \[\]\s*\}/);
+  assert.doesNotMatch(html, /defaultKeywordState[\s\S]*structured illumination microscopy/);
+  assert.doesNotMatch(html, /defaultKeywordState[\s\S]*diffusion prior/);
+});
+
+test("API config fields expose help links for obtaining keys", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /apiHelpContent/);
+  assert.match(html, /data-api-help="llm"/);
+  assert.match(html, /data-api-help="serpapi"/);
+  assert.match(html, /data-api-help="easyscholar"/);
+  assert.match(html, /https:\/\/serpapi\.com\/users\/sign_up/);
+  assert.match(html, /https:\/\/www\.easyscholar\.cc\/console\/user\/open/);
+  assert.match(html, /openApiHelp/);
 });
 
 test("today fetch panel exposes manual Google start item control", async () => {

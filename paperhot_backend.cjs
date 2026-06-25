@@ -1,6 +1,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const zlib = require("node:zlib");
 
 const DATA_DIR = path.join(__dirname, "data", "papers");
 const PAPER_ARCHIVE_NAME = "archive.json";
@@ -10,6 +11,8 @@ const FETCH_LOG_NAME = "fetch-log.json";
 const OPERATION_LOG_NAME = "operation-log.jsonl";
 const JOURNAL_METRICS_CACHE_NAME = "journal-metrics-cache.json";
 const GOOGLE_ROLLING_CURSOR_NAME = "google-rolling-cursors.json";
+const LOCAL_DATA_FORMAT = "paperhot-local-data";
+const LOCAL_DATA_VERSION = 1;
 const FETCH_LOG_LIMIT = 30;
 const USER_DATA_DIR = path.join(__dirname, "data", "user");
 const USER_CONFIG_FILE = path.join(USER_DATA_DIR, "config.json");
@@ -120,7 +123,7 @@ const DEFAULT_GOOGLE_SCHOLAR_CONFIG = {
     url: "link"
   }
 };
-const DEFAULT_USER_BACKGROUND = "用户背景：3D-SIM、多层聚焦结构光照明 MPSIM、RIM、PRIM、2D-SIM；当前正在做 PRIM 伪随机的结构光照明显微镜算法。";
+const DEFAULT_USER_BACKGROUND = "请在页面中填写你的研究背景、关注方向和评分偏好。";
 const DEFAULT_LLM_CONFIG = {
   provider: "aliyun-modelstudio",
   enabled: false,
@@ -159,27 +162,15 @@ const DEFAULT_LLM_CONFIG = {
 };
 const DEFAULT_USER_PROFILE = {
   name: "本地科研用户",
-  researchArea: "计算显微与成像重建",
+  researchArea: "填写你的研究方向",
   locale: "zh-CN",
   background: DEFAULT_USER_BACKGROUND
 };
 const DEFAULT_USER_CONFIG = {
   keywords: {
-    primary: [
-      { text: "structured illumination microscopy", enabled: true },
-      { text: "SIM", enabled: true }
-    ],
-    secondary: [
-      { text: "SIM", enabled: false },
-      { text: "speckle illumination", enabled: false },
-      { text: "structured illumination", enabled: false }
-    ],
-    inspiration: [
-      { text: "物理先验重建", enabled: false },
-      { text: "diffusion prior", enabled: false },
-      { text: "self-supervised restoration", enabled: false },
-      { text: "deconvolution", enabled: false }
-    ]
+    primary: [],
+    secondary: [],
+    inspiration: []
   },
   sources: [
     {
@@ -654,6 +645,180 @@ function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function sanitizeLocalExportValue(value) {
+  if (Array.isArray(value)) return value.map(sanitizeLocalExportValue);
+  if (!value || typeof value !== "object") {
+    if (typeof value !== "string") return value;
+    return value
+      .replace(/Bearer\s+[A-Za-z0-9._~+/=-]{12,}/gi, "Bearer [REDACTED]")
+      .replace(/sk-[A-Za-z0-9._-]{12,}/g, "sk-[REDACTED]")
+      .replace(/AIzaSy[A-Za-z0-9._-]{12,}/g, "AIzaSy[REDACTED]");
+  }
+  const result = {};
+  Object.entries(value).forEach(([key, child]) => {
+    if (/api[_-]?key|secret|authorization|password/i.test(key)) return;
+    result[key] = sanitizeLocalExportValue(child);
+  });
+  return result;
+}
+
+function jsonText(value) {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+let crcTable = null;
+
+function crc32(buffer) {
+  if (!crcTable) {
+    crcTable = Array.from({ length: 256 }, (_, index) => {
+      let crc = index;
+      for (let bit = 0; bit < 8; bit += 1) {
+        crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+      }
+      return crc >>> 0;
+    });
+  }
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function dosDateTime(date = new Date()) {
+  const year = Math.max(1980, date.getFullYear());
+  const time = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+  const day = (year - 1980) << 9 | ((date.getMonth() + 1) << 5) | date.getDate();
+  return { time, day };
+}
+
+function buildZip(entries) {
+  const fileRecords = [];
+  const localParts = [];
+  let offset = 0;
+  const { time, day } = dosDateTime();
+
+  entries.forEach(entry => {
+    const name = String(entry.path || "").replace(/\\/g, "/");
+    if (!name || name.startsWith("/") || name.includes("..")) return;
+    const nameBuffer = Buffer.from(name, "utf8");
+    const content = Buffer.isBuffer(entry.content) ? entry.content : Buffer.from(String(entry.content ?? ""), "utf8");
+    const compressed = zlib.deflateRawSync(content);
+    const crc = crc32(content);
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0x0800, 6);
+    localHeader.writeUInt16LE(8, 8);
+    localHeader.writeUInt16LE(time, 10);
+    localHeader.writeUInt16LE(day, 12);
+    localHeader.writeUInt32LE(crc, 14);
+    localHeader.writeUInt32LE(compressed.length, 18);
+    localHeader.writeUInt32LE(content.length, 22);
+    localHeader.writeUInt16LE(nameBuffer.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+    localParts.push(localHeader, nameBuffer, compressed);
+    fileRecords.push({ nameBuffer, crc, compressedSize: compressed.length, size: content.length, offset, time, day });
+    offset += localHeader.length + nameBuffer.length + compressed.length;
+  });
+
+  const centralParts = [];
+  let centralSize = 0;
+  fileRecords.forEach(record => {
+    const header = Buffer.alloc(46);
+    header.writeUInt32LE(0x02014b50, 0);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt16LE(20, 6);
+    header.writeUInt16LE(0x0800, 8);
+    header.writeUInt16LE(8, 10);
+    header.writeUInt16LE(record.time, 12);
+    header.writeUInt16LE(record.day, 14);
+    header.writeUInt32LE(record.crc, 16);
+    header.writeUInt32LE(record.compressedSize, 20);
+    header.writeUInt32LE(record.size, 24);
+    header.writeUInt16LE(record.nameBuffer.length, 28);
+    header.writeUInt16LE(0, 30);
+    header.writeUInt16LE(0, 32);
+    header.writeUInt16LE(0, 34);
+    header.writeUInt16LE(0, 36);
+    header.writeUInt32LE(0, 38);
+    header.writeUInt32LE(record.offset, 42);
+    centralParts.push(header, record.nameBuffer);
+    centralSize += header.length + record.nameBuffer.length;
+  });
+
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(fileRecords.length, 8);
+  end.writeUInt16LE(fileRecords.length, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+  return Buffer.concat([...localParts, ...centralParts, end]);
+}
+
+function findZipEndOffset(buffer) {
+  const min = Math.max(0, buffer.length - 65557);
+  for (let offset = buffer.length - 22; offset >= min; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === 0x06054b50) return offset;
+  }
+  throw new Error("ZIP 文件缺少结束目录");
+}
+
+function parseZipEntries(input) {
+  const buffer = Buffer.isBuffer(input) ? input : Buffer.from(input || []);
+  const endOffset = findZipEndOffset(buffer);
+  const entryCount = buffer.readUInt16LE(endOffset + 10);
+  const centralOffset = buffer.readUInt32LE(endOffset + 16);
+  const entries = {};
+  let offset = centralOffset;
+
+  for (let index = 0; index < entryCount; index += 1) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error("ZIP 中央目录无效");
+    const flags = buffer.readUInt16LE(offset + 8);
+    const method = buffer.readUInt16LE(offset + 10);
+    const compressedSize = buffer.readUInt32LE(offset + 20);
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    const localOffset = buffer.readUInt32LE(offset + 42);
+    const nameStart = offset + 46;
+    const name = buffer.slice(nameStart, nameStart + nameLength).toString(flags & 0x0800 ? "utf8" : "utf8").replace(/\\/g, "/");
+    offset = nameStart + nameLength + extraLength + commentLength;
+    if (!name || name.endsWith("/") || name.startsWith("/") || name.includes("..")) continue;
+    if (buffer.readUInt32LE(localOffset) !== 0x04034b50) throw new Error("ZIP 本地文件头无效");
+    const localNameLength = buffer.readUInt16LE(localOffset + 26);
+    const localExtraLength = buffer.readUInt16LE(localOffset + 28);
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    const compressed = buffer.slice(dataStart, dataStart + compressedSize);
+    if (method === 0) {
+      entries[name] = compressed;
+    } else if (method === 8) {
+      entries[name] = zlib.inflateRawSync(compressed);
+    } else {
+      throw new Error(`ZIP 压缩方式不支持：${method}`);
+    }
+  }
+  return entries;
+}
+
+function parseZipJsonEntry(entries, name) {
+  if (!entries[name]) return undefined;
+  return JSON.parse(entries[name].toString("utf8"));
+}
+
+function parseZipJsonlEntry(entries, name) {
+  if (!entries[name]) return undefined;
+  return entries[name]
+    .toString("utf8")
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => JSON.parse(line));
+}
+
 function cleanKeywordConfig(value) {
   const input = value && typeof value === "object" ? value : {};
   const fallback = cloneJson(DEFAULT_USER_CONFIG.keywords);
@@ -1099,6 +1264,49 @@ async function writeJournalMetricsCache(cache, dataDir = DATA_DIR) {
   return file;
 }
 
+async function readFetchLogPayload(dataDir = DATA_DIR) {
+  return readJsonFile(path.join(dataDir, FETCH_LOG_NAME), { logs: [] });
+}
+
+async function writeFetchLogPayload(payload, dataDir = DATA_DIR) {
+  const logs = Array.isArray(payload?.logs) ? payload.logs : [];
+  return writeJsonFile(path.join(dataDir, FETCH_LOG_NAME), {
+    ...payload,
+    mode: "fetch-log",
+    updatedAt: new Date().toISOString(),
+    logs
+  });
+}
+
+async function writeOperationLogEntries(entries, dataDir = DATA_DIR) {
+  await fs.mkdir(dataDir, { recursive: true });
+  const file = path.join(dataDir, OPERATION_LOG_NAME);
+  const cleanEntries = Array.isArray(entries) ? entries.filter(entry => entry && typeof entry === "object") : [];
+  const text = cleanEntries.map(entry => JSON.stringify({
+    at: compactText(entry.at) || new Date().toISOString(),
+    action: entry.action || "modify",
+    operation: entry.operation || entry.action || "modify",
+    ...entry
+  })).join("\n");
+  await fs.writeFile(file, text ? `${text}\n` : "", "utf8");
+  return file;
+}
+
+async function readGoogleRollingCursorsPayload(dataDir = DATA_DIR) {
+  return readJsonFile(path.join(dataDir, GOOGLE_ROLLING_CURSOR_NAME), { cursors: {} });
+}
+
+async function listPaperCacheFiles(dataDir = DATA_DIR) {
+  try {
+    const fileNames = await fs.readdir(dataDir);
+    return fileNames
+      .filter(fileName => dateKeyFromCacheFile(fileName))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
 function getCachedJournalMetrics(cache, journalName) {
   const entry = cache?.journals?.[journalMetricsCacheKey(journalName)];
   return hasResolvedJournalMetrics(entry?.metrics) ? entry.metrics : null;
@@ -1191,6 +1399,10 @@ async function readUserProfile() {
   return cleanUserProfile(await readJsonFile(USER_PROFILE_FILE, DEFAULT_USER_PROFILE));
 }
 
+async function readUserProfileFile(file = USER_PROFILE_FILE) {
+  return cleanUserProfile(await readJsonFile(file, DEFAULT_USER_PROFILE));
+}
+
 async function readUserConfig(file = USER_CONFIG_FILE) {
   return cleanUserConfig(await readJsonFile(file, DEFAULT_USER_CONFIG));
 }
@@ -1201,11 +1413,306 @@ async function writeUserConfig(config, file = USER_CONFIG_FILE) {
   return cleanConfig;
 }
 
+async function writeUserProfile(profile, file = USER_PROFILE_FILE) {
+  const cleanProfile = cleanUserProfile(profile);
+  await writeJsonFile(file, cleanProfile);
+  return cleanProfile;
+}
+
 async function readUserState(options = {}) {
   return {
-    profile: await readUserProfile(),
+    profile: options.profileFile ? await readUserProfileFile(options.profileFile) : await readUserProfile(),
     config: await readUserConfig(options.configFile)
   };
+}
+
+function localDataManifest() {
+  return {
+    format: LOCAL_DATA_FORMAT,
+    version: LOCAL_DATA_VERSION,
+    minimumImporterVersion: 1
+  };
+}
+
+function migrateLocalDataBackup(payload = {}) {
+  const version = Number(payload.version || 1);
+  if (payload.format && payload.format !== LOCAL_DATA_FORMAT) {
+    throw new Error(`不支持的本地数据备份格式：${payload.format}`);
+  }
+  if (!Number.isInteger(version) || version < 1 || version > LOCAL_DATA_VERSION) {
+    throw new Error(`不支持的本地数据备份版本：${payload.version}`);
+  }
+  return payload;
+}
+
+async function exportLocalData(options = {}) {
+  const dataDir = options.dataDir || DATA_DIR;
+  const userConfigFile = options.userConfigFile || USER_CONFIG_FILE;
+  const userProfileFile = options.userProfileFile || USER_PROFILE_FILE;
+  const includePapers = options.includePapers !== false;
+  const includeProfile = options.includeProfile === true;
+  const includeSecrets = options.includeSecrets === true;
+  const includeStats = options.includeStats === true;
+  const includeLogs = options.includeLogs === true;
+  const paperCacheFiles = {};
+  if (includeStats) {
+    const cacheNames = await listPaperCacheFiles(dataDir);
+    await Promise.all(cacheNames.map(async fileName => {
+      paperCacheFiles[fileName] = await readJsonFile(path.join(dataDir, fileName), {});
+    }));
+  }
+  const payload = {
+    ok: true,
+    ...localDataManifest(),
+    exportedAt: new Date().toISOString(),
+    data: {
+      user: {
+        config: await readUserConfig(userConfigFile),
+        ...(includeProfile ? { profile: await readUserProfileFile(userProfileFile) } : {})
+      },
+      papers: {
+        ...(includePapers ? {
+          archive: await readPaperArchive(dataDir),
+          favorites: await readFavoritesFile(dataDir),
+          notes: await readPaperNotesFile(dataDir)
+        } : {}),
+        ...(includeLogs ? {
+          operationLog: await readOperationLog(dataDir),
+          fetchLog: await readFetchLogPayload(dataDir)
+        } : {}),
+        ...(includeStats ? {
+          journalMetricsCache: await readJournalMetricsCache(dataDir),
+          googleRollingCursors: await readGoogleRollingCursorsPayload(dataDir),
+          paperCacheFiles
+        } : {})
+      }
+    }
+  };
+  if (includeSecrets) {
+    payload.data.integrations = {
+      llm: await readLlmConfig(options.llmConfigFile),
+      googleScholar: await readGoogleScholarConfig(options.googleScholarConfigFile),
+      journalMetrics: await readJournalMetricsConfig(options.journalMetricsConfigFile)
+    };
+  }
+  return includeSecrets ? payload : sanitizeLocalExportValue(payload);
+}
+
+async function buildLocalDataExportFiles(options = {}) {
+  const includePapers = options.includePapers !== false;
+  const includeProfile = options.includeProfile === true;
+  const includeSecrets = options.includeSecrets === true;
+  const includeStats = options.includeStats === true;
+  const includeLogs = options.includeLogs === true;
+  const payload = await exportLocalData(options);
+  const data = payload.data || {};
+  const files = [
+    {
+      path: "paperhot-local-data.json",
+      content: jsonText({
+        ok: true,
+        ...localDataManifest(),
+        packageType: "zip",
+        exportedAt: payload.exportedAt,
+        includePapers,
+        includeProfile,
+        includeSecrets,
+        includeStats,
+        includeLogs
+      })
+    },
+    { path: "data/user/config.json", content: jsonText(data.user?.config || {}) }
+  ];
+  if (includePapers) {
+    files.push(
+      { path: "data/papers/archive.json", content: jsonText(data.papers?.archive || { mode: "archive", papers: [] }) },
+      { path: "data/papers/favorites.json", content: jsonText(data.papers?.favorites || { favorites: [] }) },
+      { path: "data/papers/paper-notes.json", content: jsonText(data.papers?.notes || { notes: [] }) }
+    );
+  }
+  if (includeLogs) {
+    files.push(
+      { path: "data/papers/fetch-log.json", content: jsonText(data.papers?.fetchLog || { logs: [] }) },
+      { path: "data/papers/operation-log.jsonl", content: (data.papers?.operationLog || []).map(entry => JSON.stringify(entry)).join("\n") + ((data.papers?.operationLog || []).length ? "\n" : "") }
+    );
+  }
+  if (includeStats) {
+    files.push(
+      { path: "data/papers/journal-metrics-cache.json", content: jsonText(data.papers?.journalMetricsCache || { updatedAt: "", journals: {} }) },
+      { path: "data/papers/google-rolling-cursors.json", content: jsonText(data.papers?.googleRollingCursors || { cursors: {} }) }
+    );
+    Object.entries(data.papers?.paperCacheFiles || {}).forEach(([fileName, content]) => {
+      if (dateKeyFromCacheFile(fileName)) files.push({ path: `data/papers/${fileName}`, content: jsonText(content) });
+    });
+  }
+  if (includeProfile && data.user?.profile) {
+    files.push({ path: "data/user/profile.json", content: jsonText(data.user.profile) });
+  }
+  if (includeSecrets && data.integrations) {
+    files.push(
+      { path: "config/llm.json", content: jsonText(data.integrations.llm || {}) },
+      { path: "config/google-scholar.json", content: jsonText(data.integrations.googleScholar || {}) },
+      { path: "config/journal-metrics.json", content: jsonText(data.integrations.journalMetrics || {}) }
+    );
+  }
+  return files;
+}
+
+async function exportLocalDataZip(options = {}) {
+  return buildZip(await buildLocalDataExportFiles(options));
+}
+
+async function importLocalData(payload = {}, options = {}) {
+  const migratedPayload = migrateLocalDataBackup(payload || {});
+  const input = migratedPayload?.data && typeof migratedPayload.data === "object" ? migratedPayload.data : migratedPayload;
+  const dataDir = options.dataDir || DATA_DIR;
+  const userConfigFile = options.userConfigFile || USER_CONFIG_FILE;
+  const userProfileFile = options.userProfileFile || USER_PROFILE_FILE;
+  const allowSecrets = options.allowSecrets === true;
+  const imported = [];
+  const skipped = [];
+
+  if (input?.user?.config) {
+    await writeUserConfig(input.user.config, userConfigFile);
+    imported.push("userConfig");
+  }
+  if (input?.user?.profile) {
+    await writeUserProfile(input.user.profile, userProfileFile);
+    imported.push("userProfile");
+  }
+  if (input?.papers?.archive) {
+    const papers = Array.isArray(input.papers.archive.papers) ? input.papers.archive.papers.map(completePaperRecord) : [];
+    await writePaperArchive({
+      ...input.papers.archive,
+      mode: "archive",
+      updatedAt: new Date().toISOString(),
+      count: papers.length,
+      papers
+    }, dataDir);
+    imported.push("archive");
+  }
+  if (input?.papers?.favorites) {
+    const favorites = Array.isArray(input.papers.favorites.favorites)
+      ? input.papers.favorites.favorites.map(cleanFavoriteRecord).filter(record => record.keys.length)
+      : [];
+    await writeFavoritesFile({
+      ...input.papers.favorites,
+      mode: "favorites",
+      updatedAt: new Date().toISOString(),
+      count: favorites.length,
+      favorites
+    }, dataDir);
+    imported.push("favorites");
+  }
+  if (input?.papers?.notes) {
+    const notes = Array.isArray(input.papers.notes.notes)
+      ? input.papers.notes.notes.map(cleanPaperNoteRecord).filter(record => record.keys.length)
+      : [];
+    await writePaperNotesFile({
+      ...input.papers.notes,
+      mode: "paper-notes",
+      updatedAt: new Date().toISOString(),
+      count: notes.length,
+      notes
+    }, dataDir);
+    imported.push("notes");
+  }
+  if (input?.papers?.operationLog) {
+    await writeOperationLogEntries(input.papers.operationLog, dataDir);
+    imported.push("operationLog");
+  }
+  if (input?.papers?.fetchLog) {
+    await writeFetchLogPayload(input.papers.fetchLog, dataDir);
+    imported.push("fetchLog");
+  }
+  if (input?.papers?.journalMetricsCache) {
+    await writeJournalMetricsCache(input.papers.journalMetricsCache, dataDir);
+    imported.push("journalMetricsCache");
+  }
+  if (input?.papers?.googleRollingCursors) {
+    await writeGoogleRollingCursors(input.papers.googleRollingCursors, dataDir);
+    imported.push("googleRollingCursors");
+  }
+  if (input?.papers?.paperCacheFiles && typeof input.papers.paperCacheFiles === "object") {
+    const cacheEntries = Object.entries(input.papers.paperCacheFiles)
+      .filter(([fileName, payload]) => dateKeyFromCacheFile(fileName) && payload && typeof payload === "object");
+    if (cacheEntries.length) {
+      await fs.mkdir(dataDir, { recursive: true });
+      await Promise.all(cacheEntries.map(([fileName, payload]) => writeJsonFile(path.join(dataDir, fileName), payload)));
+      imported.push("paperCacheFiles");
+    }
+  }
+  if (input?.integrations) {
+    if (allowSecrets) {
+      await writeIntegrationConfigs(input.integrations, options);
+      imported.push("integrations");
+    } else {
+      skipped.push("integrations");
+    }
+  }
+
+  if (imported.length) {
+    await appendOperationLogSafe({
+      action: "import",
+      operation: "local-data-import",
+      imported
+    }, dataDir);
+  }
+
+  return { ok: true, imported, skipped };
+}
+
+async function importLocalDataZip(input, options = {}) {
+  const entries = parseZipEntries(input);
+  if (entries["paperhot-local-data.json"]) {
+    try {
+      const packagePayload = parseZipJsonEntry(entries, "paperhot-local-data.json");
+      if (packagePayload?.data) return importLocalData(packagePayload, options);
+    } catch {
+      // New ZIP exports use this as a manifest only; malformed metadata should not block valid whitelisted files.
+    }
+  }
+  const payload = {
+    user: {},
+    papers: {}
+  };
+  const userConfig = parseZipJsonEntry(entries, "data/user/config.json");
+  const userProfile = parseZipJsonEntry(entries, "data/user/profile.json");
+  const archive = parseZipJsonEntry(entries, "data/papers/archive.json");
+  const favorites = parseZipJsonEntry(entries, "data/papers/favorites.json");
+  const notes = parseZipJsonEntry(entries, "data/papers/paper-notes.json");
+  const fetchLog = parseZipJsonEntry(entries, "data/papers/fetch-log.json");
+  const operationLog = parseZipJsonlEntry(entries, "data/papers/operation-log.jsonl");
+  const journalMetricsCache = parseZipJsonEntry(entries, "data/papers/journal-metrics-cache.json");
+  const googleRollingCursors = parseZipJsonEntry(entries, "data/papers/google-rolling-cursors.json");
+  const llm = parseZipJsonEntry(entries, "config/llm.json");
+  const googleScholar = parseZipJsonEntry(entries, "config/google-scholar.json");
+  const journalMetrics = parseZipJsonEntry(entries, "config/journal-metrics.json");
+  const paperCacheFiles = {};
+  Object.keys(entries).forEach(entryName => {
+    const match = entryName.match(/^data\/papers\/(\d{4}-\d{2}-\d{2}(?:-recent)?\.json)$/);
+    if (!match) return;
+    paperCacheFiles[match[1]] = JSON.parse(entries[entryName].toString("utf8"));
+  });
+
+  if (userConfig) payload.user.config = userConfig;
+  if (userProfile) payload.user.profile = userProfile;
+  if (archive) payload.papers.archive = archive;
+  if (favorites) payload.papers.favorites = favorites;
+  if (notes) payload.papers.notes = notes;
+  if (fetchLog) payload.papers.fetchLog = fetchLog;
+  if (operationLog) payload.papers.operationLog = operationLog;
+  if (journalMetricsCache) payload.papers.journalMetricsCache = journalMetricsCache;
+  if (googleRollingCursors) payload.papers.googleRollingCursors = googleRollingCursors;
+  if (Object.keys(paperCacheFiles).length) payload.papers.paperCacheFiles = paperCacheFiles;
+  if (llm || googleScholar || journalMetrics) {
+    payload.integrations = {};
+    if (llm) payload.integrations.llm = llm;
+    if (googleScholar) payload.integrations.googleScholar = googleScholar;
+    if (journalMetrics) payload.integrations.journalMetrics = journalMetrics;
+  }
+
+  return importLocalData(payload, options);
 }
 
 function filterPapersByKeywords(papers, keywords) {
@@ -4061,6 +4568,8 @@ module.exports = {
   enrichPapersWithJournalMetrics,
   enrichPapersWithLlmInsights,
   enrichTruncatedGoogleTitles,
+  exportLocalData,
+  exportLocalDataZip,
   fetchArxivPapers,
   fetchCrossrefWorkByTitle,
   fetchBioRxivPapers,
@@ -4072,6 +4581,9 @@ module.exports = {
   fetchSemanticScholarPapers,
   fetchTodayPapers,
   inferPaperShortTitle,
+  importLocalData,
+  importLocalDataZip,
+  parseZipEntries,
   testLlmConfig,
   filterPapersByDate,
   filterPapersByDateRange,
@@ -4107,7 +4619,8 @@ module.exports = {
   updateFavoritePaper,
   updatePaperNote,
   writeIntegrationConfigs,
-  writeUserConfig
+  writeUserConfig,
+  writeUserProfile
 };
 
 
