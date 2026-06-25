@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+.superpowers/
 
 # Local secrets and machine-specific configuration
 .env

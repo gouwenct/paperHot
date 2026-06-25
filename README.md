@@ -140,7 +140,7 @@ Paper Hot 是一个轻量本地 Node.js 应用，主要由静态前端页面和�
 
 ### 前端
 
-- `.superpowers/brainstorm/codex-20260619195104/content/paperhot-config-interactive-cn.html`
+- `public/index.html`
   当前主要交互页面，包含今日论文、全部论文、个人收藏、配置、日志和统计等界面。
 
 - `docs/`

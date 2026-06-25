@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-const htmlFile = path.join(__dirname, "..", ".superpowers", "brainstorm", "codex-20260619195104", "content", "paperhot-config-interactive-cn.html");
+const htmlFile = path.join(__dirname, "..", "public", "index.html");
 
 test("all papers page exposes search and short-title controls", async () => {
   const html = await fs.readFile(htmlFile, "utf8");

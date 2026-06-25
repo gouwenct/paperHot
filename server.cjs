@@ -34,14 +34,7 @@ const HOST = "127.0.0.1";
 const portArgIndex = process.argv.indexOf("--port");
 const argPort = portArgIndex >= 0 ? process.argv[portArgIndex + 1] : "";
 const PORT = Number(argPort || process.env.PAPERHOT_PORT || 50751);
-const HTML_FILE = path.join(
-  __dirname,
-  ".superpowers",
-  "brainstorm",
-  "codex-20260619195104",
-  "content",
-  "paperhot-config-interactive-cn.html"
-);
+const HTML_FILE = path.join(__dirname, "public", "index.html");
 const fetchJobs = new Map();
 const FETCH_JOB_TTL_MS = 30 * 60 * 1000;
 

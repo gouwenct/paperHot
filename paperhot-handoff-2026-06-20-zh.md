@@ -4,7 +4,7 @@
 继续开发 `paperHot` 本地论文热点工具。当前重点是：显微/SIM/RIM/PRIM 方向论文抓取后，保留英文标题，但用 LLM 生成中文摘要和中文推荐理由，并支持在网页配置外部接口。
 
 仓库路径：`E:\my2\codex-project\paperHot`
-前端单文件：`E:\my2\codex-project\paperHot\.superpowers\brainstorm\codex-20260619195104\content\paperhot-config-interactive-cn.html`
+前端单文件：`E:\my2\codex-project\paperHot\public\index.html`
 后端：`E:\my2\codex-project\paperHot\paperhot_backend.cjs`
 服务入口：`E:\my2\codex-project\paperHot\server.cjs`
 测试：`E:\my2\codex-project\paperHot\test\paperhot_backend.test.cjs`
@@ -19,7 +19,7 @@
 ## 已完成的主要功能
 
 ### 1. LLM 配置页面
-前端 `paperhot-config-interactive-cn.html` 已改为 LLM provider 列表/手风琴样式：
+前端 `public/index.html` 已改为 LLM provider 列表/手风琴样式：
 - 每个模型左侧箭头只展开/收缩。
 - 右侧开关启用模型。
 - 每个展开模型底部有 `测试` 和 `确定`。
@@ -104,7 +104,7 @@
 ## 当前工作区状态
 `git status --short` 显示有多处脏文件：
 - `.gitignore`
-- `.superpowers/brainstorm/codex-20260619195104/content/paperhot-config-interactive-cn.html`
+- `public/index.html`
 - `paperhot_backend.cjs`
 - `server.cjs`
 - `test/paperhot_backend.test.cjs`

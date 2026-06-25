@@ -9,7 +9,7 @@
 ## 环境
 - 仓库:`E:\my2\codex-project\paperHot`(纯 Node,无 `package.json`/依赖)
 - Node:v24.15.0
-- 入口:`server.cjs`;核心:`paperhot_backend.cjs`;前端单文件:`.superpowers/brainstorm/codex-20260619195104/content/paperhot-config-interactive-cn.html`
+- 入口:`server.cjs`;核心:`paperhot_backend.cjs`;前端单文件:`public/index.html`
 - LLM 配置:`config/llm.json`,active provider = `aliyun-coding`,model = `qwen-plus`,apiMode = `openai`,key 已配置(长度 115,不外泄明文)
 
 ## 逐层证据
