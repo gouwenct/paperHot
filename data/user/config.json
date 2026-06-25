@@ -2,30 +2,26 @@
   "keywords": {
     "primary": [
       {
-        "text": "计算显微",
+        "text": "structured illumination microscopy",
         "enabled": true
       },
       {
-        "text": "computational microscopy",
+        "text": "SIM",
         "enabled": true
       },
       {
-        "text": "microscopy reconstruction",
+        "text": "speckle illumination microscopy",
+        "enabled": true
+      },
+      {
+        "text": "RIM",
         "enabled": true
       }
     ],
     "secondary": [
       {
         "text": "SIM",
-        "enabled": true
-      },
-      {
-        "text": "RIM",
-        "enabled": true
-      },
-      {
-        "text": "PRIM",
-        "enabled": true
+        "enabled": false
       },
       {
         "text": "speckle illumination",
@@ -34,16 +30,20 @@
       {
         "text": "structured illumination",
         "enabled": false
+      },
+      {
+        "text": "random illumination microscopy",
+        "enabled": true
       }
     ],
     "inspiration": [
       {
         "text": "物理先验重建",
-        "enabled": true
+        "enabled": false
       },
       {
         "text": "diffusion prior",
-        "enabled": true
+        "enabled": false
       },
       {
         "text": "self-supervised restoration",
@@ -64,6 +64,16 @@
         "网页结果",
         "项目主页"
       ],
+      "enabled": false
+    },
+    {
+      "title": "Google Scholar",
+      "desc": "通过配置的 Scholar API / 合规代理补充论文发现信号；遇到机器人验证会记录为信源失败。",
+      "tags": [
+        "论文搜索",
+        "需配置 API",
+        "反爬检测"
+      ],
       "enabled": true
     },
     {
@@ -74,7 +84,7 @@
         "每日更新",
         "摘要可用"
       ],
-      "enabled": true
+      "enabled": false
     },
     {
       "title": "bioRxiv",
@@ -84,7 +94,7 @@
         "BioImage",
         "生命科学"
       ],
-      "enabled": true
+      "enabled": false
     },
     {
       "title": "Semantic Scholar",
@@ -94,17 +104,7 @@
         "引用信息",
         "开放 PDF"
       ],
-      "enabled": true
-    },
-    {
-      "title": "Nature / Nature Methods",
-      "desc": "捕捉高影响力论文、方法文章和期刊新闻。",
-      "tags": [
-        "期刊",
-        "方法文章",
-        "高权重"
-      ],
-      "enabled": true
+      "enabled": false
     }
   ]
 }

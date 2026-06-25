@@ -19,11 +19,12 @@
 3. 在 `config/journal-metrics.json` 中填写：
 
    - `enabled`: 改成 `true`
-   - `endpoint`: 填 EasyScholar 控制台给出的期刊查询接口地址
+   - `endpoint`: 使用 `https://easyscholar.cc/open/getPublicationRank`
    - `apiKey`: 填你的 Open API Key
-   - `request.queryName`: 填接口要求的期刊名参数名，例如 `journal`、`name` 或控制台文档中的字段名
-   - `request.apiKeyHeader`: 填接口要求的鉴权 header，例如 `Authorization`、`token`、`X-API-Key`
-   - `request.apiKeyPrefix`: 如果 header 需要 `Bearer ` 前缀就保留，否则改成空字符串
+   - `request.queryName`: 使用 `publicationName`
+   - `request.apiKeyQueryName`: 使用 `secretKey`
+   - `request.useApiKeyHeader`: 使用 `false`
+   - `minIntervalMs`: 使用 `500`，对应 EasyScholar 文档要求的每秒最多 2 次请求
 
 4. 如果 EasyScholar 返回字段名和模板不一致，修改 `responseMap`：
 
@@ -37,22 +38,29 @@
 {
   "provider": "easyscholar",
   "enabled": true,
-  "endpoint": "https://www.easyscholar.cc/open/api/journal",
+  "endpoint": "https://easyscholar.cc/open/getPublicationRank",
   "apiKey": "你的 key",
+  "minIntervalMs": 500,
   "request": {
     "method": "GET",
-    "queryName": "journal",
+    "queryName": "publicationName",
+    "apiKeyQueryName": "secretKey",
     "apiKeyHeader": "Authorization",
-    "apiKeyPrefix": "Bearer "
+    "apiKeyPrefix": "Bearer ",
+    "useApiKeyHeader": false
   },
   "responseMap": {
-    "impactFactor": "data.impactFactor",
-    "partition": "data.partition",
-    "upgradedPartition": "data.upgradedPartition"
+    "impactFactor": "data.officialRank.all.sciif",
+    "partition": "data.officialRank.all.sci",
+    "upgradedPartition": "data.officialRank.all.sciUp"
   }
 }
 ```
 
 ## 当前状态
 
-当前 paperHOT 已经在每篇论文数据中预留 `journalMetrics` 字段，并在前端卡片中显示期刊指标。由于 EasyScholar 的开放接口细节需要你登录控制台查看，所以这里先采用可配置适配方式。
+当前 paperHOT 已经在每篇论文数据中预留 `journalMetrics` 字段，并在前端卡片中显示期刊指标。后端会在论文刷新后，针对能识别出期刊名的论文调用 EasyScholar，并把影响因子、JCR 分区和中科院升级版分区写入本地论文缓存。
+
+## 本地验证记录
+
+2026-06-20 测试时，`https://www.easyscholar.cc/open/api/journal` 返回 HTTP 404；同一密钥使用 `https://easyscholar.cc/open/getPublicationRank?secretKey=...&publicationName=...` 可以成功返回 `Nature Methods`、`Bioinformatics` 等期刊数据。

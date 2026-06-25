@@ -1,17 +1,20 @@
 {
   "provider": "easyscholar",
   "enabled": false,
-  "endpoint": "请填写 EasyScholar 控制台提供的期刊查询接口地址",
+  "endpoint": "https://easyscholar.cc/open/getPublicationRank",
   "apiKey": "请填写 EasyScholar Open API Key",
+  "minIntervalMs": 500,
   "request": {
     "method": "GET",
-    "queryName": "journal",
+    "queryName": "publicationName",
+    "apiKeyQueryName": "secretKey",
     "apiKeyHeader": "Authorization",
-    "apiKeyPrefix": "Bearer "
+    "apiKeyPrefix": "Bearer ",
+    "useApiKeyHeader": false
   },
   "responseMap": {
-    "impactFactor": "data.impactFactor",
-    "partition": "data.partition",
-    "upgradedPartition": "data.upgradedPartition"
+    "impactFactor": "data.officialRank.all.sciif",
+    "partition": "data.officialRank.all.sci",
+    "upgradedPartition": "data.officialRank.all.sciUp"
   }
 }

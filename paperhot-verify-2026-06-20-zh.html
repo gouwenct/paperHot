@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>paperHOT 端到端验证报告 · 2026-06-20</title>
+<style>
+  :root{
+    --bg:#faf8f5; --surface:#ffffff; --ink:#1f2328; --muted:#6b6f76;
+    --line:#e7e2da; --accent:#e0533d; --accent-soft:#fdeee9;
+    --ok:#1a7f55; --ok-soft:#e7f4ee; --code-bg:#1f2328; --code-ink:#e8eaed;
+    --warn:#9a6b00; --warn-soft:#fbf2dc;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  .wrap{max-width:860px; margin:0 auto; padding:48px 24px 80px}
+  header.doc{border-bottom:2px solid var(--accent); padding-bottom:24px; margin-bottom:8px}
+  .kicker{font-size:13px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); font-weight:700; margin:0 0 6px}
+  h1{font-size:30px; line-height:1.25; margin:0 0 12px; letter-spacing:-.01em}
+  .meta{font-size:14px; color:var(--muted); display:flex; flex-wrap:wrap; gap:6px 18px}
+  .meta b{color:var(--ink); font-weight:600}
+  .verdict{
+    background:var(--ok-soft); border:1px solid #bfe3d0; border-left:4px solid var(--ok);
+    border-radius:8px; padding:16px 18px; margin:28px 0; font-size:15.5px;
+  }
+  .verdict .tag{display:inline-block; background:var(--ok); color:#fff; font-size:12px; font-weight:700;
+    border-radius:5px; padding:2px 9px; margin-right:8px; letter-spacing:.04em; vertical-align:1px}
+  h2{font-size:21px; margin:44px 0 4px; padding-top:8px; letter-spacing:-.01em}
+  h2 .num{color:var(--accent); font-variant-numeric:tabular-nums; margin-right:8px}
+  .sub{color:var(--muted); font-size:14px; margin:0 0 16px}
+  section{border-top:1px solid var(--line); margin-top:36px; padding-top:8px}
+  .layer{
+    background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    padding:18px 20px; margin:16px 0;
+  }
+  .layer h3{margin:0 0 10px; font-size:16.5px; display:flex; align-items:center; gap:10px}
+  .badge{font-size:11.5px; font-weight:700; border-radius:20px; padding:3px 11px; letter-spacing:.03em; white-space:nowrap}
+  .badge.pass{background:var(--ok-soft); color:var(--ok); border:1px solid #bfe3d0}
+  ul{margin:8px 0; padding-left:20px}
+  li{margin:5px 0}
+  code{font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace; font-size:.88em;
+    background:var(--accent-soft); color:#b23a27; padding:1.5px 6px; border-radius:5px}
+  pre{background:var(--code-bg); color:var(--code-ink); border-radius:9px; padding:16px 18px;
+    overflow:auto; font-size:13px; line-height:1.6; margin:14px 0}
+  pre code{background:none; color:inherit; padding:0; font-size:inherit}
+  table{width:100%; border-collapse:collapse; margin:14px 0; font-size:14px}
+  th,td{text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+  th{font-size:12.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:600}
+  td.zh{color:var(--ok); font-weight:600}
+  .note{background:var(--warn-soft); border:1px solid #ecd9a6; border-left:4px solid var(--warn);
+    border-radius:8px; padding:14px 18px; margin:16px 0; font-size:14.5px}
+  .note b{color:var(--warn)}
+  .kv{display:grid; grid-template-columns:auto 1fr; gap:4px 16px; font-size:14.5px; margin:6px 0}
+  .kv dt{color:var(--muted)}
+  .kv dd{margin:0; font-variant-numeric:tabular-nums}
+  footer{margin-top:52px; padding-top:20px; border-top:1px solid var(--line);
+    color:var(--muted); font-size:13px}
+  .pill{display:inline-block; background:var(--accent-soft); color:#b23a27; font-size:12.5px;
+    font-weight:600; border-radius:6px; padding:2px 9px; margin-right:6px}
+  @media (max-width:560px){ h1{font-size:24px} .wrap{padding:32px 16px 60px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="doc">
+    <p class="kicker">paperHOT · 端到端验证</p>
+    <h1>论文抓取 → 本地存储 → LLM 连通 → 中文翻译 → 页面显示</h1>
+    <div class="meta">
+      <span><b>日期</b> 2026-06-20</span>
+      <span><b>仓库</b> E:\my2\codex-project\paperHot</span>
+      <span><b>Node</b> v24.15.0</span>
+      <span><b>方式</b> 真实命令 / 真实接口,无 mock</span>
+    </div>
+  </header>
+
+  <div class="verdict">
+    <span class="tag">通过</span>
+    五层链路全部真实跑通。真实阿里 <code>qwen-plus</code> key 有效,中文摘要+推荐理由可生成,实时服务能把旧 archive 论文补跑成中文并交给前端渲染。
+  </div>
+
+  <section>
+    <h2><span class="num">0</span>静态完整性</h2>
+    <p class="sub">无网络 · 语法与单元测试</p>
+    <div class="layer">
+      <h3>Layer 0 <span class="badge pass">PASS</span></h3>
+      <ul>
+        <li><code>node --check server.cjs</code> → OK</li>
+        <li><code>node --check paperhot_backend.cjs</code> → OK</li>
+        <li><code>node --test test/paperhot_backend.test.cjs</code> → <b>tests 32 / pass 32 / fail 0</b></li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">1</span>真实抓取 + 本地存储</h2>
+    <p class="sub">arXiv 真实 API · LLM 关闭 · 写临时目录(不污染真实数据、不烧 token)</p>
+    <div class="layer">
+      <h3>Layer 1 <span class="badge pass">PASS</span></h3>
+      <ul>
+        <li><code>fetchArxivPapers(kw, {maxResults:5})</code> 真打 arXiv,返回 5 篇真实论文(带标题/日期/score),例:
+          <em>GB-LSR: A Fast Local Spectral Image Representation…</em> | 2026-06-17 | score=84。</li>
+        <li>用自定义 arxiv fetcher 跑完整 <code>fetchRecentPapers</code> 管线写入临时目录:落盘
+          <code>&lt;date&gt;-recent.json</code> 与 <code>archive.json</code>;回读 <code>papers=1</code>,标题
+          <em>Efficient Image Registration for Ultrasound Localization…</em>。</li>
+        <li>结论:抓取 + 缓存/归档读写链路成立;临时目录已清理。</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>LLM 真实连通 + 中文总结</h2>
+    <p class="sub">读真实 config/llm.json · 1 次真实阿里调用</p>
+    <div class="layer">
+      <h3>Layer 2 <span class="badge pass">PASS</span></h3>
+      <dl class="kv">
+        <dt>ok</dt><dd>true</dd>
+        <dt>provider</dt><dd>aliyun-modelstudio</dd>
+        <dt>model</dt><dd>qwen-plus</dd>
+        <dt>endpoint</dt><dd>https://ws-…maas.aliyuncs.com/compatible-mode/v1/chat/completions</dd>
+        <dt>延迟</dt><dd>≈ 2846 ms</dd>
+        <dt>tokenUsage.total</dt><dd>292</dd>
+        <dt>返回</dt><dd>中文 summary + 中文 reason,status = 已调用 AI</dd>
+      </dl>
+      <p style="margin:8px 0 0">结论:<b>真实 key 有效</b>——handoff 此前未验证过的关键部分,现已确认连通。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">3·4</span>实时服务 + 页面显示</h2>
+    <p class="sub">后台 node server.cjs --port 50762</p>
+    <div class="layer">
+      <h3>Layer 3+4 <span class="badge pass">PASS</span></h3>
+      <ul>
+        <li><code>GET /</code> → HTTP 200,110997 字节,<code>&lt;title&gt;paperHOT 领域配置交互原型&lt;/title&gt;</code></li>
+        <li><code>GET /api/papers/recent</code> → HTTP 200,<code>count=2</code>,<code>archivedCount=2</code>,<code>errors:[]</code></li>
+      </ul>
+      <table>
+        <thead><tr><th>#</th><th>论文</th><th>AI 状态</th><th>tokens</th><th>中文</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Self-supervised Internal Learning Enhances Isotropic Resolution…(3D-SIM)</td><td>已调用 AI</td><td>538</td><td class="zh">是</td></tr>
+          <tr><td>2</td><td>AD-Relight: Training-Free Banner Relighting…</td><td>已调用 AI</td><td>712</td><td class="zh">是</td></tr>
+        </tbody>
+      </table>
+      <p style="margin:0">这两篇正是之前 <code>未调用 AI</code> 的 archive 旧论文,被实时服务"读取 → 真实 LLM 增强 → 返回中文",验证了 handoff 里"旧论文补跑 LLM"的修复。</p>
+      <p style="margin:10px 0 0">前端渲染路径核对(HTML 源码):<code>fetch(endpoint)</code> (1439) → <code>payload.papers.map(…)</code> (1443) →
+        <code>${escapeHTML(paper.summary)}</code> (1174) 与 <code>为什么与你相关：${escapeHTML(paper.reason)}</code> (1181)。字段对得上,显示链路成立。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>本轮真实数据变化</h2>
+    <ul>
+      <li><code>data/papers/archive.json</code> 中那 2 篇已被实时增强为中文摘要(<code>/api/papers/recent</code> 的正常副作用)——页面现在确实能显示中文。</li>
+      <li>真实 token 消耗合计约 <span class="pill">1542 tokens</span>(292 + 538 + 712),共 3 次调用。</li>
+      <li>临时验证目录已删除;测试服务(端口 50762)已停止。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>边界 / 未覆盖</h2>
+    <div class="note">
+      <ul style="margin:0">
+        <li>页面显示为"接口 + 渲染代码"级验证,<b>非浏览器像素级</b>;未跑 Playwright 真实截图。</li>
+        <li>数据池小:<code>today</code> 缓存为空(今天无正好当天日期的 SIM 论文),archive 仅 2 篇。<b>未触发全量 refresh</b>——全量会对最多 80 篇逐篇调真实 LLM,有明显 token 成本,需确认后再跑。</li>
+        <li>召回质量偏松:<code>AD-Relight</code>(广告横幅重打光)非显微方向却通过过滤;属召回质量问题,不影响管线正确性,可作后续优化。</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>复现命令</h2>
+<pre><code>cd E:/my2/codex-project/paperHot
+# Layer 0
+node --check server.cjs &amp;&amp; node --check paperhot_backend.cjs
+node --test test/paperhot_backend.test.cjs
+# Layer 2(1 次真实 LLM 调用)
+node -e 'require("./paperhot_backend.cjs").testLlmConfig({}).then(r=>console.log(r.ok,r.model,r.summary))'
+# Layer 3+4(实时服务,会对缺摘要的 archive 论文补跑 LLM)
+node server.cjs --port 50762
+#   另开终端:curl http://127.0.0.1:50762/api/papers/recent</code></pre>
+  </section>
+
+  <footer>
+    paperHOT 端到端验证报告 · 2026-06-20 · 自包含本地页面,无外部请求。
+    与 <code>paperhot-handoff-2026-06-20-zh.md</code> / <code>paperhot-verify-2026-06-20-zh.md</code> 同级。
+  </footer>
+
+</div>
+</body>
+</html>

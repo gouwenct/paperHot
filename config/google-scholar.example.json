@@ -1,0 +1,23 @@
+{
+  "provider": "google-scholar-api",
+  "enabled": false,
+  "endpoint": "https://serpapi.com/search.json?engine=google_scholar&hl=en",
+  "apiKey": "请填写 Scholar API Key",
+  "request": {
+    "method": "GET",
+    "queryName": "q",
+    "apiKeyQueryName": "api_key",
+    "apiKeyHeader": "Authorization",
+    "apiKeyPrefix": "Bearer ",
+    "useApiKeyHeader": false
+  },
+  "responseMap": {
+    "items": "organic_results",
+    "title": "title",
+    "summary": "snippet",
+    "doi": "doi",
+    "journal": "publication_info.summary",
+    "year": "publication_info.summary",
+    "url": "link"
+  }
+}

@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PaperHot 论文入库流程</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #637083;
+      --line: #d9e0ea;
+      --blue: #2563eb;
+      --green: #16803c;
+      --orange: #b45309;
+      --red: #b91c1c;
+      --purple: #7c3aed;
+      --shadow: 0 14px 34px rgba(21, 31, 51, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.65 "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+    }
+    header {
+      background: #101828;
+      color: #fff;
+      padding: 34px 40px;
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      letter-spacing: 0;
+    }
+    header p {
+      margin: 0;
+      max-width: 980px;
+      color: #d8dee9;
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 24px 48px;
+    }
+    section {
+      margin: 18px 0;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 22px;
+    }
+    h2 {
+      margin: 0 0 14px;
+      font-size: 21px;
+    }
+    h3 {
+      margin: 20px 0 8px;
+      font-size: 16px;
+    }
+    p { margin: 8px 0; }
+    code {
+      background: #eef2f7;
+      border: 1px solid #dde4ee;
+      border-radius: 5px;
+      padding: 1px 5px;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 13px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f1f5f9;
+      color: #0f172a;
+    }
+    .muted { color: var(--muted); }
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-right: 5px;
+      border: 1px solid transparent;
+    }
+    .ok { color: var(--green); background: #eaf7ee; border-color: #bfe7ca; }
+    .warn { color: var(--orange); background: #fff7ed; border-color: #fed7aa; }
+    .off { color: #64748b; background: #f1f5f9; border-color: #d9e0ea; }
+    .risk { color: var(--red); background: #fef2f2; border-color: #fecaca; }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 12px;
+    }
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfdff;
+      padding: 14px;
+      min-height: 148px;
+      position: relative;
+    }
+    .step::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -12px;
+      width: 10px;
+      height: 2px;
+      background: #9aa8bb;
+    }
+    .step:nth-child(4n)::after,
+    .step:last-child::after { display: none; }
+    .step b {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 5px;
+      color: #0f172a;
+    }
+    .step span {
+      color: var(--muted);
+      font-size: 13px;
+      display: block;
+    }
+    .lane {
+      border-left: 4px solid var(--blue);
+      padding-left: 14px;
+      margin: 14px 0;
+    }
+    .lane.green { border-color: var(--green); }
+    .lane.orange { border-color: var(--orange); }
+    .lane.purple { border-color: var(--purple); }
+    .refs {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .refs li { margin: 3px 0; }
+    .note {
+      border: 1px solid #fde68a;
+      background: #fffbeb;
+      border-radius: 8px;
+      padding: 12px 14px;
+      color: #78350f;
+    }
+    @media (max-width: 920px) {
+      header { padding: 28px 22px; }
+      main { padding: 20px 14px 36px; }
+      .flow { grid-template-columns: 1fr; }
+      .step::after { display: none; }
+      table { font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PaperHot 论文入库流程</h1>
+    <p>这份说明基于当前仓库代码的只读梳理，描述从前端点击“抓取论文”到后端搜索、过滤、富集、翻译、归档和返回页面的实际路径。</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>当前结论</h2>
+      <p>点击“今日论文”里的 <code>抓取论文</code> 后，前端不会直接逐个访问论文数据库，而是创建一个后端异步抓取任务。后端根据启用的关键词和信源并行抓取候选论文，然后统一进入一条本地管线：去重、字符串关键词过滤、字符串领域过滤、日期范围筛选、初步排序截断、Crossref 元数据补全、LLM 摘要翻译和推荐理由、EasyScholar 期刊指标、基于 LLM 摘要和期刊指标的最终重评分、写入本地归档。</p>
+      <p class="note">当前保存的用户配置里，信源开关只有 <b>Google Scholar</b> 是启用状态；Google 搜索、arXiv、bioRxiv、Semantic Scholar 当前关闭。代码本身支持这些信源，如果前端没有传入任何可识别信源，后端会默认使用 arXiv、bioRxiv、Semantic Scholar。</p>
+    </section>
+
+    <section>
+      <h2>点击之后的主流程</h2>
+      <div class="flow">
+        <div class="step">
+          <b>1. 前端收集条件</b>
+          <span>读取启用关键词、启用信源、起止日期、Google 起始条目。</span>
+          <span>入口：<code>paperRefreshBody()</code></span>
+        </div>
+        <div class="step">
+          <b>2. 创建后端任务</b>
+          <span>POST 到 <code>/api/papers/refresh/start</code>，后端返回任务 id。</span>
+          <span>前端随后轮询状态接口。</span>
+        </div>
+        <div class="step">
+          <b>3. 后端选择模式</b>
+          <span>当前前端“抓取论文”按钮传的是 <code>mode=recent</code> 加起止日期；<code>today</code> 和 <code>last7</code> 是后端保留模式。</span>
+        </div>
+        <div class="step">
+          <b>4. 并行抓取信源</b>
+          <span>arXiv、bioRxiv、Semantic Scholar、Google Scholar、Google 搜索按启用项并发请求。</span>
+        </div>
+        <div class="step">
+          <b>5. 合并候选池</b>
+          <span>所有信源结果 flatten 成一个 <code>rawPapers</code> 列表。</span>
+        </div>
+        <div class="step">
+          <b>6. 漏斗过滤</b>
+          <span>先去重，再关键词过滤，再领域锚点过滤，再日期范围过滤。</span>
+        </div>
+        <div class="step">
+          <b>7. 排序和截断</b>
+          <span>先用字符串规则做初步 <code>score</code> 排序并最多取 80 篇；LLM 和期刊指标出来后会重新计算最终分数。</span>
+        </div>
+        <div class="step">
+          <b>8. 富集和入库</b>
+          <span>标题补全、Crossref、LLM、EasyScholar、最终重评分，最后合并到 <code>archive.json</code> 并写缓存和抓取日志。</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>1. 会去哪些数据库搜索文章？</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>信源</th>
+            <th>后端函数</th>
+            <th>实际请求方式</th>
+            <th>当前配置状态</th>
+            <th>时间/分页机制</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Google Scholar via SerpApi</td>
+            <td><code>fetchGoogleScholarPapers()</code></td>
+            <td>读取 <code>config/google-scholar.json</code>，使用配置的 endpoint、query 参数、API Key，解析 <code>organic_results</code>。</td>
+            <td><span class="pill ok">已启用</span></td>
+            <td>支持 <code>maxPages</code>、<code>num</code>、本地 rolling cursor。当前代码未主动加 <code>scisbd</code>，所以排序主要依赖 SerpApi/Scholar 默认结果。</td>
+          </tr>
+          <tr>
+            <td>Google 搜索 via SerpApi</td>
+            <td><code>fetchGoogleSearchPapers()</code></td>
+            <td>复用 Google 配置，但强制 <code>engine=google</code>，解析普通网页搜索结果。</td>
+            <td><span class="pill off">当前关闭</span></td>
+            <td>支持 SerpApi 分页和 rolling cursor；普通 Google 结果日期不稳定，代码允许无日期网页结果继续进入 Crossref/LLM。</td>
+          </tr>
+          <tr>
+            <td>arXiv</td>
+            <td><code>fetchArxivPapers()</code></td>
+            <td>请求 <code>https://export.arxiv.org/api/query</code>。</td>
+            <td><span class="pill off">当前关闭</span></td>
+            <td>代码明确设置 <code>sortBy=submittedDate</code> 和 <code>sortOrder=descending</code>，从新到旧拉取。多个关键词在 arXiv 查询里用 <code>OR</code> 组合。</td>
+          </tr>
+          <tr>
+            <td>bioRxiv</td>
+            <td><code>fetchBioRxivPapers()</code></td>
+            <td>请求 <code>https://api.biorxiv.org/details/biorxiv/{startDate}/{endDate}/0/json</code>。</td>
+            <td><span class="pill off">当前关闭</span></td>
+            <td>按日期区间取回，再本地关键词过滤。</td>
+          </tr>
+          <tr>
+            <td>Semantic Scholar</td>
+            <td><code>fetchSemanticScholarPapers()</code></td>
+            <td>请求 <code>https://api.semanticscholar.org/graph/v1/paper/search</code>。</td>
+            <td><span class="pill off">当前关闭</span></td>
+            <td>传入 query、limit、fields；多个英文关键词会合并成一个空格分隔的 query，不是逐个关键词循环搜索。如果是时间范围抓取，会在本地按 publicationDate/year 过滤。</td>
+          </tr>
+          <tr>
+            <td>Crossref</td>
+            <td><code>enrichPapersWithCrossref()</code></td>
+            <td>不是初始搜索源，而是富集源。按 DOI 或标题补 DOI、期刊、作者、发表日期。</td>
+            <td><span class="pill ok">有候选时调用</span></td>
+            <td>Google 搜索疑似 DOI 链接会要求标题匹配，避免把错误网页 DOI 写入论文。</td>
+          </tr>
+          <tr>
+            <td>EasyScholar</td>
+            <td><code>enrichPapersWithJournalMetrics()</code></td>
+            <td>不是初始搜索源，而是期刊指标富集源。</td>
+            <td><span class="pill ok">已启用</span></td>
+            <td>对可识别期刊名查询影响因子、分区等，并写入本地期刊指标缓存。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>2. 搜索完之后如何处理？</h2>
+
+      <div class="lane">
+        <h3>去重</h3>
+        <p>初始候选先进入 <code>dedupePapers()</code>。目前第一轮去重键是 <code>paper.id</code>，没有 id 时用 <code>title-source</code>。后续真正写入归档时，<code>mergePaperLists()</code> 使用更稳定的归档键：优先 DOI，没有 DOI 时使用 id、url 或 title。</p>
+        <p class="muted">注意：跨信源如果 DOI 缺失、标题略有差异，第一轮候选池去重可能不会合并；归档阶段会再按更灵活的 key 合并。</p>
+      </div>
+
+      <div class="lane green">
+        <h3>关键词和领域过滤</h3>
+        <p>这两步当前都是字符串规则，不是 LLM。<code>filterPapersByKeywords()</code> 会在标题、摘要、标签、来源中匹配启用关键词。对于 <code>SIM</code>、<code>RIM</code>、<code>PRIM</code> 这类短缩写，代码要求同时出现显微成像相关上下文，避免普通英文缩写误命中。</p>
+        <p><code>filterPapersByDomainAnchors()</code> 会再检查显微、成像、重建、illumination、bioimage 等领域锚点，把只碰巧命中关键词但不在当前科研领域内的结果剔除。LLM 不参与这两步过滤，它在后面的摘要翻译、推荐理由和最终重评分阶段参与。</p>
+      </div>
+
+      <div class="lane orange">
+        <h3>日期筛选</h3>
+        <p>前端页面现在只给用户一个起止日期范围；点击“抓取论文”时，前端把它作为 <code>mode=recent</code>、<code>startDate</code>、<code>endDate</code> 发给后端。也就是说，前端看到的是“日期范围抓取”，后端内部用 recent 模式承接。</p>
+        <p><code>today</code> 和 <code>last7</code> 仍存在于后端接口中：<code>today</code> 要求论文发表日期等于当天日期，<code>last7</code> 会用今天往前 6 天的滚动范围。但当前主前端没有给它们单独按钮。普通 Google 网页搜索经常没有结构化日期，代码允许这类无日期网页候选继续进入 Crossref/LLM，最终入库前仍会再做严格日期过滤。</p>
+      </div>
+
+      <div class="lane purple">
+        <h3>评分和排序</h3>
+        <p>评分现在分两段：第一段 <code>scorePaper()</code> 只用于候选召回后的初步排序和截断，避免把明显无关的结果送进昂贵的 Crossref/LLM/期刊指标流程。它仍然是字符串规则，不能作为最终推荐质量判断。</p>
+        <p>第二段 <code>rescorePaperAfterEnrichment()</code> 在 LLM 摘要翻译、推荐理由和 EasyScholar 期刊指标之后运行，并覆盖最终 <code>score</code>。期刊权重按影响因子分档：IF 大于 30 为 A 档，IF 10 到 30 为 B 档，IF 0 到 10 为 C 档；预印本、未查询或不清楚的文章默认给平均权重 B 档。</p>
+        <p>LLM 本身只生成中文摘要 <code>abstractZh</code> 和推荐理由 <code>reason</code>；本地重评分规则会结合英文摘要、中文摘要和推荐理由判断相关性：传统结构光照明显微镜的新理念/新范式给 A 档；传统 SIM 算法或改进给 B 档；深度学习结合 SIM 给 B 档；生物结果中明确和其他方法对比的，会额外加一点分。最终排序再按重评分后的 <code>score</code> 降序，分数相同时按发表日期新到旧。</p>
+      </div>
+
+      <div class="lane">
+        <h3>元数据补全</h3>
+        <p>Google 结果标题如果包含省略号，<code>enrichTruncatedGoogleTitles()</code> 会尝试打开网页，从 HTML meta 或 title 中恢复完整标题。随后 <code>enrichPapersWithCrossref()</code> 用 DOI 或标题查 Crossref，补 DOI、期刊、作者、日期。对于 Google 搜索推断出的 DOI，代码要求 Crossref 标题与原标题相似，否则会移除可疑 DOI 和 URL。</p>
+      </div>
+
+      <div class="lane green">
+        <h3>翻译和推荐理由</h3>
+        <p><code>enrichPapersWithLlmInsights()</code> 读取 <code>config/llm.json</code>。当前 LLM 已启用，模型配置为阿里百炼兼容 OpenAI chat completions 的 <code>qwen-plus</code>。Prompt 要求：英文标题不翻译；<code>abstractZh</code> 严格翻译原始摘要，不扩写、不评价；<code>reason</code> 用 1 到 2 句中文说明推荐理由。</p>
+        <p>如果历史归档论文缺少 AI 结果，<code>enrichMissingLlmInsights()</code> 会在读取缓存或归档时补跑 LLM，并尽量恢复原始英文摘要，避免把旧的生成式中文摘要当作原摘要继续翻译。</p>
+      </div>
+
+      <div class="lane orange">
+        <h3>期刊指标和本地入库</h3>
+        <p>LLM 处理后，<code>enrichPapersWithJournalMetrics()</code> 会对非预印本期刊查询 EasyScholar，并复用本地缓存。最后 <code>mergePapersIntoArchive()</code> 把本次论文合并进 <code>data/papers/archive.json</code>。重复论文保留原身份字段，只在有新 LLM 或期刊指标时补充摘要翻译、推荐理由、token 使用和期刊指标。</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>本地文件输出</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>文件</th>
+            <th>用途</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>data/papers/archive.json</code></td>
+            <td>长期论文库。所有抓取成功并入库的论文最终合并到这里。</td>
+          </tr>
+          <tr>
+            <td><code>data/papers/{date}.json</code> 或 <code>data/papers/{date}-recent.json</code></td>
+            <td>单次模式缓存。再次非刷新读取时优先使用。</td>
+          </tr>
+          <tr>
+            <td><code>data/papers/fetch-log.json</code></td>
+            <td>最近抓取日志，记录各信源返回数量、漏斗计数、候选快照、LLM 用量。</td>
+          </tr>
+          <tr>
+            <td><code>data/papers/google-rolling-cursors.json</code></td>
+            <td>Google Scholar / Google 搜索滚动分页游标。开启 rollingFetch 后，下次从保存的 start 继续。</td>
+          </tr>
+          <tr>
+            <td><code>data/papers/journal-metrics-cache.json</code></td>
+            <td>EasyScholar 期刊指标缓存。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>代码锚点</h2>
+      <ul class="refs">
+        <li>前端抓取按钮：<code>.superpowers/brainstorm/codex-20260619195104/content/paperhot-config-interactive-cn.html:2104</code></li>
+        <li>前端创建抓取任务并轮询：<code>paperhot-config-interactive-cn.html:2233</code>、<code>:2269</code>、<code>:2272</code></li>
+        <li>后端异步任务接口：<code>server.cjs:174</code>、状态接口 <code>server.cjs:219</code></li>
+        <li>总入口：<code>paperhot_backend.cjs:2827</code> 的 <code>fetchPaperPayload()</code></li>
+        <li>arXiv：<code>paperhot_backend.cjs:1262</code>；bioRxiv：<code>:1274</code>；Google Scholar：<code>:1972</code>；Google 搜索：<code>:2033</code>；Semantic Scholar：<code>:2100</code></li>
+        <li>过滤和排序：<code>filterPapersByKeywords()</code> <code>:1127</code>，<code>filterPapersByDomainAnchors()</code> <code>:1139</code>，初步 <code>scorePaper()</code> <code>:498</code>，富集后 <code>rescorePaperAfterEnrichment()</code> <code>:548</code>，<code>rankedPapers</code> <code>:2965</code></li>
+        <li>富集：Crossref <code>:1802</code>，LLM prompt <code>:1822</code>，LLM 执行 <code>:1938</code>，EasyScholar <code>:1047</code></li>
+        <li>归档合并：<code>mergePaperLists()</code> <code>:2300</code>，<code>mergePapersIntoArchive()</code> <code>:2396</code></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

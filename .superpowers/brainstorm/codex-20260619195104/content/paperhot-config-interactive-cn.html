@@ -14,6 +14,10 @@
     button { font: inherit; cursor: pointer; }
     .app { min-height: 100vh; display: grid; grid-template-columns: 180px 1fr; }
     .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
       padding: 12px 10px;
       background: rgba(255,255,255,0.76);
       border-right: 1px solid rgba(207,219,228,0.8);
@@ -111,7 +115,17 @@
       background: #0fa7c6;
       color: #fff;
     }
+    .filter-chip {
+      cursor: pointer;
+      text-align: left;
+    }
+    .filter-chip:not(.selected) {
+      background: #fff;
+      border-color: #d9e3ea;
+      color: #60738b;
+    }
     .chip.muted { border-color: #dce4ea; background: #f3f6f8; color: #79879a; }
+    .chip.error { border-color: #fecaca; background: #fff1f2; color: #b42318; }
     .layout {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 370px;
@@ -198,6 +212,243 @@
       display: flex;
       justify-content: flex-end;
       gap: 8px;
+    }
+    .fetch-range-panel {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid #dfe8ee;
+      border-radius: 12px;
+      background: #f8fafb;
+    }
+    .fetch-range-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr)) auto auto;
+      gap: 10px;
+      align-items: end;
+    }
+    .fetch-range-row label {
+      display: grid;
+      gap: 5px;
+      color: #4f6076;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .fetch-range-row input {
+      height: 34px;
+      padding: 0 10px;
+      border: 1px solid #d9e2e9;
+      border-radius: 10px;
+      background: #fff;
+      color: #203049;
+      font-size: 12px;
+      font-weight: 760;
+    }
+    .google-rolling-status {
+      color: #60738b;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .fetch-session-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      padding-top: 2px;
+    }
+    .fetch-session-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      border: 1px solid #d7e4eb;
+      border-radius: 999px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .fetch-session-chip.active {
+      border-color: #0fa7c6;
+      background: #0fa7c6;
+    }
+    .fetch-session-btn {
+      min-height: 26px;
+      padding: 5px 10px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: #60738b;
+      font-size: 12px;
+      font-weight: 820;
+      cursor: pointer;
+    }
+    .fetch-session-chip.active .fetch-session-btn {
+      color: #fff;
+    }
+    .fetch-session-remove {
+      width: 24px;
+      min-height: 26px;
+      border: 0;
+      border-left: 1px solid #d7e4eb;
+      background: transparent;
+      color: #8aa0b5;
+      font-size: 16px;
+      font-weight: 900;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .fetch-session-chip.active .fetch-session-remove {
+      border-left-color: rgba(255, 255, 255, 0.32);
+      color: #fff;
+    }
+    .fetch-session-remove:hover {
+      background: rgba(12, 28, 45, 0.08);
+      color: #21324a;
+    }
+    .fetch-session-chip.active .fetch-session-remove:hover {
+      background: rgba(255, 255, 255, 0.18);
+      color: #fff;
+    }
+    .llm-provider-list { display: grid; gap: 8px; }
+    .llm-provider {
+      border: 1px solid #e1e8ee;
+      border-radius: 10px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .llm-provider-head {
+      display: grid;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      width: 100%;
+      border: 0;
+      background: transparent;
+      padding: 10px;
+      text-align: left;
+    }
+    .llm-arrow { color: #7c8a9b; font-size: 16px; }
+    .llm-provider-name { color: #203049; font-size: 13px; font-weight: 850; }
+    .llm-provider-desc { margin-top: 2px; color: #7b899a; font-size: 11px; font-weight: 700; }
+    .switch {
+      width: 36px;
+      height: 20px;
+      border: 0;
+      border-radius: 999px;
+      background: #d7dde2;
+      position: relative;
+    }
+    .switch::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      transition: 120ms ease;
+    }
+    .switch.on { background: #1f2a40; }
+    .switch.on::after { left: 19px; }
+    .llm-provider-body {
+      display: grid;
+      gap: 10px;
+      padding: 0 10px 12px;
+      border-top: 1px solid #edf2f5;
+    }
+    .segmented { display: flex; gap: 6px; flex-wrap: wrap; }
+    .segment {
+      height: 28px;
+      padding: 0 10px;
+      border: 1px solid #d9e3ea;
+      border-radius: 9px;
+      background: #fff;
+      color: #60738b;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .segment.active { background: #1f2a40; border-color: #1f2a40; color: #fff; }
+    .model-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .model-chip {
+      min-height: 22px;
+      padding: 3px 8px;
+      border: 1px solid #dfe7ed;
+      border-radius: 8px;
+      background: #f8fafb;
+      color: #64758b;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .model-chip.active { background: #1f2a40; color: #fff; border-color: #1f2a40; }
+    .range-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+    .range-row input { accent-color: #644df6; }
+    .llm-provider-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding-top: 2px;
+    }
+    .secret-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .secret-row input { min-width: 0; }
+    .secret-toggle {
+      height: 34px;
+      padding: 0 10px;
+      border: 1px solid #d9e3ea;
+      border-radius: 9px;
+      background: #fff;
+      color: #60738b;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .secret-toggle:hover { border-color: #0ea5b7; color: #0b95a6; }
+    .llm-test-result {
+      min-height: 22px;
+      color: #60738b;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .llm-test-result.ok { color: #148567; }
+    .llm-test-result.error { color: #b42318; }
+    .background-config {
+      display: grid;
+      gap: 10px;
+      margin: 12px 0;
+      padding: 12px;
+      border: 1px solid #dfe8ee;
+      border-radius: 10px;
+      background: #f8fafb;
+    }
+    .background-config-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    .background-config-head h4 {
+      margin: 0;
+      color: #203049;
+      font-size: 13px;
+    }
+    .user-background-input {
+      width: 100%;
+      min-height: 260px;
+      padding: 10px 12px;
+      border: 1px solid #cfdbe5;
+      border-radius: 8px;
+      background: #fff;
+      color: #203049;
+      font: inherit;
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      resize: vertical;
     }
     .add-box {
       display: grid;
@@ -358,6 +609,15 @@
       position: relative;
       padding-left: 18px;
     }
+    .lazy-paper-sentinel {
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #708096;
+      font-size: 12px;
+      font-weight: 800;
+    }
     .timeline-list::before {
       content: "";
       position: absolute;
@@ -369,7 +629,7 @@
     }
     .timeline-item {
       display: grid;
-      grid-template-columns: 72px minmax(0, 1fr);
+      grid-template-columns: 84px minmax(0, 1fr);
       gap: 14px;
       position: relative;
       padding-bottom: 14px;
@@ -385,16 +645,26 @@
       border-radius: 50%;
       background: #fff;
     }
-    .timeline-time {
-      padding-top: 4px;
+    .timeline-stamp {
+      display: grid;
+      gap: 4px;
+      padding-top: 2px;
       color: #5f6f84;
-      font-size: 12px;
-      font-weight: 850;
       line-height: 1.35;
     }
-    .timeline-time span {
-      display: block;
-      margin-top: 3px;
+    .timeline-date {
+      color: #738397;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .timeline-time {
+      color: #1f2a40;
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: 0;
+    }
+    .timeline-source-type {
       color: #8a98aa;
       font-size: 11px;
       font-weight: 700;
@@ -408,16 +678,286 @@
       box-shadow: 0 10px 24px rgba(33,58,82,0.06);
     }
     .paper-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: start;
+      margin-bottom: 8px;
+    }
+    .paper-source-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .source { color: #75859a; font-size: 12px; font-weight: 800; }
+    .paper-title-row {
+      display: grid;
+      gap: 8px;
+      align-items: start;
+      margin: 7px 0 5px;
+    }
+    .paper-title-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin: 6px 0 4px;
+    }
+    .paper-title {
+      min-width: 0;
+      margin: 0;
+      color: #203049;
+      font-family: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", Arial, sans-serif;
+      font-size: 18px;
+      font-weight: 850;
+      line-height: 1.42;
+      overflow-wrap: anywhere;
+    }
+    .paper-title a { color: inherit; text-decoration: none; }
+    .paper-title a:hover { color: #0ea5b7; text-decoration: underline; }
+    .short-title-row {
+      display: inline-grid;
+      grid-template-columns: auto minmax(220px, 1fr);
+      gap: 8px;
+      align-items: center;
+      flex: 1 1 320px;
+      min-width: min(100%, 320px);
+      color: #65758b;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .short-title-input {
+      width: 100%;
+      min-width: 220px;
+      height: 26px;
+      padding: 0 9px;
+      border: 1px solid #d9e3ea;
+      border-radius: 8px;
+      background: #fff;
+      color: #203049;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .all-search-panel {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid rgba(222,232,238,0.92);
+      border-radius: 13px;
+      background: rgba(255,255,255,0.88);
+      box-shadow: 0 10px 24px rgba(33,58,82,0.06);
+    }
+    .all-search-panel input {
+      width: 100%;
+      height: 34px;
+      padding: 0 11px;
+      border: 1px solid #d9e3ea;
+      border-radius: 10px;
+      background: #fff;
+      color: #203049;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 760;
+    }
+    .all-search-count {
+      color: #64758b;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .all-control-panel {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid rgba(222,232,238,0.92);
+      border-radius: 13px;
+      background: rgba(255,255,255,0.88);
+      box-shadow: 0 10px 24px rgba(33,58,82,0.06);
+    }
+    .all-control-panel .all-search-panel,
+    .all-control-panel .category-bar {
+      margin-bottom: 0;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+    }
+    .last-fetch-status {
+      min-width: 260px;
+      display: grid;
+      gap: 3px;
+      justify-items: end;
+      color: #60738b;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.45;
+      text-align: right;
+    }
+    .last-fetch-status strong {
+      color: #203049;
+      font-size: 13px;
+      font-weight: 900;
+    }
+    .last-fetch-status span { color: #7b899a; }
+    .all-sort-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .time-axis {
+      display: grid;
+      gap: 8px;
+      padding: 8px 2px 2px;
+    }
+    .time-axis-head {
       display: flex;
       justify-content: space-between;
       gap: 12px;
-      align-items: flex-start;
-      margin-bottom: 8px;
+      color: #708096;
+      font-size: 12px;
+      font-weight: 850;
     }
-    .source { color: #75859a; font-size: 12px; }
-    .paper-title { margin: 0 0 8px; color: #1f2a40; font-size: 16px; font-weight: 850; }
-    .paper-summary { margin: 0; color: #5f6f84; font-size: 13px; line-height: 1.7; }
+    .time-bucket-title {
+      color: #708096;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .time-axis-track {
+      position: relative;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      min-height: 58px;
+      padding: 4px 4px 0;
+    }
+    .time-axis-track::before {
+      content: "";
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      top: 15px;
+      height: 2px;
+      background: #d7e7ee;
+    }
+    .time-axis-node {
+      position: relative;
+      display: grid;
+      justify-items: center;
+      gap: 5px;
+      min-width: 54px;
+      border: 0;
+      background: transparent;
+      color: #60738b;
+      font: inherit;
+      font-size: 11px;
+      font-weight: 850;
+      cursor: pointer;
+      z-index: 1;
+    }
+    .time-axis-dot {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border: 2px solid #d7e7ee;
+      border-radius: 50%;
+      background: #fff;
+      color: #60738b;
+      font-size: 10px;
+      line-height: 1;
+    }
+    .time-axis-node.active .time-axis-dot {
+      border-color: #0fa7c6;
+      background: #0fa7c6;
+      color: #fff;
+    }
+    .time-axis-label {
+      max-width: 74px;
+      color: #60738b;
+      line-height: 1.25;
+      text-align: center;
+      overflow-wrap: anywhere;
+    }
+    .time-axis-count {
+      color: #8a98aa;
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .all-filter-section {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .all-filter-title {
+      color: #51647a;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .paper-summary {
+      margin: 0;
+      color: #65758b;
+      font-family: Arial, SimHei, "黑体", sans-serif;
+      font-size: 15px;
+      font-weight: 400;
+      line-height: 1.78;
+    }
+    .paper-doi {
+      flex-basis: 100%;
+      color: #7a8aa0;
+      font-size: 11px;
+      font-weight: 760;
+      overflow-wrap: anywhere;
+    }
+    .citation-copy {
+      width: 26px;
+      height: 26px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #d8e5ec;
+      border-radius: 8px;
+      background: #f8fafb;
+      color: #637287;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .citation-copy:hover { border-color: #0ea5b7; color: #0b95a6; background: #eefcff; }
     .head-actions { display: flex; gap: 7px; align-items: center; white-space: nowrap; }
+    .published-date-pill {
+      height: 26px;
+      display: inline-flex;
+      align-items: center;
+      padding: 0 9px;
+      border: 1px solid #e0e7ed;
+      border-radius: 14px;
+      background: #f7fafb;
+      color: #7b899a;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: default;
+    }
+    .published-date-pill[data-copy-doi] {
+      cursor: pointer;
+    }
+    .published-date-pill[data-copy-doi]:hover { border-color: #0ea5b7; color: #0b95a6; background: #eefcff; }
     .favorite {
       height: 26px;
       padding: 0 10px;
@@ -443,8 +983,35 @@
       border-radius: 8px;
       background: #e8fbf5;
       color: #17966f;
-      font-size: 13px;
-      font-weight: 720;
+      font-family: Arial, SimHei, "黑体", sans-serif;
+      font-size: 15px;
+      font-weight: 400;
+      line-height: 1.72;
+    }
+    .reason.abstract-translation {
+      background: #fafafa;
+      color: #080808;
+    }
+    .reason.abstract-translation .reason-label { color: #080808; }
+    .reason + .reason { margin-top: 6px; }
+    .reason-label {
+      margin-right: 6px;
+      color: #0c7658;
+      font-weight: 700;
+    }
+    .score-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      height: 24px;
+      padding: 0 9px;
+      border: 1px solid #b9e9f2;
+      border-radius: 999px;
+      background: #e9fbff;
+      color: #0b92ad;
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
     }
     .token-usage {
       display: flex;
@@ -461,6 +1028,109 @@
       border-radius: 12px;
       background: #f7fafb;
     }
+    .token-usage .match-pill {
+      border-color: #b9e9f2;
+      background: #eefcff;
+      color: #0b92ad;
+      font-weight: 850;
+    }
+    .paper-signal-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 6px;
+      color: #7b899a;
+      font-size: 12px;
+      font-weight: 760;
+    }
+    .paper-signal-row span {
+      padding: 3px 8px;
+      border: 1px solid #e0e7ed;
+      border-radius: 12px;
+      background: #f7fafb;
+    }
+    .paper-signal-row .match-pill {
+      border-color: #b9e9f2;
+      background: #eefcff;
+      color: #0b92ad;
+      font-weight: 850;
+    }
+    .paper-signal-row .citation-copy { margin-left: auto; }
+    .fetch-progress {
+      display: grid;
+      gap: 8px;
+      width: 100%;
+    }
+    .fetch-progress-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: #203049;
+      font-size: 13px;
+      font-weight: 850;
+    }
+    .fetch-progress-track {
+      height: 8px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e6eef3;
+    }
+    .fetch-progress-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: #12aeca;
+      transition: width 180ms ease;
+    }
+    .fetch-progress-counts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .fetch-progress-counts span {
+      padding: 3px 8px;
+      border: 1px solid #d9e7ee;
+      border-radius: 999px;
+      background: #f8fbfc;
+      color: #60738b;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .fetch-progress-page-detail {
+      color: #41566f;
+      font-size: 12px;
+      font-weight: 850;
+      line-height: 1.5;
+    }
+    .journal-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      margin-top: 9px;
+    }
+    .paper-source-row .journal-tags { margin-top: 0; }
+    .journal-tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 9px;
+      border: 1px solid rgba(255, 178, 160, 0.62);
+      border-radius: 5px;
+      background: #ffe2dd;
+      color: #e12b16;
+      font-size: 12px;
+      font-weight: 850;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    .journal-tag.if { background: #fff0d6; border-color: #ffd9a3; color: #d84417; }
+    .journal-tag.q1 { background: #ffe2dd; border-color: #ffc4b8; color: #d62716; }
+    .journal-tag.q2 { background: #e8deee; border-color: #d8c5e4; color: #8d3b8f; }
+    .journal-tag.q3 { background: #dbeddb; border-color: #c2dec4; color: #3e7c4a; }
+    .journal-tag.q4 { background: #fadec9; border-color: #efc19f; color: #9e5d2f; }
+    .journal-tag.cas { background: #e9e8e7; border-color: #d8d6d3; color: #6e655d; }
+    .journal-tag.muted { background: #eef3f6; border-color: #dbe5eb; color: #7a8797; }
     .section-title {
       display: flex;
       align-items: end;
@@ -478,6 +1148,55 @@
       color: #708096;
       font-size: 12px;
       font-weight: 750;
+    }
+    .favorites-tabs {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 4px 0 12px;
+      padding: 0 2px;
+    }
+    .favorites-tab-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .favorites-tab {
+      min-height: 34px;
+      padding: 0 10px;
+      border: 0;
+      border-bottom: 3px solid transparent;
+      background: transparent;
+      color: #51647a;
+      font-size: 17px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+    .favorites-tab.active {
+      border-bottom-color: #0fa7c6;
+      color: #1f2a40;
+    }
+    .favorites-tab-count {
+      color: #8a98aa;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .favorites-tab-panel {
+      display: grid;
+      gap: 12px;
+    }
+    .favorites-tab-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 0 2px;
+      color: #60738b;
+      font-size: 12px;
+      font-weight: 800;
     }
     .reading-list { display: grid; gap: 10px; }
     .reading-card {
@@ -607,6 +1326,100 @@
       font-size: 12px;
       line-height: 1.6;
     }
+    .fetch-log-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      background: #fff;
+    }
+    .fetch-log-detail-link {
+      height: 26px;
+      padding: 0 10px;
+      border: 1px solid #cbdde6;
+      border-radius: 13px;
+      background: #fff;
+      color: #44647e;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .candidate-action-btn {
+      min-width: 82px;
+      height: 26px;
+      padding: 0 9px;
+      border: 1px solid #b8e9f1;
+      border-radius: 13px;
+      background: #e9fbff;
+      color: #237989;
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+    .candidate-action-btn.exists,
+    .candidate-action-btn:disabled {
+      border-color: #dce4ea;
+      background: #f3f6f8;
+      color: #79879a;
+      cursor: default;
+    }
+    .candidate-action-btn.remove {
+      border-color: #fecaca;
+      background: #fff1f2;
+      color: #b42318;
+    }
+    .candidate-action-btn.remove:disabled {
+      border-color: #f3d5d5;
+      background: #f8eeee;
+      color: #9d6b6b;
+    }
+    .candidate-sort-btn {
+      border: 0;
+      background: transparent;
+      color: #51647a;
+      font: inherit;
+      font-weight: 850;
+      padding: 0;
+    }
+    .candidate-table-wrap {
+      margin-top: 12px;
+      overflow-x: auto;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      background: #fff;
+    }
+    .candidate-table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 760px;
+      font-size: 12px;
+    }
+    .candidate-table th,
+    .candidate-table td {
+      padding: 9px 10px;
+      border-bottom: 1px solid #edf2f5;
+      text-align: left;
+      vertical-align: top;
+      line-height: 1.55;
+    }
+    .candidate-table th {
+      background: #f8fafb;
+      color: #51647a;
+      font-weight: 850;
+    }
+    .candidate-table tr:last-child td { border-bottom: 0; }
+    .candidate-title-cell {
+      min-width: 280px;
+      color: #203049;
+      font-weight: 760;
+    }
+    .candidate-title-cell a {
+      color: #0b6f88;
+      text-decoration: none;
+    }
+    .candidate-meta-cell {
+      color: #60748c;
+      white-space: nowrap;
+    }
     .empty {
       padding: 26px;
       border: 1px dashed #bddde2;
@@ -627,6 +1440,7 @@
       .sidebar { display: none; }
       .main { padding: 14px; }
       .hero-top { flex-direction: column; }
+      .fetch-range-row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -639,7 +1453,8 @@
         <a class="nav-item" href="#all">☰ 全部论文</a>
         <a class="nav-item" href="#favorites">♡ 个人收藏</a>
         <a class="nav-item active" href="#config">⌘ 领域配置</a>
-        <a class="nav-item" href="#tokens">▥ Token 统计</a>
+        <a class="nav-item" href="#tokens">▥ 统计</a>
+        <a class="nav-item" href="#logs">☷ 日志</a>
         <a class="nav-item" href="#about">ⓘ 关于</a>
       </nav>
     </aside>
@@ -665,77 +1480,21 @@
             <div class="panel-head">
               <div>
                 <h2>信源配置</h2>
-                <div class="panel-note">控制 paperHOT 从哪里找论文、项目和科研动态</div>
+                <div class="panel-note">这里只显示后端已经接入、抓取时真正会使用的论文信源</div>
               </div>
-              <button class="primary-btn" id="add-source">添加信源</button>
             </div>
 
-            <div class="source-list" id="source-list">
-              <article class="source-card">
-                <div>
-                  <h3>Google 搜索</h3>
-                  <p class="source-desc">补充机构新闻、项目主页、论文代码页和 Nature / Science 网页结果。</p>
-                  <div class="tags"><span class="tag">关键词搜索</span><span class="tag">网页结果</span><span class="tag">项目主页</span></div>
-                </div>
-                <div class="source-actions">
-                  <button class="toggle" data-source-toggle>启用</button>
-                  <button class="edit-link" data-edit-source>编辑</button>
-                </div>
-              </article>
+            <div class="source-list" id="source-list"></div>
 
-              <article class="source-card">
+            <div class="add-box" id="integration-config-panel">
+              <div class="panel-head">
                 <div>
-                  <h3>arXiv</h3>
-                  <p class="source-desc">抓取 cs.CV、eess.IV、cs.AI、q-bio.QM 等分类。</p>
-                  <div class="tags"><span class="tag">论文源</span><span class="tag">每日更新</span><span class="tag">摘要可用</span></div>
+                  <h2>外部接口配置</h2>
+                  <div class="panel-note">API Key 只写入本机后端配置；留空表示保留已有密钥</div>
                 </div>
-                <div class="source-actions">
-                  <button class="toggle" data-source-toggle>启用</button>
-                  <button class="edit-link" data-edit-source>编辑</button>
-                </div>
-              </article>
-
-              <article class="source-card">
-                <div>
-                  <h3>bioRxiv</h3>
-                  <p class="source-desc">追踪生物图像、显微实验、细胞成像和生物物理预印本。</p>
-                  <div class="tags"><span class="tag">预印本</span><span class="tag">BioImage</span><span class="tag">生命科学</span></div>
-                </div>
-                <div class="source-actions">
-                  <button class="toggle" data-source-toggle>启用</button>
-                  <button class="edit-link" data-edit-source>编辑</button>
-                </div>
-              </article>
-
-              <article class="source-card">
-                <div>
-                  <h3>Nature / Nature Methods</h3>
-                  <p class="source-desc">捕捉高影响力论文、方法文章和期刊新闻。</p>
-                  <div class="tags"><span class="tag">期刊</span><span class="tag">方法文章</span><span class="tag">高权重</span></div>
-                </div>
-                <div class="source-actions">
-                  <button class="toggle" data-source-toggle>启用</button>
-                  <button class="edit-link" data-edit-source>编辑</button>
-                </div>
-              </article>
-            </div>
-
-            <div class="add-box">
-              <h3>添加信源示例</h3>
-              <div class="add-grid">
-                <button class="example" data-add-example="公众号：科研圈">
-                  <strong>添加公众号</strong>
-                  <span>例：公众号“科研圈”或某课题组公众号，用于补充中文动态。</span>
-                </button>
-                <button class="example" data-add-example="期刊：Nature Photonics">
-                  <strong>添加期刊</strong>
-                  <span>例：Nature Photonics / Nature Methods / Optica，按期刊源追踪。</span>
-                </button>
-                <button class="example" data-add-example="网页源：实验室主页">
-                  <strong>添加网页源</strong>
-                  <span>例：某实验室 news 页面、项目主页或 RSS feed。</span>
-                </button>
+                <button class="primary-btn" id="save-integrations">保存接口</button>
               </div>
+              <div id="integration-config-form"></div>
             </div>
           </section>
         </div>
@@ -764,83 +1523,6 @@
       setTimeout(() => toast.classList.remove("show"), 1200);
     }
 
-    document.querySelectorAll("[data-source-toggle]").forEach(button => {
-      button.addEventListener("click", () => {
-        const card = button.closest(".source-card");
-        const paused = button.textContent === "暂停";
-        button.textContent = paused ? "启用" : "暂停";
-        button.classList.toggle("paused", !paused);
-        card.classList.toggle("paused", !paused);
-        showToast(paused ? "信源已启用" : "信源已暂停");
-      });
-    });
-
-    document.querySelectorAll("[data-edit-source]").forEach(button => {
-      button.addEventListener("click", () => showToast("这里会打开信源编辑表单"));
-    });
-
-    document.querySelectorAll("[data-add-example]").forEach(button => {
-      button.addEventListener("click", () => {
-        const title = button.getAttribute("data-add-example");
-        const card = document.createElement("article");
-        card.className = "source-card";
-        card.innerHTML = `
-          <div>
-            <h3>${title}</h3>
-            <p class="source-desc">新增示例信源。正式版本中这里会填写 URL、抓取方式、更新频率和领域映射。</p>
-            <div class="tags"><span class="tag">自定义信源</span><span class="tag">待配置</span></div>
-          </div>
-          <div class="source-actions">
-            <button class="toggle" data-source-toggle>启用</button>
-            <button class="edit-link" data-edit-source>编辑</button>
-          </div>
-        `;
-        document.getElementById("source-list").appendChild(card);
-        card.querySelector("[data-source-toggle]").addEventListener("click", event => {
-          const toggle = event.currentTarget;
-          const currentCard = toggle.closest(".source-card");
-          const paused = toggle.textContent === "暂停";
-          toggle.textContent = paused ? "启用" : "暂停";
-          toggle.classList.toggle("paused", !paused);
-          currentCard.classList.toggle("paused", !paused);
-          showToast(paused ? "信源已启用" : "信源已暂停");
-        });
-        card.querySelector("[data-edit-source]").addEventListener("click", () => showToast("这里会打开信源编辑表单"));
-        showToast("已添加示例信源");
-      });
-    });
-
-    document.querySelectorAll("[data-token-group]").forEach(group => {
-      group.addEventListener("click", event => {
-        if (event.target.classList.contains("remove")) {
-          event.stopPropagation();
-          event.target.closest(".keyword-chip").remove();
-          showToast("关键词已删除");
-          return;
-        }
-        const chip = event.target.closest(".keyword-chip");
-        if (chip) {
-          chip.classList.toggle("selected");
-          showToast(chip.classList.contains("selected") ? "关键词已启用" : "关键词已停用");
-        }
-      });
-    });
-
-    document.querySelectorAll("[data-add-token]").forEach(button => {
-      button.addEventListener("click", () => {
-        const row = button.closest(".input-row");
-        const input = row.querySelector("input");
-        const text = input.value.trim() || "新关键词";
-        const group = row.previousElementSibling;
-        const chip = document.createElement("span");
-        chip.className = "keyword-chip selected";
-        chip.innerHTML = `${text} <button class="remove">×</button>`;
-        group.appendChild(chip);
-        input.value = "";
-        showToast("关键词已添加");
-      });
-    });
-
     document.getElementById("save-config").addEventListener("click", () => showToast("配置已保存（原型演示）"));
 
     const mainContent = document.getElementById("main-content");
@@ -855,6 +1537,10 @@
       { key: "review", label: "综述" }
     ];
     let activePaperCategory = "all";
+    let allPaperSortMode = "fetched";
+    let allPaperSortDirection = "desc";
+    let allPaperDateFilter = "all";
+    const selectedAllPaperKeywords = new Set();
     const samplePapers = [
       {
         id: "p1",
@@ -915,61 +1601,419 @@
     let recentDataStatus = "正在载入最近相关论文...";
     let paperDataMeta = null;
     let recentDataMeta = null;
+    const paperPageSize = 20;
+    const paperVisibleLimits = new Map();
+    let paperLazyObserver = null;
     let tokenStats = null;
-    let tokenStatsStatus = "正在读取本地 Token 统计...";
-    const saved = new Set(["p1"]);
-    const readPapers = new Set();
-    const starredPapers = new Set();
+    let tokenStatsStatus = "正在读取本地统计...";
+    let fetchLogEntries = [];
+    let fetchLogStatus = "";
+    let activeFetchLogDetailIndex = null;
+    let operationLogEntries = [];
+    let operationLogStatus = "";
+    let candidateDetailSort = { field: "index", direction: "asc" };
+    const candidateArchiveStates = new Map();
+    let archiveLlmRefreshingAll = false;
+    const archiveLlmRefreshingKeys = new Set();
+    let fetchProgress = null;
+    const fetchRangeStorageKey = "paperhot.fetchRange.v1";
+    const fetchSessionsStorageKey = "paperhot.todayFetchSessions.v1";
+    const defaultFetchStartDate = "2026-05-01";
+    let googleRollingStatusText = "自动：正在读取抓取起点...";
+    let allPaperSearchQuery = "";
+    let allPaperSearchTimer = null;
+    let fetchRange = loadFetchRange();
+    let todayFetchSessions = loadTodayFetchSessions();
+    let activeTodayFetchSessionId = todayFetchSessions[0]?.id || "";
+    if (activeTodayFetchSessionId) {
+      const activeSession = todayFetchSessions.find(session => session.id === activeTodayFetchSessionId);
+      todayPapers = activeSession?.papers || [];
+      paperDataMeta = activeSession?.meta || null;
+      paperDataStatus = activeSession ? `显示 ${activeSession.label} 抓取结果` : paperDataStatus;
+    }
+    const favoriteKeys = new Set();
+    let favoritePapersCache = [];
+    let favoriteStatus = "正在载入个人收藏...";
+    let favoriteActiveTab = "reading";
+    const paperNoteByKey = new Map();
+    let paperNotesStatus = "正在载入论文标注...";
 
-    function paperCard(paper) {
-      const isSaved = saved.has(paper.id);
-      const isStarred = starredPapers.has(paper.id);
+    function todayDateInputValue() {
+      const now = new Date();
+      const offset = now.getTimezoneOffset() * 60000;
+      return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+    }
+
+    function loadFetchRange() {
+      try {
+        const savedRange = JSON.parse(localStorage.getItem(fetchRangeStorageKey) || "{}");
+        return {
+          startDate: savedRange.startDate || defaultFetchStartDate,
+          endDate: savedRange.endDate || todayDateInputValue(),
+          googleStartItem: savedRange.googleStartItem || ""
+        };
+      } catch {
+        return { startDate: defaultFetchStartDate, endDate: todayDateInputValue(), googleStartItem: "" };
+      }
+    }
+
+    function saveFetchRange() {
+      try {
+        localStorage.setItem(fetchRangeStorageKey, JSON.stringify(fetchRange));
+      } catch (error) {
+        console.warn("Fetch range save failed", error);
+      }
+    }
+
+    function loadTodayFetchSessions() {
+      try {
+        const sessions = JSON.parse(localStorage.getItem(fetchSessionsStorageKey) || "[]");
+        if (!Array.isArray(sessions)) return [];
+        return sessions
+          .map(session => ({
+            id: String(session.id || ""),
+            label: String(session.label || ""),
+            startDate: String(session.startDate || ""),
+            endDate: String(session.endDate || ""),
+            papers: Array.isArray(session.papers) ? session.papers.map(normalizePaperForView) : [],
+            meta: session.meta && typeof session.meta === "object" ? session.meta : null
+          }))
+          .filter(session => session.id && session.label);
+      } catch (error) {
+        console.warn("Fetch sessions load failed", error);
+        return [];
+      }
+    }
+
+    function saveTodayFetchSessions() {
+      try {
+        localStorage.setItem(fetchSessionsStorageKey, JSON.stringify(todayFetchSessions));
+      } catch (error) {
+        console.warn("Fetch sessions save failed", error);
+      }
+    }
+
+    function fetchRangeLabel(startDate, endDate) {
+      const format = value => {
+        const parts = String(value || "").split("-");
+        if (parts.length < 3) return value || "";
+        return `${parts[0]}.${parts[1]}.${parts[2]}`;
+      };
+      return `${format(startDate)} 到 ${format(endDate)}`;
+    }
+
+    function fetchSessionTimeLabel(value) {
+      const date = value ? new Date(value) : new Date();
+      if (Number.isNaN(date.getTime())) return "";
+      const pad = number => String(number).padStart(2, "0");
+      return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+
+    function fetchLogEntryTime(entry) {
+      const value = entry?.at || entry?.fetchedAt || entry?.createdAt || entry?.time || "";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function formatLastFetchTime(date) {
+      return new Intl.DateTimeFormat("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      }).format(date);
+    }
+
+    function elapsedSinceText(date, now = new Date()) {
+      const elapsedMs = Math.max(0, now.getTime() - date.getTime());
+      const totalHours = Math.floor(elapsedMs / 3600000);
+      const days = Math.floor(totalHours / 24);
+      const hours = totalHours % 24;
+      if (days > 0) return `${days}天${hours}小时`;
+      if (hours > 0) return `${hours}小时`;
+      return "不足1小时";
+    }
+
+    function todayLastFetchHeroStatus() {
+      const lastFetchDate = (fetchLogEntries || [])
+        .map(fetchLogEntryTime)
+        .filter(Boolean)
+        .sort((a, b) => b.getTime() - a.getTime())[0];
+      if (!lastFetchDate) {
+        return `<div class="last-fetch-status"><strong>上次抓取：暂无记录</strong><span>完成一次抓取后这里会显示间隔</span></div>`;
+      }
+      return `
+        <div class="last-fetch-status">
+          <strong>上次抓取：${escapeHTML(formatLastFetchTime(lastFetchDate))}</strong>
+          <span>距今 ${escapeHTML(elapsedSinceText(lastFetchDate))} 未抓取</span>
+        </div>
+      `;
+    }
+
+    function mergePaperPool(existing, incoming) {
+      const merged = new Map();
+      [...existing, ...incoming].forEach(paper => {
+        const key = String(paper.doi || paper.id || paper.url || paper.title || "").toLowerCase();
+        if (!key) return;
+        merged.set(key, { ...(merged.get(key) || {}), ...paper });
+      });
+      return [...merged.values()].map(normalizePaperForView);
+    }
+
+    function removePaperFromPool(pool, target) {
+      const targetKeys = new Set(paperLookupKeys(target));
+      return pool.filter(paper => !paperLookupKeys(paper).some(key => targetKeys.has(key)));
+    }
+
+    function paperLookupKeys(paper) {
+      return [paper.doi, paper.url, paper.pdfUrl, paper.id, paper.title]
+        .map(value => String(value || "").trim().toLowerCase().replace(/\s+/g, " "))
+        .filter(Boolean);
+    }
+
+    function paperLooksLikeGeneratedSummary(value) {
+      return /^(该论文|论文|本文|研究提出|该文|这篇论文)/.test(String(value || "").trim());
+    }
+
+    function buildPaperLookup(pool) {
+      const lookup = new Map();
+      pool.forEach(paper => {
+        paperLookupKeys(paper).forEach(key => {
+          const previous = lookup.get(key);
+          if (!previous || (paper.abstractZh && !previous.abstractZh)) lookup.set(key, paper);
+        });
+      });
+      return lookup;
+    }
+
+    function hydratePaperFromLookup(paper, lookup) {
+      const match = paperLookupKeys(paper).map(key => lookup.get(key)).find(Boolean);
+      if (!match) return normalizePaperForView(paper);
+      const summary = paperLooksLikeGeneratedSummary(paper.summary) && match.summary
+        ? match.summary
+        : (paper.summary || match.summary);
+      const tokenUsage = paper.tokenUsage?.status === "已调用 AI"
+        ? paper.tokenUsage
+        : (match.tokenUsage || paper.tokenUsage);
+      return normalizePaperForView({
+        ...paper,
+        summary,
+        abstractZh: paper.abstractZh || match.abstractZh,
+        llmSummary: paper.llmSummary || match.llmSummary,
+        reason: paper.reason || match.reason,
+        tokenUsage,
+        journalMetrics: paper.journalMetrics || match.journalMetrics
+      });
+    }
+
+    function syncTodayFetchSessionsFromPaperPool(pool) {
+      if (!todayFetchSessions.length || !pool.length) return false;
+      const lookup = buildPaperLookup(pool);
+      if (!lookup.size) return false;
+      let changed = false;
+      todayFetchSessions = todayFetchSessions.map(session => {
+        const papers = session.papers.map(paper => hydratePaperFromLookup(paper, lookup));
+        const sessionChanged = papers.some((paper, index) =>
+          paper.abstractZh !== session.papers[index]?.abstractZh ||
+          paper.summary !== session.papers[index]?.summary
+        );
+        if (!sessionChanged) return session;
+        changed = true;
+        return {
+          ...session,
+          papers,
+          meta: session.meta ? { ...session.meta, papers, count: papers.length } : session.meta
+        };
+      });
+      if (!changed) return false;
+      const activeSession = activeTodayFetchSession();
+      if (activeSession) {
+        todayPapers = activeSession.papers;
+        paperDataMeta = activeSession.meta;
+      }
+      saveTodayFetchSessions();
+      return true;
+    }
+
+    function saveTodayFetchSession(payload, normalizedPapers) {
+      const startDate = payload.startDate || fetchRange.startDate;
+      const endDate = payload.endDate || fetchRange.endDate;
+      const fetchedAt = payload.fetchedAt || new Date().toISOString();
+      const id = `${startDate}_${endDate}_${fetchedAt}`;
+      const rangeLabel = fetchRangeLabel(startDate, endDate);
+      const timeLabel = fetchSessionTimeLabel(fetchedAt);
+      const session = {
+        id,
+        label: `${rangeLabel} · ${timeLabel}`,
+        rangeLabel,
+        fetchedAt,
+        startDate,
+        endDate,
+        papers: normalizedPapers,
+        meta: payload
+      };
+      todayFetchSessions.unshift(session);
+      activeTodayFetchSessionId = id;
+      saveTodayFetchSessions();
+      return session;
+    }
+
+    function activeTodayFetchSession() {
+      return todayFetchSessions.find(session => session.id === activeTodayFetchSessionId) || null;
+    }
+
+    function removeTodayFetchSession(sessionId) {
+      const session = todayFetchSessions.find(item => item.id === sessionId);
+      if (!session) return;
+      todayFetchSessions = todayFetchSessions.filter(item => item.id !== sessionId);
+      if (activeTodayFetchSessionId === sessionId) {
+        const nextSession = todayFetchSessions[0] || null;
+        activeTodayFetchSessionId = nextSession?.id || "";
+        todayPapers = nextSession?.papers || [];
+        paperDataMeta = nextSession?.meta || null;
+        paperDataStatus = nextSession
+          ? `显示 ${nextSession.label} 抓取结果`
+          : `已清除 ${session.label} 的今日论文显示；已入库论文仍保留在全部论文`;
+      } else {
+        paperDataStatus = `已清除 ${session.label} 的今日论文显示；已入库论文仍保留在全部论文`;
+      }
+      saveTodayFetchSessions();
+      renderToday();
+    }
+
+    function paperTitleLink(paper) {
+      const title = escapeHTML(paper.title);
+      const url = String(paper.url || paper.pdfUrl || "").trim();
+      return url ? `<a href="${escapeHTML(url)}" target="_blank" rel="noopener">${title}</a>` : title;
+    }
+
+    function paperStableKey(paper) {
+      return String(paper.id || paper.doi || paper.url || paper.title || "").trim();
+    }
+
+    function isFavoritePaper(paper) {
+      return paperLookupKeys(paper).some(key => favoriteKeys.has(key));
+    }
+
+    function paperNoteFor(paper) {
+      return paperLookupKeys(paper).map(key => paperNoteByKey.get(key)).find(Boolean) || {};
+    }
+
+    function paperShortTitle(paper) {
+      return String(paperNoteFor(paper).shortTitle || inferPaperShortTitle(paper)).trim();
+    }
+
+    function inferPaperShortTitle(paper) {
+      const year = String(paper.published || paper.date || paper.fetchedAt || "").match(/(19|20)\d{2}/)?.[0] || "n.d.";
+      return `${year}@`;
+    }
+
+    function isReadPaper(paper) {
+      return paperNoteFor(paper).read === true;
+    }
+
+    function isStarredPaper(paper) {
+      return paperNoteFor(paper).starred === true;
+    }
+
+    function paperLlmRefreshButton(paper) {
+      if (location.hash.replace("#", "") !== "all") return "";
+      const key = paperStableKey(paper);
+      if (!key) return "";
+      const loading = archiveLlmRefreshingKeys.has(key);
+      return `<button class="ghost-btn" type="button" data-refresh-paper-llm="${escapeHTML(key)}" ${loading || archiveLlmRefreshingAll ? "disabled" : ""}>${loading ? "LLM中" : "LLM"}</button>`;
+    }
+
+    function paperShortTitleEditor(paper) {
+      const key = paperStableKey(paper);
+      if (!key) return "";
+      return `
+        <label class="short-title-row">
+          <span>短标题</span>
+          <input class="short-title-input" data-short-title-input="${escapeHTML(key)}" value="${escapeHTML(paperShortTitle(paper))}" placeholder="设置短标题，便于后续搜索">
+        </label>
+      `;
+    }
+
+    function favoritePaperWorkflowButton(paper, scope = "") {
+      if (scope !== "favorites") return "";
+      const key = escapeHTML(paperStableKey(paper) || paper.id || "");
+      if (!key) return "";
+      if (favoriteActiveTab === "reading") {
+        return `<button class="ghost-btn" type="button" data-favorite-mark-read="${key}">标记已读</button>`;
+      }
+      if (favoriteActiveTab === "read") {
+        return `
+          <button class="ghost-btn" type="button" data-favorite-mark-unread="${key}">未阅读</button>
+          <button class="ghost-btn" type="button" data-favorite-remove-read="${key}">删除</button>
+        `;
+      }
+      return "";
+    }
+
+    function paperCard(paper, scope = "") {
+      const isSaved = isFavoritePaper(paper);
+      const isStarred = isStarredPaper(paper);
       const paperId = escapeHTML(paper.id);
       const labelList = paperCategoryLabels(paper);
       const tokenUsage = paperTokenUsage(paper);
       const journalMetrics = paperJournalMetrics(paper);
+      const publishedLabel = paperPublishedDateLabel(paper);
+      const publishedDoiControl = paperPublishedDoiControl(paper, publishedLabel);
+      const matchLabel = paperKeywordMatchLabel(paper);
+      const abstractBlock = paperAbstractBlock(paper);
+      const reasonBlock = paperReasonBlock(paper);
       return `
         <article class="paper-card">
           <div class="paper-head">
-            <div class="source">${escapeHTML(paper.source)}</div>
+            <div>
+              <div class="paper-source-row">
+                ${publishedDoiControl}
+                <span class="source">${escapeHTML(paperSourceLabel(paper))}</span>
+                ${journalMetricTags(journalMetrics)}
+              </div>
+            </div>
             <div class="head-actions">
+              ${paperLlmRefreshButton(paper)}
+              ${favoritePaperWorkflowButton(paper, scope)}
               <button class="star-btn ${isStarred ? "starred" : ""}" data-star-toggle="${paperId}">${isStarred ? "已标星" : "☆ 标星"}</button>
               <button class="favorite ${isSaved ? "saved" : ""}" data-favorite="${paperId}">${isSaved ? "已收藏" : "♡ 加入个人收藏"}</button>
-              <span class="score">${escapeHTML(paper.score)}</span>
             </div>
           </div>
-          <div class="tags">${labelList.map(label => `<span class="tag">${escapeHTML(label)}</span>`).join("")}</div>
-          <h2 class="paper-title">${escapeHTML(paper.title)}</h2>
-          <p class="paper-summary">${escapeHTML(paper.summary)}</p>
-          <div class="tags">${paper.tags.map(tag => `<span class="tag">${escapeHTML(tag)}</span>`).join("")}</div>
-          <div class="token-usage">
-            <span>期刊指标：${escapeHTML(journalMetrics.status)}</span>
-            <span>IF ${escapeHTML(journalMetrics.impactFactor || "--")}</span>
-            <span>分区 ${escapeHTML(journalMetrics.partition || "--")}</span>
-            ${journalMetrics.source ? `<span>${escapeHTML(journalMetrics.source)}</span>` : ""}
+          <div class="paper-title-row">
+            <h2 class="paper-title">${paperTitleLink(paper)}</h2>
           </div>
-          <div class="reason">为什么与你相关：${escapeHTML(paper.reason)}</div>
+          <div class="paper-title-tools">
+            ${paperShortTitleEditor(paper)}
+          </div>
+          ${abstractBlock}
+          ${reasonBlock}
           <div class="token-usage">
+            <span class="score-pill">评分 ${escapeHTML(paper.score)}</span>
+            ${labelList.map(label => `<span class="tag">${escapeHTML(label)}</span>`).join("")}
+          </div>
+          <div class="paper-signal-row">
+            <span class="match-pill">${escapeHTML(matchLabel)}</span>
             <span>AI Token：${escapeHTML(tokenUsage.total)}</span>
-            <span>输入 ${escapeHTML(tokenUsage.prompt)}</span>
-            <span>输出 ${escapeHTML(tokenUsage.completion)}</span>
-            <span>${escapeHTML(tokenUsage.status)}</span>
+            ${paperBibliography(paper)}
           </div>
         </article>
       `;
     }
 
     function readingCard(paper, index) {
-      const isRead = readPapers.has(paper.id);
-      const isStarred = starredPapers.has(paper.id);
+      const isRead = isReadPaper(paper);
+      const isStarred = isStarredPaper(paper);
       const paperId = escapeHTML(paper.id);
       return `
         <article class="reading-card">
           <div class="reading-order">${index + 1}</div>
           <div>
             <div class="source">${escapeHTML(paper.source)} · ${escapeHTML(paperCategoryLabels(paper).join(" / "))}</div>
-            <h2 class="paper-title">${escapeHTML(paper.title)}</h2>
-            <p class="paper-summary">${escapeHTML(paper.summary)}</p>
+            <h2 class="paper-title">${paperTitleLink(paper)}</h2>
+            <p class="paper-summary">${escapeHTML(paperAbstractZh(paper))}</p>
             <div class="reading-meta">
               <span>建议阅读：${paper.score >= 88 ? "优先精读" : "快速浏览"}</span>
               <span>${escapeHTML(paper.sourceType)}</span>
@@ -988,33 +2032,256 @@
 
     function bindReadingStatus() {
       document.querySelectorAll("[data-read-toggle]").forEach(button => {
-        button.addEventListener("click", () => {
+        button.addEventListener("click", async () => {
           const id = button.getAttribute("data-read-toggle");
-          if (readPapers.has(id)) readPapers.delete(id);
-          else readPapers.add(id);
-          renderFavorites();
+          const paper = papers.find(item => item.id === id)
+            || favoritePapersCache.find(item => item.id === id)
+            || recentPapers.find(item => item.id === id)
+            || todayPapers.find(item => item.id === id);
+          if (!paper) return;
+          await updatePaperNote(paper, { read: !isReadPaper(paper) });
+        });
+      });
+    }
+
+    function findPaperForFavoriteWorkflow(key) {
+      return papers.find(item => paperStableKey(item) === key || item.id === key)
+        || favoritePapersCache.find(item => paperStableKey(item) === key || item.id === key)
+        || recentPapers.find(item => paperStableKey(item) === key || item.id === key)
+        || todayPapers.find(item => paperStableKey(item) === key || item.id === key);
+    }
+
+    function bindFavoriteWorkflowActions() {
+      document.querySelectorAll("[data-favorite-mark-read]").forEach(button => {
+        button.addEventListener("click", async () => {
+          const key = button.getAttribute("data-favorite-mark-read");
+          const paper = findPaperForFavoriteWorkflow(key);
+          if (!paper) return;
+          await updatePaperNote(paper, { read: true });
+        });
+      });
+      document.querySelectorAll("[data-favorite-mark-unread]").forEach(button => {
+        button.addEventListener("click", async () => {
+          const key = button.getAttribute("data-favorite-mark-unread");
+          const paper = findPaperForFavoriteWorkflow(key);
+          if (!paper) return;
+          await updatePaperNote(paper, { read: false });
+        });
+      });
+      document.querySelectorAll("[data-favorite-remove-read]").forEach(button => {
+        button.addEventListener("click", async () => {
+          const key = button.getAttribute("data-favorite-remove-read");
+          const paper = findPaperForFavoriteWorkflow(key);
+          if (!paper) return;
+          await updateFavorite(paper, false);
+        });
+      });
+    }
+
+    async function copyText(text) {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      const input = document.createElement("textarea");
+      input.value = text;
+      input.style.position = "fixed";
+      input.style.left = "-9999px";
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      input.remove();
+    }
+
+    function bindCitationCopy() {
+      document.querySelectorAll("[data-copy-doi]").forEach(button => {
+        button.addEventListener("click", async () => {
+          try {
+            await copyText(button.getAttribute("data-copy-doi") || "");
+            showToast("DOI 已复制");
+          } catch {
+            showToast("复制失败，请手动复制 DOI");
+          }
+        });
+      });
+      document.querySelectorAll("[data-copy-citation]").forEach(button => {
+        button.addEventListener("click", async () => {
+          try {
+            await copyText(button.getAttribute("data-copy-citation") || "");
+            showToast("引用格式已复制");
+          } catch {
+            showToast("复制失败，请手动复制提示内容");
+          }
         });
       });
     }
 
     function bindStarredStatus() {
       document.querySelectorAll("[data-star-toggle]").forEach(button => {
-        button.addEventListener("click", () => {
+        button.addEventListener("click", async () => {
           const id = button.getAttribute("data-star-toggle");
-          if (starredPapers.has(id)) starredPapers.delete(id);
-          else starredPapers.add(id);
-          renderPage(location.hash.replace("#", "") || "today");
+          const paper = [...recentPapers, ...todayPapers, ...favoritePapersCache, ...papers].find(item => item.id === id);
+          if (!paper) return;
+          await updatePaperNote(paper, { starred: !isStarredPaper(paper) });
         });
       });
     }
 
-    function timelineItem(paper) {
+    function timelineItem(paper, scope = "") {
+      const stamp = paperTimelineStamp(paper);
       return `
         <div class="timeline-item">
-          <div class="timeline-time">${paper.time}<span>${paper.sourceType}</span></div>
-          ${paperCard(paper)}
+          <div class="timeline-stamp">
+            <div class="timeline-date">${escapeHTML(stamp.date)}</div>
+            <div class="timeline-time">${escapeHTML(stamp.time)}</div>
+            <div class="timeline-source-type">${escapeHTML(paperSourceChannelLabel(paper))}</div>
+          </div>
+          ${paperCard(paper, scope)}
         </div>
       `;
+    }
+
+    function paperVisibleLimitKey(scope) {
+      const base = String(scope || "papers");
+      if (base === "today") return `today:${activePaperCategory}:${activeTodayFetchSessionId || "current"}`;
+      if (base === "all") {
+        return [
+          "all",
+          allPaperSortMode,
+          allPaperSortDirection,
+          allPaperDateFilter,
+          allPaperSearchQuery,
+          [...selectedAllPaperKeywords].sort().join(",")
+        ].join(":");
+      }
+      if (base === "favorites") return `favorites:${favoriteActiveTab}`;
+      return base;
+    }
+
+    function paperVisibleLimit(scope) {
+      const key = paperVisibleLimitKey(scope);
+      return paperVisibleLimits.get(key) || paperPageSize;
+    }
+
+    function resetPaperVisibleLimit(scope) {
+      paperVisibleLimits.delete(paperVisibleLimitKey(scope));
+    }
+
+    function loadMorePapers(scope) {
+      const key = paperVisibleLimitKey(scope);
+      paperVisibleLimits.set(key, (paperVisibleLimits.get(key) || paperPageSize) + paperPageSize);
+      if (scope === "today") renderToday();
+      if (scope === "all") renderAll();
+      if (scope === "favorites") renderFavorites();
+    }
+
+    function renderPaperTimeline(list, scope) {
+      const visibleLimit = paperVisibleLimit(scope);
+      const visiblePapers = list.slice(0, visibleLimit);
+      const hasMore = list.length > visibleLimit;
+      const timeline = visiblePapers.length
+        ? `<div class="timeline-list">${visiblePapers.map(paper => timelineItem(paper, scope)).join("")}</div>`
+        : "";
+      const sentinel = hasMore
+        ? `<div class="lazy-paper-sentinel" data-lazy-paper-sentinel="${escapeHTML(scope)}">继续加载后 ${Math.min(paperPageSize, list.length - visibleLimit)} 篇</div>`
+        : "";
+      return `${timeline}${sentinel}`;
+    }
+
+    function paperDisplayDate(paper) {
+      const value = String(paper.published || paper.date || paperDataMeta?.date || recentDataMeta?.date || "").trim();
+      return formatDateParts(value) || "日期待定";
+    }
+
+    function paperTimelineStamp(paper) {
+      if (allPaperSortMode !== "published") {
+        const value = String(paper.fetchedAt || paper.date || paper.published || "").trim();
+        const date = formatDateParts(value);
+        if (date) {
+          return {
+            date,
+            time: formatTimeParts(value)
+          };
+        }
+      }
+      return {
+        date: paperDisplayDate(paper),
+        time: paper.time || ""
+      };
+    }
+
+    function paperPublishedDateLabel(paper) {
+      const value = String(paper.published || paper.date || "").trim();
+      return formatDateParts(value);
+    }
+
+    function paperKeywordMatchLabel(paper) {
+      const keywords = getAllEnabledKeywords();
+      const matched = keywords.filter(keyword => paperMatchesKeyword(paper, keyword));
+      if (!matched.length) return "检索依据：未直接命中当前关键词";
+      return `检索依据：${matched.slice(0, 3).join(" / ")}`;
+    }
+
+    function paperMatchesKeyword(paper, keyword) {
+      const clean = String(keyword || "").trim();
+      if (!clean) return false;
+      const text = [
+        paper.title,
+        paper.summary,
+        paper.reason,
+        paper.source,
+        paper.journal,
+        ...(Array.isArray(paper.tags) ? paper.tags : []),
+        ...(Array.isArray(paper.categoryLabels) ? paper.categoryLabels : [])
+      ].join(" ").toLowerCase();
+      const lower = clean.toLowerCase();
+      if (lower.length <= 3) {
+        return new RegExp(`(^|[^a-z0-9])${escapeRegExp(lower)}([^a-z0-9]|$)`, "i").test(text);
+      }
+      return text.includes(lower);
+    }
+
+    function paperAuthorsText(paper) {
+      if (Array.isArray(paper.authors)) return paper.authors.join(" ");
+      return String(paper.authors || paper.author || "").trim();
+    }
+
+    function paperMatchesSearchQuery(paper, query) {
+      const clean = String(query || "").trim().toLowerCase();
+      if (!clean) return true;
+      const text = [
+        paper.title,
+        paperShortTitle(paper),
+        paperAuthorsText(paper),
+        paper.summary,
+        paper.abstractZh,
+        paper.reason,
+        ...(Array.isArray(paper.tags) ? paper.tags : [])
+      ].join(" ").toLowerCase();
+      return splitSearchOrClauses(clean).some(clause => (
+        clause.split(/\s+/).filter(Boolean).every(part => text.includes(part))
+      ));
+    }
+
+    function splitSearchOrClauses(query) {
+      return String(query || "")
+        .split(/\s+OR\s+/i)
+        .map(part => part.trim())
+        .filter(Boolean);
+    }
+
+    function escapeRegExp(value) {
+      return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function formatDateParts(value) {
+      const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      return match ? `${match[1]}.${match[2]}.${match[3]}` : "";
+    }
+
+    function formatTimeParts(value) {
+      const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+      return match ? `${match[4]}:${match[5]}` : "";
     }
 
     function categoryBar() {
@@ -1037,6 +2304,28 @@
       return Array.isArray(paper.categoryLabels) && paper.categoryLabels.length ? paper.categoryLabels : [paper.categoryLabel].filter(Boolean);
     }
 
+    function paperPublishedDoiControl(paper, publishedLabel) {
+      if (!publishedLabel) return "";
+      const doi = String(paper.doi || "").trim();
+      const title = doi ? `DOI：${doi}` : "未记录 DOI";
+      const copyAttrs = doi
+        ? ` data-copy-doi="${escapeHTML(doi)}" title="${escapeHTML(title)}" aria-label="复制 DOI：${escapeHTML(doi)}"`
+        : ` title="${escapeHTML(title)}" aria-label="${escapeHTML(title)}"`;
+      return `<button class="published-date-pill" type="button"${copyAttrs}>发表时间：${escapeHTML(publishedLabel)}</button>`;
+    }
+
+    function paperSourceLabel(paper) {
+      const journal = String(paper.journal || paper.venue || "").trim();
+      if (journal) return `期刊：${journal}`;
+      return paper.source || "来源未记录";
+    }
+
+    function paperBibliography(paper) {
+      const journal = paper.journal || paper.source || "未记录";
+      const citation = paper.citation || `${paper.title || "未命名论文"}。${journal}。`;
+      return `<button class="citation-copy" type="button" data-copy-citation="${escapeHTML(citation)}" title="${escapeHTML(citation)}" aria-label="复制引用格式">⧉</button>`;
+    }
+
     function paperTokenUsage(paper) {
       const usage = paper.tokenUsage || {};
       const prompt = Number(usage.prompt || 0);
@@ -1049,23 +2338,329 @@
       };
     }
 
+    function paperAbstractZh(paper) {
+      const abstractZh = String(paper.abstractZh || "").trim();
+      if (abstractZh) return abstractZh;
+      const summary = String(paper.summary || "").trim();
+      const llmSummary = String(paper.llmSummary || "").trim();
+      if (!summary) return "";
+      if (llmSummary && summary === llmSummary) return "";
+      if (/^(该论文|论文|本文|研究提出|该文|这篇论文)/.test(summary)) return "";
+      return summary;
+    }
+
+    function paperAbstractBlock(paper) {
+      const abstractZh = paperAbstractZh(paper);
+      return abstractZh ? `<div class="reason abstract-translation"><span class="reason-label">摘要翻译</span>${escapeHTML(abstractZh)}</div>` : "";
+    }
+
+    function paperReasonBlock(paper) {
+      const reason = String(paper.reason || "").trim();
+      return reason ? `<div class="reason"><span class="reason-label">推荐理由</span>${escapeHTML(reason)}</div>` : "";
+    }
+
     function paperJournalMetrics(paper) {
+      if (isPreprintPaper(paper)) return null;
       const metrics = paper.journalMetrics || {};
+      if (!metrics.impactFactor && !metrics.partition && !metrics.upgradedPartition) return null;
       return {
         impactFactor: metrics.impactFactor || "",
         partition: metrics.partition || "",
+        upgradedPartition: metrics.upgradedPartition || "",
         source: metrics.source || "",
         status: metrics.status || "未查询"
       };
+    }
+
+    function isPreprintPaper(paper) {
+      const text = [paper.journal, paper.venue, paper.source, paper.sourceType]
+        .map(value => String(value || "").trim().toLowerCase())
+        .join(" ");
+      return /\barxiv\b/.test(text) || /\bbiorxiv\b/.test(text) || text.includes("预印本");
+    }
+
+    function paperSourceChannelLabel(paper) {
+      const source = String(paper.source || "").toLowerCase();
+      if (source.includes("google 搜索")) return "渠道：Google 搜索";
+      if (source.includes("google scholar")) return "渠道：Google Scholar";
+      if (source.includes("semantic scholar")) return "渠道：Semantic Scholar";
+      if (source.includes("arxiv")) return "渠道：arXiv";
+      if (source.includes("biorxiv")) return "渠道：bioRxiv";
+      return paper.sourceType ? `渠道：${paper.sourceType}` : "渠道未记录";
+    }
+
+    function journalPartitionClass(partition) {
+      const value = String(partition || "").toUpperCase();
+      if (value.includes("Q1") || value.includes("1区")) return "q1";
+      if (value.includes("Q2") || value.includes("2区")) return "q2";
+      if (value.includes("Q3") || value.includes("3区")) return "q3";
+      if (value.includes("Q4") || value.includes("4区")) return "q4";
+      return "muted";
+    }
+
+    function journalMetricTags(metrics) {
+      if (!metrics) return "";
+      const tags = [];
+      if (metrics.impactFactor) tags.push(`<span class="journal-tag if">IF ${escapeHTML(metrics.impactFactor)}</span>`);
+      if (metrics.partition) {
+        tags.push(`<span class="journal-tag ${journalPartitionClass(metrics.partition)}">SCI ${escapeHTML(metrics.partition)}</span>`);
+      }
+      if (metrics.upgradedPartition) {
+        tags.push(`<span class="journal-tag cas">中科院 ${escapeHTML(metrics.upgradedPartition)}</span>`);
+      }
+      if (!tags.length) return "";
+      return `<div class="journal-tags" title="${escapeHTML(metrics.source || metrics.status || "期刊指标")}">${tags.join("")}</div>`;
     }
 
     function matchesPaperCategory(paper) {
       return activePaperCategory === "all" || paperCategoryKeys(paper).includes(activePaperCategory);
     }
 
+    function matchesSelectedAllPaperKeywords(paper) {
+      if (!selectedAllPaperKeywords.size) return true;
+      return [...selectedAllPaperKeywords].some(keyword => paperMatchesKeyword(paper, keyword));
+    }
+
+    function paperDateValue(paper, mode = allPaperSortMode) {
+      if (mode === "published") return String(paper.published || paper.date || "").trim();
+      return String(paper.fetchedAt || paper.date || paper.published || "").trim();
+    }
+
+    function paperDateKey(paper, mode = allPaperSortMode) {
+      const value = paperDateValue(paper, mode);
+      const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      return match ? `${match[1]}-${match[2]}-${match[3]}` : "";
+    }
+
+    function paperPublishedYear(paper) {
+      const value = paperDateValue(paper, "published");
+      return value.match(/(19|20)\d{2}/)?.[0] || "";
+    }
+
+    function todayKey() {
+      return todayDateInputValue();
+    }
+
+    function offsetDateKey(offsetDays) {
+      const date = new Date(`${todayKey()}T00:00:00`);
+      date.setDate(date.getDate() + offsetDays);
+      return date.toISOString().slice(0, 10);
+    }
+
+    function fetchedTimeBucketKey(paper) {
+      const key = paperDateKey(paper, "fetched");
+      if (!key) return "unknown";
+      const today = new Date(`${todayKey()}T00:00:00`);
+      const date = new Date(`${key}T00:00:00`);
+      if (Number.isNaN(date.getTime())) return "unknown";
+      const ageDays = Math.floor((today - date) / 86400000);
+      if (ageDays >= 0 && ageDays < 7) return "last-7-days";
+      return `month-${key.slice(0, 7)}`;
+    }
+
+    function fetchedMonthLabel(monthKey) {
+      const month = monthKey.replace("month-", "").split("-")[1] || "";
+      return `${Number(month)}M`;
+    }
+
+    function publishedYearBuckets(list) {
+      const counts = new Map();
+      list.forEach(paper => {
+        const year = paperPublishedYear(paper) || "unknown";
+        counts.set(year, (counts.get(year) || 0) + 1);
+      });
+      const years = [...counts.keys()]
+        .filter(year => year !== "unknown")
+        .sort((a, b) => Number(b) - Number(a));
+      const total = list.length || 1;
+      const minStandalone = Math.max(2, Math.ceil(total * 0.04));
+      const buckets = [];
+      let rangeStart = "";
+      let rangeEnd = "";
+      let rangeCount = 0;
+      const flushRange = () => {
+        if (!rangeStart) return;
+        const label = rangeStart === rangeEnd ? `${rangeStart}` : `${rangeEnd}-${rangeStart}`;
+        buckets.push({ key: `year-range-${rangeEnd}-${rangeStart}`, label, nodeLabel: label, count: rangeCount, years: [rangeStart, rangeEnd] });
+        rangeStart = "";
+        rangeEnd = "";
+        rangeCount = 0;
+      };
+      years.forEach(year => {
+        const count = counts.get(year) || 0;
+        if (count >= minStandalone) {
+          flushRange();
+          buckets.push({ key: `year-${year}`, label: `${year}`, nodeLabel: year, count });
+          return;
+        }
+        if (!rangeStart) rangeStart = year;
+        rangeEnd = year;
+        rangeCount += count;
+      });
+      flushRange();
+      if (counts.has("unknown")) buckets.push({ key: "unknown", label: "时间待定", nodeLabel: "?", count: counts.get("unknown") });
+      return buckets;
+    }
+
+    function allPaperTimeBucketKey(paper, mode = allPaperSortMode) {
+      if (mode === "published") {
+        const year = paperPublishedYear(paper);
+        if (!year) return "unknown";
+        const bucket = publishedYearBuckets(recentPapers).find(item => {
+          if (item.key === `year-${year}`) return true;
+          if (!item.years) return false;
+          const start = Number(item.years[0]);
+          const end = Number(item.years[1]);
+          return Number(year) <= start && Number(year) >= end;
+        });
+        return bucket?.key || `year-${year}`;
+      }
+      return fetchedTimeBucketKey(paper);
+    }
+
+    function allPaperTimeBuckets(list, mode = allPaperSortMode) {
+      const buckets = new Map();
+      list.forEach(paper => {
+        const key = allPaperTimeBucketKey(paper, mode);
+        buckets.set(key, (buckets.get(key) || 0) + 1);
+      });
+      if (mode === "published") {
+        return publishedYearBuckets(list)
+          .map(item => ({ ...item, count: buckets.get(item.key) || item.count || 0 }))
+          .filter(item => item.count > 0);
+      }
+      const monthBuckets = [...buckets.keys()]
+        .filter(key => key.startsWith("month-"))
+        .sort((a, b) => b.localeCompare(a))
+        .map(key => ({ key, label: key.replace("month-", "").replace("-", "."), nodeLabel: fetchedMonthLabel(key) }));
+      const fixed = [{ key: "last-7-days", label: "最近 7 天", nodeLabel: "7D" }];
+      const unknown = buckets.has("unknown") ? [{ key: "unknown", label: "时间待定", nodeLabel: "?" }] : [];
+      return [...fixed, ...monthBuckets, ...unknown]
+        .map(item => ({ ...item, count: buckets.get(item.key) || 0 }))
+        .filter(item => item.count > 0);
+    }
+
+    function matchesAllPaperDateFilter(paper) {
+      return allPaperDateFilter === "all" || allPaperTimeBucketKey(paper) === allPaperDateFilter;
+    }
+
+    function paperMatchesAllFilters(paper) {
+      return matchesSelectedAllPaperKeywords(paper)
+        && matchesAllPaperDateFilter(paper)
+        && paperMatchesSearchQuery(paper, allPaperSearchQuery);
+    }
+
+    function paperTimestamp(value) {
+      const time = Date.parse(value || "");
+      return Number.isNaN(time) ? 0 : time;
+    }
+
+    function sortAllPapers(list) {
+      const field = allPaperSortMode === "published" ? "published" : "fetchedAt";
+      const direction = allPaperSortDirection === "asc" ? 1 : -1;
+      return [...list].sort((a, b) => direction * (paperTimestamp(a[field] || a.date) - paperTimestamp(b[field] || b.date)));
+    }
+
+    function sortDirectionLabel(mode) {
+      if (allPaperSortMode !== mode) return "";
+      return allPaperSortDirection === "asc" ? " ↑" : " ↓";
+    }
+
+    function sortBar(sourcePapers) {
+      const buckets = allPaperTimeBuckets(sourcePapers);
+      const bucketTitle = allPaperSortMode === "published" ? "按发表年份筛选" : "按抓取日期筛选";
+      const bucketButtons = buckets.map(bucket => `
+        <button class="time-axis-node ${allPaperDateFilter === bucket.key ? "active" : ""}" data-all-time-filter="${escapeHTML(bucket.key)}" title="${escapeHTML(bucket.label)} · ${bucket.count}篇">
+          <span class="time-axis-dot">${escapeHTML(bucket.nodeLabel || bucket.label)}</span>
+          <span class="time-axis-label">${escapeHTML(bucket.label)}</span>
+          <span class="time-axis-count">${bucket.count}篇</span>
+        </button>
+      `).join("");
+      return `
+        <div class="category-bar">
+          <div class="all-sort-row">
+            <button class="category-btn ${allPaperSortMode === "fetched" ? "active" : ""}" data-paper-sort="fetched">按抓取时间${sortDirectionLabel("fetched")}</button>
+            <button class="category-btn ${allPaperSortMode === "published" ? "active" : ""}" data-paper-sort="published">按发表时间${sortDirectionLabel("published")}</button>
+          </div>
+          <div class="time-axis">
+            <div class="time-axis-head">
+              <span class="time-bucket-title">${bucketTitle}</span>
+              <button class="chip filter-chip ${allPaperDateFilter === "all" ? "selected" : ""}" data-all-time-filter="all">全部时间</button>
+            </div>
+            <div class="time-axis-head"><span>最新</span><span>最旧</span></div>
+            <div class="time-axis-track">
+              ${bucketButtons || `<span class="small-text">暂无可筛选时间</span>`}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function allPaperSearchPanel(totalCount, shownCount) {
+      return `
+        <div class="all-search-panel">
+          <input type="search" data-all-paper-search value="${escapeHTML(allPaperSearchQuery)}" placeholder="搜索论文标题、短标题、作者信息；支持 SIM OR RIM">
+          <div class="all-search-count">显示 ${shownCount} / ${totalCount} 篇</div>
+        </div>
+      `;
+    }
+
+    function archiveActionButtons() {
+      return `
+        <div class="token-row">
+          <button class="ghost-btn" data-refresh-archive-llm ${archiveLlmRefreshingAll ? "disabled" : ""}>${archiveLlmRefreshingAll ? "LLM中" : "LLM"}</button>
+          <button class="ghost-btn" data-refresh-journals>刷新期刊</button>
+          <button class="ghost-btn" data-dedupe-archive>自动去重</button>
+        </div>
+      `;
+    }
+
+    function allPaperControlPanel(totalCount, shownCount, sourcePapers) {
+      return `
+        <div class="all-control-panel">
+          ${allPaperSearchPanel(totalCount, shownCount)}
+          ${sortBar(sourcePapers)}
+        </div>
+      `;
+    }
+
+    function allPaperStatusText() {
+      const meta = recentDataMeta;
+      const countText = meta ? `${meta.count || recentPapers.length} 篇` : `${recentPapers.length} 篇示例`;
+      const dateText = meta?.date ? `日期：${meta.date}` : "当前为本地示例数据";
+      const errorText = meta?.errors?.length ? `；部分信源失败：${meta.errors.map(item => item.source).join("、")}` : "";
+      return `${recentDataStatus} · ${countText} · ${dateText}${errorText}`;
+    }
+
+    function allPaperSideFilter() {
+      const focusKeywords = [...getEnabledKeywords("primary"), ...getEnabledKeywords("secondary")];
+      const keywordChips = focusKeywords.length
+        ? focusKeywords.map(keyword => `
+            <button class="chip filter-chip ${selectedAllPaperKeywords.has(keyword) ? "selected" : ""}" data-all-filter-keyword="${escapeHTML(keyword)}">
+              ${escapeHTML(keyword)}
+            </button>
+          `).join("")
+        : `<span class="small-text">还没有启用的关注领域，请到“领域配置”中添加。</span>`;
+      return `
+        <h2>全部论文筛选</h2>
+        <div class="all-filter-section">
+          <div class="all-filter-title">关注标签</div>
+          <div class="token-row">${keywordChips}</div>
+        </div>
+      `;
+    }
+
+    function toggleSetValue(set, value) {
+      if (set.has(value)) set.delete(value);
+      else set.add(value);
+    }
+
     function normalizePaperForView(paper) {
       return {
         ...paper,
+        abstractZh: String(paper.abstractZh || "").trim(),
+        llmSummary: String(paper.llmSummary || "").trim(),
+        reason: String(paper.reason || "").trim(),
         categories: paperCategoryKeys(paper),
         categoryLabels: paperCategoryLabels(paper),
         tokenUsage: paperTokenUsage(paper),
@@ -1077,24 +2672,328 @@
       document.querySelectorAll("[data-paper-category]").forEach(button => {
         button.addEventListener("click", () => {
           activePaperCategory = button.getAttribute("data-paper-category");
+          resetPaperVisibleLimit("today");
           renderPage(location.hash.replace("#", "") || "today");
+        });
+      });
+    }
+
+    function bindPaperSort() {
+      document.querySelectorAll("[data-paper-sort]").forEach(button => {
+        button.addEventListener("click", () => {
+          const nextMode = button.getAttribute("data-paper-sort") || "fetched";
+          if (allPaperSortMode === nextMode) {
+            allPaperSortDirection = allPaperSortDirection === "asc" ? "desc" : "asc";
+          } else {
+            allPaperSortMode = nextMode;
+            allPaperSortDirection = "desc";
+            allPaperDateFilter = "all";
+          }
+          resetPaperVisibleLimit("all");
+          renderAll();
+        });
+      });
+      document.querySelectorAll("[data-all-time-filter]").forEach(button => {
+        button.addEventListener("click", () => {
+          allPaperDateFilter = button.getAttribute("data-all-time-filter") || "all";
+          resetPaperVisibleLimit("all");
+          renderAll();
+        });
+      });
+    }
+
+    function bindAllPaperSideFilters() {
+      document.querySelectorAll("[data-all-filter-keyword]").forEach(button => {
+        button.addEventListener("click", () => {
+          const keyword = button.getAttribute("data-all-filter-keyword");
+          if (!keyword) return;
+          toggleSetValue(selectedAllPaperKeywords, keyword);
+          resetPaperVisibleLimit("all");
+          renderAll();
+        });
+      });
+    }
+
+    function bindAllPaperSearch() {
+      const input = document.querySelector("[data-all-paper-search]");
+      if (!input) return;
+      input.addEventListener("input", () => {
+        allPaperSearchQuery = input.value.trim();
+        window.clearTimeout(allPaperSearchTimer);
+        allPaperSearchTimer = window.setTimeout(() => {
+          resetPaperVisibleLimit("all");
+          renderAll();
+          const nextInput = document.querySelector("[data-all-paper-search]");
+          if (nextInput) {
+            nextInput.focus();
+            nextInput.setSelectionRange(nextInput.value.length, nextInput.value.length);
+          }
+        }, 120);
+      });
+    }
+
+    function bindFavoriteTabs() {
+      document.querySelectorAll("[data-favorites-tab]").forEach(button => {
+        button.addEventListener("click", () => {
+          favoriteActiveTab = button.getAttribute("data-favorites-tab") || "reading";
+          resetPaperVisibleLimit("favorites");
+          renderFavorites();
+        });
+      });
+    }
+
+    function bindLazyPaperLoading() {
+      if (paperLazyObserver) paperLazyObserver.disconnect();
+      const sentinels = document.querySelectorAll("[data-lazy-paper-sentinel]");
+      if (!sentinels.length) return;
+      if (!("IntersectionObserver" in window)) {
+        sentinels.forEach(sentinel => loadMorePapers(sentinel.getAttribute("data-lazy-paper-sentinel")));
+        return;
+      }
+      paperLazyObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) return;
+          const scope = entry.target.getAttribute("data-lazy-paper-sentinel");
+          if (!scope) return;
+          paperLazyObserver.unobserve(entry.target);
+          loadMorePapers(scope);
+        });
+      }, { rootMargin: "420px 0px" });
+      sentinels.forEach(sentinel => paperLazyObserver.observe(sentinel));
+    }
+
+    async function saveShortTitleInput(input) {
+      const key = input.getAttribute("data-short-title-input");
+      if (!key) return;
+      const value = input.value.trim();
+      const paper = [...recentPapers, ...todayPapers, ...favoritePapersCache, ...papers].find(item => paperStableKey(item) === key);
+      if (!paper) return;
+      await updatePaperNote(paper, { shortTitle: value });
+    }
+
+    function bindShortTitleEditors() {
+      document.querySelectorAll("[data-short-title-input]").forEach(input => {
+        input.addEventListener("change", () => saveShortTitleInput(input));
+        input.addEventListener("keydown", event => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          saveShortTitleInput(input);
+          input.blur();
         });
       });
     }
 
     function bindFavorites() {
       document.querySelectorAll("[data-favorite]").forEach(button => {
-        button.addEventListener("click", () => {
+        button.addEventListener("click", async () => {
           const id = button.getAttribute("data-favorite");
-          if (saved.has(id)) saved.delete(id);
-          else saved.add(id);
-          renderPage(location.hash.replace("#", "") || "today");
+          const paper = [...recentPapers, ...todayPapers, ...favoritePapersCache, ...papers].find(item => item.id === id);
+          if (!paper) return;
+          await updateFavorite(paper, !isFavoritePaper(paper));
         });
       });
     }
 
+    function applyFavoritesPayload(payload = {}) {
+      favoriteKeys.clear();
+      (Array.isArray(payload.favorites) ? payload.favorites : []).forEach(item => {
+        (Array.isArray(item.keys) ? item.keys : [item.key]).forEach(key => {
+          const cleanKey = String(key || "").trim().toLowerCase().replace(/\s+/g, " ");
+          if (cleanKey) favoriteKeys.add(cleanKey);
+        });
+      });
+      favoritePapersCache = Array.isArray(payload.papers) ? payload.papers.map(normalizePaperForView) : [];
+      favoriteStatus = `已载入个人收藏 ${favoritePapersCache.length} 篇`;
+    }
+
+    function applyPaperNotesPayload(payload = {}) {
+      paperNoteByKey.clear();
+      const notes = Array.isArray(payload.notes) ? payload.notes : [];
+      notes.forEach(note => {
+        (Array.isArray(note.keys) ? note.keys : [note.key]).forEach(key => {
+          const cleanKey = String(key || "").trim().toLowerCase().replace(/\s+/g, " ");
+          if (cleanKey) paperNoteByKey.set(cleanKey, note);
+        });
+      });
+      paperNotesStatus = `已载入论文标注 ${notes.length} 条`;
+    }
+
+    async function loadFavoritesData() {
+      if (location.protocol === "file:") {
+        favoriteStatus = "直接打开 HTML 时无法读取后端收藏文件";
+        return;
+      }
+      try {
+        const response = await fetch("/api/favorites");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        applyFavoritesPayload(await response.json());
+      } catch (error) {
+        favoriteStatus = `个人收藏接口暂不可用：${error.message}`;
+      }
+      if (location.hash.replace("#", "") === "favorites") renderFavorites();
+      const page = location.hash.replace("#", "");
+      if (page === "all") renderAll();
+      if (page === "favorites") renderFavorites();
+    }
+
+    async function loadPaperNotesData() {
+      if (location.protocol === "file:") {
+        paperNotesStatus = "直接打开 HTML 时无法读取后端论文标注文件";
+        return;
+      }
+      try {
+        const response = await fetch("/api/paper-notes");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        applyPaperNotesPayload(await response.json());
+      } catch (error) {
+        paperNotesStatus = `论文标注接口暂不可用：${error.message}`;
+      }
+      const page = location.hash.replace("#", "");
+      if (page === "all") renderAll();
+      if (page === "favorites") renderFavorites();
+    }
+
+    async function updateFavorite(paper, favorite) {
+      if (location.protocol === "file:") {
+        showToast("直接打开 HTML 时无法保存收藏");
+        return;
+      }
+      try {
+        const response = await fetch("/api/favorites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paper, favorite })
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        applyFavoritesPayload(await response.json());
+        showToast(favorite ? "已加入个人收藏" : "已取消个人收藏");
+      } catch (error) {
+        favoriteStatus = `保存个人收藏失败：${error.message}`;
+        showToast(`收藏失败：${error.message}`);
+      }
+      renderPage(location.hash.replace("#", "") || "today");
+    }
+
+    async function updatePaperNote(paper, note) {
+      if (location.protocol === "file:") {
+        showToast("直接打开 HTML 时无法保存论文标注");
+        return;
+      }
+      try {
+        const response = await fetch("/api/paper-notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paper, note })
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        applyPaperNotesPayload(await response.json());
+        showToast("论文标注已保存");
+      } catch (error) {
+        paperNotesStatus = `保存论文标注失败：${error.message}`;
+        showToast(`论文标注失败：${error.message}`);
+      }
+      renderPage(location.hash.replace("#", "") || "today");
+    }
+
     function getEnabledSourceNames() {
       return sourceState.filter(source => source.enabled).map(source => source.title);
+    }
+
+    function googleRollingRequestBody() {
+      return {
+        keywords: getAllEnabledKeywords(),
+        sources: getEnabledSourceNames()
+      };
+    }
+
+    function googleRollingStatusLine(items) {
+      const enabledItems = (Array.isArray(items) ? items : []).filter(item => item && item.label);
+      if (!enabledItems.length) return "自动：当前未启用 Google 抓取渠道";
+      return `自动：${enabledItems.map(item => `${item.label} 从第 ${escapeHTML(item.nextItem)} 篇开始`).join("；")}`;
+    }
+
+    async function loadGoogleRollingStatus() {
+      if (location.protocol === "file:") {
+        googleRollingStatusText = "自动：直接打开 HTML 时无法读取后端抓取起点";
+        return;
+      }
+      try {
+        const response = await fetch("/api/google-rolling/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(googleRollingRequestBody())
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        googleRollingStatusText = googleRollingStatusLine(payload.items);
+      } catch (error) {
+        googleRollingStatusText = `自动：读取抓取起点失败：${error.message}`;
+      }
+      if ((location.hash.replace("#", "") || "today") === "today") renderToday();
+    }
+
+    async function resetGoogleRollingStart() {
+      if (location.protocol === "file:") {
+        showToast("直接打开 HTML 时无法重置抓取起点");
+        return;
+      }
+      googleRollingStatusText = "自动：正在重置为从第一页抓取...";
+      fetchRange.googleStartItem = "";
+      saveFetchRange();
+      renderToday();
+      try {
+        const response = await fetch("/api/google-rolling/reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(googleRollingRequestBody())
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        googleRollingStatusText = googleRollingStatusLine(payload.items);
+        showToast("自动抓取起点已重置为第一页");
+      } catch (error) {
+        googleRollingStatusText = `自动：重置抓取起点失败：${error.message}`;
+        showToast(`重置失败：${error.message}`);
+      }
+      renderToday();
+    }
+
+    function fetchRangePanel() {
+      const sessionButtons = todayFetchSessions.map(session => `
+        <span class="fetch-session-chip ${session.id === activeTodayFetchSessionId ? "active" : ""}">
+          <button class="fetch-session-btn" data-fetch-session="${escapeHTML(session.id)}">
+            ${escapeHTML(session.label)} · ${session.papers.length} 篇
+          </button>
+          <button class="fetch-session-remove" data-remove-fetch-session="${escapeHTML(session.id)}" aria-label="清除 ${escapeHTML(session.label)} 的记录">×</button>
+        </span>
+      `).join("");
+      return `
+        <div class="fetch-range-panel">
+          <div class="keyword-section-head">
+            <h3>抓取时间范围</h3>
+            <div class="keyword-section-note">选择时间段后点击抓取。每次抓取会生成一个时间段按钮；清除只清空这里的按钮和当前显示，不删除“全部论文”里的入库论文。</div>
+          </div>
+          <div class="fetch-range-row">
+            <label>开始日期
+              <input type="date" data-fetch-range="startDate" value="${escapeHTML(fetchRange.startDate)}">
+            </label>
+            <label>结束日期
+              <input type="date" data-fetch-range="endDate" value="${escapeHTML(fetchRange.endDate)}">
+            </label>
+            <label>从第几篇开始
+              <input type="number" min="1" step="20" data-fetch-range="googleStartItem" value="${escapeHTML(fetchRange.googleStartItem || "")}" placeholder="自动">
+            </label>
+            <button class="ghost-btn" data-reset-google-start>重置</button>
+            <button class="primary-btn" data-refresh-papers="range">抓取论文</button>
+          </div>
+          <div class="google-rolling-status">${googleRollingStatusText}</div>
+          <div class="keyword-section-note">留空时按本地滚动游标继续；填 41 表示从第 41 篇开始抓取。</div>
+          <div class="fetch-session-bar">
+            ${sessionButtons || `<span class="small-text">还没有临时抓取时间段。</span>`}
+            ${todayFetchSessions.length ? `<button class="ghost-btn" data-clear-fetch-sessions>清除</button>` : ""}
+          </div>
+        </div>
+      `;
     }
 
     function paperStatusBar(mode = "today") {
@@ -1104,12 +3003,104 @@
       const countText = meta ? `${meta.count || list.length} 篇` : `${list.length} 篇示例`;
       const dateText = meta?.date ? `日期：${meta.date}` : "当前为本地示例数据";
       const errorText = meta?.errors?.length ? `；部分信源失败：${meta.errors.map(item => item.source).join("、")}` : "";
-      const actionText = mode === "recent" ? "刷新最近论文" : "刷新今日论文";
+      const journalButton = mode === "recent" ? `<button class="ghost-btn" data-refresh-archive-llm ${archiveLlmRefreshingAll ? "disabled" : ""}>${archiveLlmRefreshingAll ? "LLM中" : "LLM"}</button><button class="ghost-btn" data-refresh-journals>刷新期刊</button><button class="ghost-btn" data-dedupe-archive>自动去重</button>` : "";
       return `
         <div class="status-bar">
-          <span>${escapeHTML(status)} · ${escapeHTML(countText)} · ${escapeHTML(dateText + errorText)}</span>
-          <button class="ghost-btn" data-refresh-papers="${mode}">${actionText}</button>
+          ${fetchProgress && mode === "today" ? fetchProgressPanel() : `<span>${escapeHTML(status)} · ${escapeHTML(countText)} · ${escapeHTML(dateText + errorText)}</span>`}
+          <div class="token-row">
+            ${journalButton}
+          </div>
         </div>
+      `;
+    }
+
+    function fetchProgressPanel() {
+      const progress = fetchProgress || {};
+      const counts = progress.counts || {};
+      const percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
+      const items = [
+        ["原始返回", counts.raw],
+        ["去重后", counts.deduped],
+        ["关键词命中", counts.keywordMatched],
+        ["领域过滤", counts.domainMatched],
+        ["日期范围", counts.dateMatched],
+        ["候选", counts.ranked],
+        ["最终", counts.fetched]
+      ].filter(([, value]) => value !== undefined);
+      const sourceText = Array.isArray(progress.sources) && progress.sources.length
+        ? `；信源：${progress.sources.map(source => `${source.label || source.api} ${source.status === "failed" ? "失败" : `返回 ${source.returned || 0}`}`).join("，")}`
+        : "";
+      const pageDetail = progress.sourcePage
+        ? (progress.detail || `正在抓第 ${progress.sourcePage.page} 页，第 ${progress.sourcePage.itemStart}-${progress.sourcePage.itemEnd} 篇`)
+        : "";
+      const sourceFailures = [
+        ...(Array.isArray(progress.sources) ? progress.sources : [])
+          .filter(source => source.status === "failed")
+          .map(source => ({
+            source: source.api,
+            label: source.label || source.api,
+            message: source.message || ""
+          })),
+        ...(Array.isArray(progress.errors) ? progress.errors : [])
+      ].filter((item, index, list) => {
+        const key = `${item.source || item.label || ""}|${item.message || ""}`;
+        return key.trim() && list.findIndex(other => `${other.source || other.label || ""}|${other.message || ""}` === key) === index;
+      });
+      const failureText = sourceFailures.length
+        ? `<div class="fetch-progress-counts">${sourceFailures.map(item => `<span class="chip error">${escapeHTML(item.label || item.source || "信源")} 失败${item.message ? `：${escapeHTML(item.message)}` : ""}</span>`).join("")}</div>`
+        : "";
+      return `
+        <div class="fetch-progress">
+          <div class="fetch-progress-head">
+            <span>${escapeHTML(progress.message || "正在抓取论文...")}${escapeHTML(sourceText)}</span>
+            <span>${percent}%</span>
+          </div>
+          ${pageDetail ? `<div class="fetch-progress-page-detail">${escapeHTML(pageDetail)}</div>` : ""}
+          <div class="fetch-progress-track" aria-label="抓取进度">
+            <div class="fetch-progress-fill" style="width:${percent}%"></div>
+          </div>
+          <div class="fetch-progress-counts">
+            ${items.map(([label, value]) => `<span>${escapeHTML(label)} ${escapeHTML(value)}</span>`).join("")}
+          </div>
+          ${failureText}
+        </div>
+      `;
+    }
+
+    // 渲染“本次抓取报告”：调用了哪些 API、消耗了哪些大模型、抓到了哪几篇论文。
+    function fetchReportPanel(mode = "recent") {
+      const meta = mode === "recent" ? recentDataMeta : paperDataMeta;
+      const report = meta && meta.fetchReport;
+      if (!report) return "";
+      const wrap = "margin:12px 0;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;padding:12px 16px;";
+      if (report.cached) {
+        return `<div style="${wrap}color:#64748b;font-size:13px;">本次为缓存读取，未发起新的 API 调用。点击上方按钮可重新抓取并生成报告。</div>`;
+      }
+      const range = report.range ? `${escapeHTML(report.range.startDate || "")} → ${escapeHTML(report.range.endDate || "")}` : "";
+      const statusColor = s => s === "ok" ? "#15803d" : (s === "failed" ? "#b91c1c" : "#b45309");
+      const apiRows = (report.apis || []).map(a => {
+        const models = a.models && a.models.length ? `，模型：${escapeHTML(a.models.join("、"))}` : "";
+        const msg = a.message ? ` · ${escapeHTML(a.message)}` : "";
+        return `<li><b>${escapeHTML(a.label || a.api)}</b> · <span style="color:${statusColor(a.status)}">${escapeHTML(a.status)}</span> · 返回 ${a.returned || 0} 条${models}${msg}</li>`;
+      }).join("") || "<li>未调用任何数据源</li>";
+      const llm = report.llm || {};
+      const modelRows = (llm.models || []).map(m => `<li>${escapeHTML(m.model)} · 调用 ${m.calls} 次 · ${m.total} tokens（输入 ${m.prompt} / 输出 ${m.completion}）</li>`).join("") || "<li>本次未消耗大模型</li>";
+      const paperRows = (report.papers || []).map(p => {
+        const title = p.url ? `<a href="${escapeHTML(p.url)}" target="_blank" rel="noopener">${escapeHTML(p.title)}</a>` : escapeHTML(p.title);
+        return `<li><span style="color:#dc2626;font-weight:600">[${p.score ?? "-"}]</span> ${title} <span style="color:#64748b">· ${escapeHTML(p.source || "")}</span></li>`;
+      }).join("") || "<li>本次没有抓到新论文</li>";
+      const h = "margin:12px 0 4px;font-size:13px;color:#334155;font-weight:700;";
+      const ul = "margin:0;padding-left:18px;font-size:13px;color:#1f2937;line-height:1.7;";
+      return `
+        <details style="${wrap}" open>
+          <summary style="cursor:pointer;font-weight:700;color:#0f172a;font-size:14px;">本次抓取报告 · 范围 ${range} · 抓到 ${report.fetchedCount || 0} 篇</summary>
+          <h4 style="${h}">调用的 API（数据源 + 富集 + 大模型）</h4>
+          <ul style="${ul}">${apiRows}</ul>
+          <h4 style="${h}">消耗的大模型（合计 ${llm.totalTokens || 0} tokens，共 ${llm.calls || 0} 次调用）</h4>
+          <ul style="${ul}">${modelRows}</ul>
+          <h4 style="${h}">抓到的论文（${report.fetchedCount || 0} 篇）</h4>
+          <ul style="${ul}">${paperRows}</ul>
+        </details>
       `;
     }
 
@@ -1121,62 +3112,332 @@
         return;
       }
 
-      if (mode === "recent") recentDataStatus = refresh ? "正在刷新最近相关论文..." : "正在载入最近相关论文...";
-      else paperDataStatus = refresh ? "正在刷新今日论文..." : "正在载入真实论文数据...";
+      const isRangeFetch = mode === "range";
+      const requestMode = isRangeFetch ? "recent" : mode;
+      const rangeText = `${fetchRange.startDate} → ${fetchRange.endDate}`;
+      if (requestMode === "recent") {
+        recentDataStatus = refresh
+          ? `正在抓取 ${isRangeFetch ? rangeText : "最近"} 相关论文...`
+          : "正在载入最近相关论文...";
+        if (isRangeFetch) paperDataStatus = recentDataStatus;
+      } else {
+        paperDataStatus = refresh ? "正在抓取论文..." : "正在载入真实论文数据...";
+      }
       renderPage(location.hash.replace("#", "") || "today");
 
       try {
-        const endpoint = refresh ? "/api/papers/refresh" : (mode === "recent" ? "/api/papers/recent" : "/api/papers/today");
-        const options = refresh
-          ? {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                mode,
-                keywords: getAllEnabledKeywords(),
-                sources: getEnabledSourceNames()
-              })
-            }
-          : {};
-        const response = await fetch(endpoint, options);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const payload = await response.json();
-        if (Array.isArray(payload.papers) && payload.papers.length) {
-          const normalizedPapers = payload.papers.map(normalizePaperForView);
-          if (mode === "recent") {
-            recentPapers = normalizedPapers;
-            recentDataMeta = payload;
-            recentDataStatus = refresh ? "已刷新最近相关论文" : "已载入最近相关论文";
-          } else {
-            todayPapers = normalizedPapers;
-            paperDataMeta = payload;
-            paperDataStatus = refresh ? "已刷新今日真实论文" : "已载入今日真实论文";
-          }
-        } else {
-          if (mode === "recent") {
-            recentDataMeta = payload;
-            recentPapers = [];
-            recentDataStatus = "后端没有匹配到最近相关论文";
-          } else {
-            paperDataMeta = payload;
-            todayPapers = [];
-            paperDataStatus = "今天没有匹配到当前领域论文";
-          }
+        const payload = refresh
+          ? await runPaperRefreshJob(requestMode, isRangeFetch)
+          : await fetchPaperPayloadOnce(requestMode);
+        applyPaperPayload(payload, { requestMode, isRangeFetch, refresh, rangeText });
+        if (refresh) {
+          loadArchiveData();
+          loadGoogleRollingStatus();
+          loadFetchLogData().then(() => {
+            if ((location.hash.replace("#", "") || "today") === "today") renderToday();
+          });
         }
       } catch (error) {
-        if (mode === "recent") recentDataStatus = `后端接口暂不可用，正在使用本地示例数据：${error.message}`;
+        if (requestMode === "recent") {
+          recentDataStatus = `后端接口暂不可用，正在使用本地示例数据：${error.message}`;
+          if (isRangeFetch) paperDataStatus = recentDataStatus;
+        }
         else paperDataStatus = `后端接口暂不可用，正在使用本地示例数据：${error.message}`;
       }
+      fetchProgress = null;
       renderPage(location.hash.replace("#", "") || "today");
     }
 
+    async function fetchPaperPayloadOnce(requestMode) {
+      const endpoint = requestMode === "recent" ? "/api/papers/recent" : "/api/papers/today";
+      const response = await fetch(endpoint);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    }
+
+    async function loadArchiveData() {
+      if (location.protocol === "file:") return;
+      try {
+        const response = await fetch("/api/archive");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        recentPapers = Array.isArray(payload.papers) ? payload.papers.map(normalizePaperForView) : [];
+        recentDataMeta = payload;
+        recentDataStatus = `已载入全部论文库 ${recentPapers.length} 篇`;
+      } catch (error) {
+        recentDataStatus = `全部论文库接口暂不可用：${error.message}`;
+      }
+      if (location.hash.replace("#", "") === "all") renderAll();
+    }
+
+    function paperRefreshBody(requestMode, isRangeFetch) {
+      return {
+        mode: requestMode,
+        keywords: getAllEnabledKeywords(),
+        sources: getEnabledSourceNames(),
+        ...(isRangeFetch ? { startDate: fetchRange.startDate, endDate: fetchRange.endDate, googleStartItem: fetchRange.googleStartItem } : {})
+      };
+    }
+
+    async function runPaperRefreshJob(requestMode, isRangeFetch) {
+      fetchProgress = {
+        stage: "queued",
+        percent: 2,
+        message: "抓取任务已创建，等待后端开始",
+        counts: {},
+        sources: []
+      };
+      renderPage(location.hash.replace("#", "") || "today");
+      const response = await fetch("/api/papers/refresh/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(paperRefreshBody(requestMode, isRangeFetch))
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const started = await response.json();
+      if (started.progress) fetchProgress = started.progress;
+      renderPage(location.hash.replace("#", "") || "today");
+      while (true) {
+        await wait(900);
+        const statusResponse = await fetch(`/api/papers/refresh/status?id=${encodeURIComponent(started.id)}`);
+        if (!statusResponse.ok) throw new Error(`HTTP ${statusResponse.status}`);
+        const status = await statusResponse.json();
+        if (status.progress) {
+          fetchProgress = status.progress;
+          renderPage(location.hash.replace("#", "") || "today");
+        }
+        if (status.status === "done") return status.result;
+        if (status.status === "error") throw new Error(status.error || "抓取失败");
+      }
+    }
+
+    function wait(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function applyPaperPayload(payload, { requestMode, isRangeFetch, refresh, rangeText }) {
+      if (Array.isArray(payload.papers) && payload.papers.length) {
+        const normalizedPapers = payload.papers.map(normalizePaperForView);
+        if (requestMode === "recent") {
+          recentPapers = isRangeFetch ? mergePaperPool(recentPapers, normalizedPapers) : normalizedPapers;
+          if (!isRangeFetch) syncTodayFetchSessionsFromPaperPool(recentPapers);
+          recentDataMeta = payload;
+          recentDataStatus = refresh ? `已抓取 ${payload.count || normalizedPapers.length} 篇论文` : "已载入最近相关论文";
+          if (isRangeFetch) {
+            saveTodayFetchSession(payload, normalizedPapers);
+            todayPapers = normalizedPapers;
+            paperDataMeta = payload;
+            paperDataStatus = `显示 ${activeTodayFetchSession()?.label || rangeText} 抓取结果`;
+          }
+        } else {
+          todayPapers = normalizedPapers;
+          paperDataMeta = payload;
+          paperDataStatus = refresh ? "已抓取论文" : "已载入今日真实论文";
+        }
+        return;
+      }
+      if (requestMode === "recent") {
+        recentDataMeta = payload;
+        if (!isRangeFetch) recentPapers = [];
+        recentDataStatus = isRangeFetch ? `所选时间范围没有匹配到当前领域论文` : "后端没有匹配到最近相关论文";
+        if (isRangeFetch) {
+          saveTodayFetchSession(payload, []);
+          todayPapers = [];
+          paperDataMeta = payload;
+          paperDataStatus = recentDataStatus;
+        }
+      } else {
+        paperDataMeta = payload;
+        todayPapers = [];
+        paperDataStatus = refresh ? "没有匹配到当前领域论文" : "今天没有匹配到当前领域论文";
+      }
+    }
+
+    async function refreshJournalMetrics() {
+      if (location.protocol === "file:") {
+        recentDataStatus = "直接打开 HTML 时无法访问后端，无法刷新期刊指标";
+        renderAll();
+        return;
+      }
+
+      recentDataStatus = "正在刷新本地期刊指标...";
+      renderAll();
+
+      try {
+        const response = await fetch("/api/journals/refresh", { method: "POST" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        if (Array.isArray(payload.papers)) {
+          recentPapers = payload.papers.map(normalizePaperForView);
+          recentDataMeta = { ...(recentDataMeta || {}), ...payload };
+        }
+        recentDataStatus = `已刷新 ${payload.matchedCount || 0} 个期刊，更新 ${payload.updatedCount || 0} 篇论文`;
+      } catch (error) {
+        recentDataStatus = `刷新期刊失败：${error.message}`;
+      }
+      renderAll();
+    }
+
+    async function dedupeArchive() {
+      if (location.protocol === "file:") {
+        recentDataStatus = "直接打开 HTML 时无法访问后端，无法自动去重";
+        renderAll();
+        return;
+      }
+
+      recentDataStatus = "正在对全部论文库自动去重...";
+      renderAll();
+
+      try {
+        const response = await fetch("/api/archive/dedupe", { method: "POST" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        const archivePapers = Array.isArray(payload.papers)
+          ? payload.papers
+          : (Array.isArray(payload.archive?.papers) ? payload.archive.papers : []);
+        recentPapers = archivePapers.map(normalizePaperForView);
+        recentDataMeta = { ...(recentDataMeta || {}), ...(payload.archive || {}), dedupe: payload };
+        recentDataStatus = `已自动去重：${payload.beforeCount || 0} 篇 → ${payload.afterCount || recentPapers.length} 篇`;
+        showToast(`自动去重完成，移除 ${payload.removedCount || 0} 篇重复项`);
+      } catch (error) {
+        recentDataStatus = `自动去重失败：${error.message}`;
+      }
+      renderAll();
+    }
+
+    function applyArchivePayload(payload = {}) {
+      const archivePapers = Array.isArray(payload.papers)
+        ? payload.papers
+        : (Array.isArray(payload.archive?.papers) ? payload.archive.papers : []);
+      if (archivePapers.length) recentPapers = archivePapers.map(normalizePaperForView);
+      if (payload.archive) recentDataMeta = { ...(recentDataMeta || {}), ...payload.archive };
+    }
+
+    async function refreshArchiveLlm() {
+      if (location.protocol === "file:") {
+        recentDataStatus = "直接打开 HTML 时无法访问后端，无法执行 LLM";
+        renderAll();
+        return;
+      }
+      archiveLlmRefreshingAll = true;
+      recentDataStatus = "正在对缺失摘要翻译/推荐理由的论文执行 LLM...";
+      renderAll();
+
+      try {
+        const response = await fetch("/api/archive/llm", { method: "POST" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        applyArchivePayload(payload);
+        recentDataStatus = `LLM 完成：更新 ${payload.updatedCount || 0} 篇，跳过 ${payload.skippedCount || 0} 篇`;
+        showToast(`LLM 完成，更新 ${payload.updatedCount || 0} 篇`);
+      } catch (error) {
+        recentDataStatus = `LLM 失败：${error.message}`;
+      } finally {
+        archiveLlmRefreshingAll = false;
+      }
+      renderAll();
+    }
+
+    async function refreshOnePaperLlm(key) {
+      const paper = recentPapers.find(item => paperStableKey(item) === key)
+        || todayPapers.find(item => paperStableKey(item) === key);
+      if (!paper) return;
+      if (location.protocol === "file:") {
+        showToast("直接打开 HTML 时无法访问后端");
+        return;
+      }
+      archiveLlmRefreshingKeys.add(key);
+      renderPage(location.hash.replace("#", "") || "all");
+
+      try {
+        const response = await fetch("/api/archive/llm/paper", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paper })
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        applyArchivePayload(payload);
+        if (payload.paper) recentPapers = mergePaperPool(recentPapers, [normalizePaperForView(payload.paper)]);
+        recentDataStatus = payload.updated ? "已重新生成该论文的摘要翻译和推荐理由" : "没有找到这篇论文的入库记录";
+        showToast(payload.updated ? "LLM 已更新该论文" : "没有找到该论文");
+      } catch (error) {
+        recentDataStatus = `单篇 LLM 失败：${error.message}`;
+        showToast(`LLM 失败：${error.message}`);
+      } finally {
+        archiveLlmRefreshingKeys.delete(key);
+      }
+      renderPage(location.hash.replace("#", "") || "all");
+    }
+
     function bindPaperRefresh() {
+      document.querySelectorAll("[data-fetch-range]").forEach(input => {
+        input.addEventListener("change", () => {
+          fetchRange[input.getAttribute("data-fetch-range")] = input.value;
+          saveFetchRange();
+        });
+      });
+      document.querySelectorAll("[data-fetch-session]").forEach(button => {
+        button.addEventListener("click", () => {
+          activeTodayFetchSessionId = button.getAttribute("data-fetch-session");
+          const session = activeTodayFetchSession();
+          if (!session) return;
+          todayPapers = session.papers;
+          paperDataMeta = session.meta;
+          paperDataStatus = `显示 ${session.label} 抓取结果`;
+          resetPaperVisibleLimit("today");
+          renderToday();
+        });
+      });
+      document.querySelectorAll("[data-remove-fetch-session]").forEach(button => {
+        button.addEventListener("click", event => {
+          event.stopPropagation();
+          removeTodayFetchSession(button.getAttribute("data-remove-fetch-session"));
+        });
+      });
+      document.querySelectorAll("[data-clear-fetch-sessions]").forEach(button => {
+        button.addEventListener("click", () => {
+          todayFetchSessions = [];
+          activeTodayFetchSessionId = "";
+          todayPapers = [];
+          paperDataMeta = null;
+          paperDataStatus = "已清除今日论文下的临时时间段显示；已入库论文仍保留在全部论文";
+          saveTodayFetchSessions();
+          resetPaperVisibleLimit("today");
+          renderToday();
+        });
+      });
+      document.querySelectorAll("[data-reset-google-start]").forEach(button => {
+        button.addEventListener("click", resetGoogleRollingStart);
+      });
       document.querySelectorAll("[data-refresh-papers]").forEach(button => {
-        button.addEventListener("click", () => loadPaperData(button.getAttribute("data-refresh-papers") || "today", true));
+        button.addEventListener("click", () => {
+          document.querySelectorAll("[data-fetch-range]").forEach(input => {
+            fetchRange[input.getAttribute("data-fetch-range")] = input.value;
+          });
+          if (fetchRange.startDate && fetchRange.endDate && fetchRange.startDate > fetchRange.endDate) {
+            showToast("开始日期不能晚于结束日期");
+            return;
+          }
+          saveFetchRange();
+          loadPaperData(button.getAttribute("data-refresh-papers") || "today", true);
+        });
+      });
+      document.querySelectorAll("[data-refresh-journals]").forEach(button => {
+        button.addEventListener("click", refreshJournalMetrics);
+      });
+      document.querySelectorAll("[data-dedupe-archive]").forEach(button => {
+        button.addEventListener("click", dedupeArchive);
+      });
+      document.querySelectorAll("[data-refresh-archive-llm]").forEach(button => {
+        button.addEventListener("click", refreshArchiveLlm);
+      });
+      document.querySelectorAll("[data-refresh-paper-llm]").forEach(button => {
+        button.addEventListener("click", () => refreshOnePaperLlm(button.getAttribute("data-refresh-paper-llm")));
       });
     }
 
-    function pageShell(title, subtitle, body, side = "") {
+    function pageShell(title, subtitle, body, side = "", heroActions = "") {
       return `
         <section class="hero">
           <div class="hero-top">
@@ -1184,6 +3445,7 @@
               <h1>${title}</h1>
               <div class="subtitle">${subtitle}</div>
             </div>
+            ${heroActions ? `<div class="hero-actions">${heroActions}</div>` : ""}
           </div>
         </section>
         ${side ? `<section class="simple-grid"><div>${body}</div><aside class="panel">${side}</aside></section>` : body}
@@ -1196,101 +3458,97 @@
         ? papers
         : papers.filter(matchesPaperCategory);
       const timeline = filteredPapers.length
-        ? `<div class="timeline-list">${filteredPapers.map(timelineItem).join("")}</div>`
-        : `<div class="empty">当前分类暂时没有论文。可以切回“全部”，或在“领域配置”中增加相关关键词和信源。</div>`;
-      const body = `${paperStatusBar("today")}${categoryBar()}${timeline}`;
+        ? renderPaperTimeline(filteredPapers, "today")
+        : `<div class="empty">当前时间段暂时没有论文。可以选择新的起止日期后点击“抓取论文”，或切到“全部论文”查看已入库内容。</div>`;
+      const body = `${fetchRangePanel()}${paperStatusBar("today")}${categoryBar()}${timeline}`;
       const focusKeywords = [...getEnabledKeywords("primary"), ...getEnabledKeywords("secondary")];
       const sideChips = focusKeywords.length
         ? focusKeywords.map(keyword => `<span class="chip selected">${escapeHTML(keyword)}</span>`).join("")
         : `<span class="small-text">还没有启用的关注领域，请到“领域配置”中添加。</span>`;
       const side = `<h2>当前关注领域</h2><div class="token-row" style="margin-top:12px">${sideChips}</div>`;
-      mainContent.innerHTML = pageShell("今日论文", "只展示当前关注领域里今天最值得读的相关论文。", body, side);
+      mainContent.innerHTML = pageShell("今日论文", "选择日期范围并抓取当前关注领域的相关论文；抓取结果会同步进入“全部论文”。", body, side, todayLastFetchHeroStatus());
       bindPaperRefresh();
       bindPaperCategories();
       bindFavorites();
       bindStarredStatus();
+      bindCitationCopy();
+      bindShortTitleEditors();
+      bindLazyPaperLoading();
     }
 
     function renderAll() {
       papers = recentPapers;
-      const filteredPapers = activePaperCategory === "all"
-        ? papers
-        : papers.filter(matchesPaperCategory);
-      const list = filteredPapers.length
-        ? `<div class="paper-list">${filteredPapers.map(paperCard).join("")}</div>`
-        : `<div class="empty">${papers.length ? "当前分类暂时没有论文。可以切回“全部”，或在“领域配置”中增加相关关键词和信源。" : "最近相关论文池为空。可以到“领域配置”增加关键词，或点击上方刷新。"}</div>`;
-      const body = `${paperStatusBar("recent")}${categoryBar()}${list}`;
-      const focusKeywords = [...getEnabledKeywords("primary"), ...getEnabledKeywords("secondary")];
-      const focusChips = focusKeywords.map(keyword => `<span class="chip selected">${escapeHTML(keyword)}</span>`).join("");
-      const side = `<h2>全部论文筛选</h2><div class="token-row" style="margin-top:12px"><span class="chip selected">全部</span><span class="chip">已收藏</span><span class="chip">带代码</span><span class="chip">Nature</span>${focusChips}</div>`;
-      mainContent.innerHTML = pageShell("全部论文", "展示当前关注领域的完整论文池，支持后续按来源、标签、收藏状态筛选。", body, side);
+      const filteredPapers = papers.filter(paperMatchesAllFilters);
+      const sortedPapers = sortAllPapers(filteredPapers);
+      const list = sortedPapers.length
+        ? renderPaperTimeline(sortedPapers, "all")
+        : `<div class="empty">${papers.length ? "当前筛选条件下暂时没有论文。可以清空搜索词、切回“全部”，或在“领域配置”中增加相关关键词和信源。" : "最近相关论文池为空。可以到“领域配置”增加关键词，或点击上方刷新。"}</div>`;
+      const body = `${allPaperControlPanel(papers.length, sortedPapers.length, papers)}${list}`;
+      const side = allPaperSideFilter();
+      mainContent.innerHTML = pageShell("全部论文", allPaperStatusText(), body, side, archiveActionButtons());
       bindPaperRefresh();
-      bindPaperCategories();
+      bindPaperSort();
+      bindAllPaperSearch();
+      bindAllPaperSideFilters();
+      bindShortTitleEditors();
       bindFavorites();
       bindStarredStatus();
+      bindCitationCopy();
+      bindShortTitleEditors();
+      bindLazyPaperLoading();
     }
 
     function renderFavorites() {
-      papers = recentPapers.length ? recentPapers : todayPapers;
-      const favoritePapers = papers.filter(paper => saved.has(paper.id));
-      const unreadPapers = favoritePapers.filter(paper => !readPapers.has(paper.id));
-      const readPaperList = favoritePapers.filter(paper => readPapers.has(paper.id));
-      const starredPaperList = favoritePapers.filter(paper => starredPapers.has(paper.id));
-      const favoriteSection = favoritePapers.length
-        ? `
-          <div class="section-title">
-            <h2>已收藏论文</h2>
-            <span>${favoritePapers.length} 篇</span>
+      const fallbackPool = recentPapers.length ? recentPapers : todayPapers;
+      const mergedFavorites = mergePaperPool(favoritePapersCache, fallbackPool.filter(isFavoritePaper));
+      papers = mergedFavorites;
+      const favoritePapers = mergedFavorites;
+      const unreadPapers = favoritePapers.filter(paper => !isReadPaper(paper));
+      const readPaperList = favoritePapers.filter(isReadPaper);
+      const starredPaperList = favoritePapers.filter(isStarredPaper);
+      const tabItems = [
+        { key: "all", label: "已收藏论文", papers: favoritePapers, empty: `${escapeHTML(favoriteStatus || "还没有个人收藏。")} 回到“今日论文”或“全部论文”，点击论文卡片右上角的“加入个人收藏”。` },
+        { key: "reading", label: "待阅读", papers: unreadPapers, empty: "当前没有待阅读论文。" },
+        { key: "read", label: "已阅读", papers: readPaperList, empty: "读完论文后，点“待阅读”按钮会移动到这里。" },
+        { key: "starred", label: "标星", papers: starredPaperList, empty: "对重点论文点“标星”，会集中显示在这里。" }
+      ];
+      const activeTab = tabItems.find(item => item.key === favoriteActiveTab) || tabItems[1];
+      favoriteActiveTab = activeTab.key;
+      papers = activeTab.papers;
+      const tabs = `
+        <div class="favorites-tabs">
+          <div class="favorites-tab-list">
+            ${tabItems.map(item => `
+              <button class="favorites-tab ${item.key === activeTab.key ? "active" : ""}" type="button" data-favorites-tab="${item.key}">
+                ${escapeHTML(item.label)}
+              </button>
+            `).join("")}
           </div>
-          <div class="paper-list">${favoritePapers.map(paperCard).join("")}</div>
-        `
-        : `<div class="empty">还没有个人收藏。回到“今日论文”或“全部论文”，点击论文卡片右上角的“加入个人收藏”。</div>`;
-      const readingSection = favoritePapers.length
-        ? `
-          <div class="section-title">
-            <h2>阅读板块</h2>
-            <span>${unreadPapers.length} 篇待阅读</span>
+          <div class="favorites-tab-count">${activeTab.papers.length} 篇</div>
+        </div>
+      `;
+      const list = activeTab.papers.length
+        ? renderPaperTimeline(activeTab.papers, "favorites")
+        : `<div class="empty">${activeTab.empty}</div>`;
+      const body = `
+        ${tabs}
+        <section class="favorites-tab-panel">
+          <div class="favorites-tab-head">
+            <span>${escapeHTML(activeTab.label)}</span>
+            <span>已收藏 ${favoritePapers.length} · 待阅读 ${unreadPapers.length} · 已阅读 ${readPaperList.length} · 标星 ${starredPaperList.length}</span>
           </div>
-          ${unreadPapers.length
-            ? `<div class="reading-list">${unreadPapers.map(readingCard).join("")}</div>`
-            : `<div class="empty">当前没有待阅读论文。</div>`}
-        `
-        : "";
-      const readSection = readPaperList.length
-        ? `
-          <div class="section-title">
-            <h2>已阅读论文</h2>
-            <span>${readPaperList.length} 篇</span>
-          </div>
-          <div class="reading-list">${readPaperList.map(readingCard).join("")}</div>
-        `
-        : `
-          <div class="section-title">
-            <h2>已阅读论文</h2>
-            <span>0 篇</span>
-          </div>
-          <div class="empty">读完论文后，点“待阅读”按钮会移动到这里。</div>
-        `;
-      const starredSection = starredPaperList.length
-        ? `
-          <div class="section-title">
-            <h2>标星论文</h2>
-            <span>${starredPaperList.length} 篇</span>
-          </div>
-          <div class="reading-list">${starredPaperList.map(readingCard).join("")}</div>
-        `
-        : `
-          <div class="section-title">
-            <h2>标星论文</h2>
-            <span>0 篇</span>
-          </div>
-          <div class="empty">对重点论文点“标星”，会集中显示在这里。</div>
-        `;
-      const body = favoritePapers.length ? `${favoriteSection}${readingSection}${readSection}${starredSection}` : favoriteSection;
+          ${list}
+        </section>
+      `;
       mainContent.innerHTML = pageShell("个人收藏", "保存待读论文、可复现代码和组会候选材料。", body);
+      bindFavoriteTabs();
       bindFavorites();
       bindReadingStatus();
+      bindFavoriteWorkflowActions();
       bindStarredStatus();
+      bindCitationCopy();
+      bindShortTitleEditors();
+      bindLazyPaperLoading();
     }
 
     function formatToken(value) {
@@ -1345,13 +3603,361 @@
         tokenStatsStatus = `统计时间：${tokenStats.generatedAt ? new Date(tokenStats.generatedAt).toLocaleString("zh-CN") : "本地缓存"}`;
       } catch (error) {
         tokenStats = null;
-        tokenStatsStatus = `Token 统计接口暂不可用：${error.message}`;
+        tokenStatsStatus = `统计接口暂不可用：${error.message}`;
+      }
+      await loadFetchLogData();
+      renderTokenStats();
+    }
+
+    async function loadFetchLogData() {
+      if (location.protocol === "file:") {
+        fetchLogEntries = [];
+        activeFetchLogDetailIndex = null;
+        fetchLogStatus = "直接打开 HTML 时无法读取抓取日志";
+        return;
+      }
+      try {
+        const logResponse = await fetch("/api/fetch/log");
+        if (!logResponse.ok) throw new Error(`HTTP ${logResponse.status}`);
+        const logPayload = await logResponse.json();
+        fetchLogEntries = Array.isArray(logPayload.entries) ? logPayload.entries : [];
+        if (activeFetchLogDetailIndex !== null && !fetchLogEntries[activeFetchLogDetailIndex]) {
+          activeFetchLogDetailIndex = null;
+        }
+        fetchLogStatus = "";
+      } catch (error) {
+        fetchLogEntries = [];
+        activeFetchLogDetailIndex = null;
+        fetchLogStatus = `抓取日志接口暂不可用：${error.message}`;
+      }
+    }
+
+    function fetchLogCandidateSnapshot(entry, key = "beforeDomain") {
+      const snapshots = entry?.candidateSnapshots || {};
+      const snapshot = snapshots[key] || {};
+      return {
+        total: Number(snapshot.total || 0),
+        shown: Number(snapshot.shown || (Array.isArray(snapshot.papers) ? snapshot.papers.length : 0)),
+        papers: Array.isArray(snapshot.papers) ? snapshot.papers : []
+      };
+    }
+
+    function fetchLogCandidateButton(entry, index) {
+      const snapshot = fetchLogCandidateSnapshot(entry, "beforeDomain");
+      if (!snapshot.total) return "";
+      return `<button class="fetch-log-detail-link" type="button" data-fetch-log-detail="${index}">查看领域过滤前候选 ${snapshot.total} 篇</button>`;
+    }
+
+    function fetchLogRetryButton(entry, index) {
+      const errors = Array.isArray(entry?.errors) ? entry.errors : [];
+      const retryable = errors.some(error => ["crossref", "llm", "abstract"].includes(error.source));
+      if (!retryable) return "";
+      return `<button class="fetch-log-detail-link" type="button" data-fetch-log-retry="${index}">重试失败富集</button>`;
+    }
+
+    function fetchLogCandidateLegacyNote(entry) {
+      const snapshot = fetchLogCandidateSnapshot(entry, "beforeDomain");
+      if (snapshot.total) return "";
+      const keywordMatched = Number(entry?.pipelineCounts?.keywordMatched || 0);
+      if (!keywordMatched) return "";
+      return `<span class="small-text" style="color:#b45309;">旧日志未保存候选明细；重新抓取后可查看领域过滤前 ${keywordMatched} 篇</span>`;
+    }
+
+    function fetchLogSourcePageText(entry, source) {
+      const pages = entry?.sourcePages?.[source.api];
+      if (!pages) return "";
+      const pageText = pages.firstPage === pages.lastPage
+        ? `本次页码 ${pages.firstPage} 页`
+        : `本次页码 ${pages.firstPage}-${pages.lastPage} 页`;
+      const itemText = pages.firstItem && pages.lastItem ? `；第 ${pages.firstItem}-${pages.lastItem} 篇` : "";
+      const nextText = pages.nextStart !== undefined ? `；下次从 start=${pages.nextStart} 继续` : "";
+      const skippedText = Array.isArray(pages.skippedPages) && pages.skippedPages.length
+        ? `；已跳过 ${pages.skippedPages.map(page => `第 ${page.itemStart}-${page.itemEnd} 篇`).join("、")}`
+        : "";
+      return `${pageText}${itemText}${skippedText}${nextText}`;
+    }
+
+    function candidateStableKey(paper) {
+      return paperLookupKeys(paper)[0] || "";
+    }
+
+    function candidateExistsInArchive(paper) {
+      const lookup = buildPaperLookup(recentPapers);
+      return paperLookupKeys(paper).some(key => lookup.has(key));
+    }
+
+    function candidateArchiveButton(paper, index) {
+      const key = candidateStableKey(paper);
+      const state = candidateArchiveStates.get(key);
+      const exists = state === "added" || state === "exists" || candidateExistsInArchive(paper);
+      if (state === "removing") return `<button class="candidate-action-btn remove" type="button" disabled>撤销中</button>`;
+      if (exists) return `<button class="candidate-action-btn remove" type="button" data-candidate-remove="${index}">撤销</button>`;
+      const loading = state === "adding";
+      return `<button class="candidate-action-btn" type="button" data-candidate-add="${index}" ${loading ? "disabled" : ""}>${loading ? "加入中" : "加入全部论文"}</button>`;
+    }
+
+    function candidateSortIndicator(field) {
+      if (candidateDetailSort.field !== field) return "";
+      return candidateDetailSort.direction === "asc" ? " ↑" : " ↓";
+    }
+
+    function candidateSortHeader(field, label) {
+      return `<button class="candidate-sort-btn" type="button" data-candidate-sort="${field}">${label}${candidateSortIndicator(field)}</button>`;
+    }
+
+    function sortCandidatePapers(papers) {
+      const field = candidateDetailSort.field;
+      const direction = candidateDetailSort.direction === "desc" ? -1 : 1;
+      const valueOf = (paper, index) => {
+        if (field === "index") return index;
+        if (field === "score") return Number(paper.score || 0);
+        return String(paper[field] || "").toLowerCase();
+      };
+      return papers
+        .map((paper, index) => ({ paper, index }))
+        .sort((a, b) => {
+          const av = valueOf(a.paper, a.index);
+          const bv = valueOf(b.paper, b.index);
+          if (typeof av === "number" && typeof bv === "number") return (av - bv) * direction;
+          return String(av).localeCompare(String(bv), "zh-CN") * direction;
+        });
+    }
+
+    function renderFetchLogCandidateDetail() {
+      const entry = fetchLogEntries[activeFetchLogDetailIndex];
+      if (!entry) {
+        activeFetchLogDetailIndex = null;
+        return "";
+      }
+      const snapshot = fetchLogCandidateSnapshot(entry, "beforeDomain");
+      const when = entry.at ? new Date(entry.at).toLocaleString("zh-CN") : "";
+      const range = entry.range ? `${escapeHTML(entry.range.startDate || "")} → ${escapeHTML(entry.range.endDate || "")}` : "";
+      const sortedItems = sortCandidatePapers(snapshot.papers);
+      const rows = sortedItems.map(({ paper, index }, rowIndex) => {
+        const title = paper.url
+          ? `<a href="${escapeHTML(paper.url)}" target="_blank" rel="noopener">${escapeHTML(paper.title || "未记录标题")}</a>`
+          : escapeHTML(paper.title || "未记录标题");
+        return `
+          <tr>
+            <td class="candidate-meta-cell">${rowIndex + 1}</td>
+            <td class="candidate-title-cell">${title}</td>
+            <td>${escapeHTML(paper.journal || "未记录")}</td>
+            <td>${escapeHTML(paper.source || "未记录")}</td>
+            <td class="candidate-meta-cell">${escapeHTML(paper.published || "未记录")}</td>
+            <td class="candidate-meta-cell">${escapeHTML(paper.score || "-")}</td>
+            <td class="candidate-meta-cell">${candidateArchiveButton(paper, index)}</td>
+          </tr>
+        `;
+      }).join("");
+      const cappedText = snapshot.total > snapshot.shown
+        ? `；日志中最多保存前 ${snapshot.shown} 篇`
+        : "";
+      return `
+        <section class="panel" data-fetch-log-candidate-detail>
+          <div class="panel-head">
+            <div>
+              <h2>领域过滤前候选论文</h2>
+              <div class="panel-note">${escapeHTML(when)} · 范围 ${range} · 共 ${snapshot.total} 篇${cappedText}</div>
+            </div>
+            <button class="ghost-btn" type="button" data-fetch-log-back>返回统计</button>
+          </div>
+          ${rows ? `
+            <div class="candidate-table-wrap">
+              <table class="candidate-table">
+                <thead>
+                  <tr>
+                    <th>${candidateSortHeader("index", "#")}</th>
+                    <th>${candidateSortHeader("title", "标题")}</th>
+                    <th>${candidateSortHeader("journal", "期刊")}</th>
+                    <th>${candidateSortHeader("source", "来源")}</th>
+                    <th>${candidateSortHeader("published", "发表时间")}</th>
+                    <th>${candidateSortHeader("score", "分数")}</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          ` : `<div class="empty">这条抓取日志没有保存领域过滤前候选论文明细。重新抓取后会记录。</div>`}
+        </section>
+      `;
+    }
+
+    // 渲染“最近抓取日志”：每条显示各信源抓到多少篇；0 篇的记录后端已过滤不入库。
+    function fetchLogPanel() {
+      if (fetchLogStatus) return `<div class="empty">${escapeHTML(fetchLogStatus)}</div>`;
+      const rows = (fetchLogEntries || []).map((entry, index) => {
+        const when = entry.at ? new Date(entry.at).toLocaleString("zh-CN") : "";
+        const range = entry.range ? `${escapeHTML(entry.range.startDate || "")} → ${escapeHTML(entry.range.endDate || "")}` : "";
+        const errors = Array.isArray(entry.errors) ? entry.errors : [];
+        const displayCount = Number(entry.fetchedCount || 0);
+        const newFetchedCount = entry.newFetchedCount === undefined ? displayCount : Number(entry.newFetchedCount || 0);
+        const sourceChips = (entry.sources || [])
+          .map(s => {
+            const matchedError = errors.find(error => error.source === s.api || error.source === s.label);
+            const message = s.message || matchedError?.message || "";
+            const pageText = fetchLogSourcePageText(entry, s);
+            const pageSuffix = pageText ? ` · ${escapeHTML(pageText)}` : "";
+            if (s.status === "failed") {
+              return `<span class="chip error">源失败 ${escapeHTML(s.label || s.api)}${message ? `：${escapeHTML(message)}` : ""}</span>`;
+            }
+            return `<span class="chip selected">源返回 ${escapeHTML(s.label || s.api)}：${s.count || 0} 篇${pageSuffix}</span>`;
+          })
+          .join("") || `<span class="small-text">无逐源数量记录</span>`;
+        const sourceErrorList = errors.filter(error => ["googlesearch", "googlescholar"].includes(error.source));
+        const sourceErrors = sourceErrorList.length
+          ? `<div class="small-text" style="margin-top:6px;color:#b42318;">Google 相关信源失败：${sourceErrorList.map(error => escapeHTML(error.message || error.source)).join("；")}</div>`
+          : "";
+        const llm = entry.llm || {};
+        const llmText = llm.totalTokens
+          ? `；大模型 ${escapeHTML((llm.models || []).map(m => m.model).join("、"))} 共 ${llm.totalTokens} tokens`
+          : "";
+        const counts = entry.pipelineCounts || {};
+        const funnel = counts.raw
+          ? `<div class="small-text" style="margin-top:6px;">筛选漏斗：原始返回 ${counts.raw} 篇 → 去重后 ${counts.deduped || 0} 篇 → 关键词命中 ${counts.keywordMatched || 0} 篇 → 领域过滤 ${counts.domainMatched || 0} 篇 → 日期范围 ${counts.dateMatched || 0} 篇 → 本次新增 ${newFetchedCount} 篇 → 最终展示 ${displayCount} 篇</div>`
+          : "";
+        return `
+          <div class="fetch-log-card">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+              <div style="font-size:13px;color:#0f172a;font-weight:600;">${escapeHTML(when)} · 最终展示 ${displayCount} 篇 / 本次新增 ${newFetchedCount} 篇 <span style="color:#64748b;font-weight:400">（范围 ${range}；下方为各源原始返回数）</span></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+                ${fetchLogRetryButton(entry, index)}
+                ${fetchLogCandidateButton(entry, index) || fetchLogCandidateLegacyNote(entry)}
+              </div>
+            </div>
+            <div class="token-row" style="margin-top:8px;gap:6px;flex-wrap:wrap;">${sourceChips}</div>
+            ${sourceErrors}
+            ${funnel}
+            ${llmText ? `<div class="small-text" style="margin-top:6px;">${llmText}</div>` : ""}
+          </div>`;
+      }).join("");
+      return rows || `<div class="empty">还没有抓取日志。到“今日论文”或“全部论文”点击抓取后，这里会记录每次抓到论文的信源与数量。</div>`;
+    }
+
+    function bindFetchLogPanel() {
+      document.querySelectorAll("[data-fetch-log-detail]").forEach(button => {
+        button.addEventListener("click", () => {
+          activeFetchLogDetailIndex = Number(button.getAttribute("data-fetch-log-detail"));
+          renderTokenStats();
+        });
+      });
+      document.querySelectorAll("[data-fetch-log-retry]").forEach(button => {
+        button.addEventListener("click", () => retryFetchLogEnrichment(Number(button.getAttribute("data-fetch-log-retry"))));
+      });
+      bindCandidateDetailActions();
+      const back = document.querySelector("[data-fetch-log-back]");
+      if (back) {
+        back.addEventListener("click", () => {
+          activeFetchLogDetailIndex = null;
+          renderTokenStats();
+        });
+      }
+    }
+
+    async function retryFetchLogEnrichment(index) {
+      if (location.protocol === "file:") {
+        fetchLogStatus = "直接打开 HTML 时无法访问后端，无法重试失败富集";
+        renderTokenStats();
+        return;
+      }
+      fetchLogStatus = "正在重试失败的 Crossref / LLM 富集...";
+      renderTokenStats();
+      try {
+        const response = await fetch("/api/fetch/log/retry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ index })
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        fetchLogStatus = payload.retried
+          ? `重试完成：处理 ${payload.attemptedCount || 0} 篇，仍失败 ${Array.isArray(payload.remainingErrors) ? payload.remainingErrors.length : 0} 项`
+          : (payload.message || "没有可重试的失败项");
+        await loadArchiveData();
+      } catch (error) {
+        fetchLogStatus = `重试失败：${error.message}`;
+      }
+      await loadTokenStats();
+    }
+
+    function bindCandidateDetailActions() {
+      document.querySelectorAll("[data-candidate-sort]").forEach(button => {
+        button.addEventListener("click", () => {
+          const field = button.getAttribute("data-candidate-sort") || "index";
+          candidateDetailSort = {
+            field,
+            direction: candidateDetailSort.field === field && candidateDetailSort.direction === "asc" ? "desc" : "asc"
+          };
+          renderTokenStats();
+        });
+      });
+      document.querySelectorAll("[data-candidate-add]").forEach(button => {
+        button.addEventListener("click", () => addCandidateToArchive(Number(button.getAttribute("data-candidate-add"))));
+      });
+      document.querySelectorAll("[data-candidate-remove]").forEach(button => {
+        button.addEventListener("click", () => removeCandidateFromArchive(Number(button.getAttribute("data-candidate-remove"))));
+      });
+    }
+
+    async function addCandidateToArchive(index) {
+      const entry = fetchLogEntries[activeFetchLogDetailIndex];
+      const paper = fetchLogCandidateSnapshot(entry, "beforeDomain").papers[index];
+      if (!paper) return;
+      const key = candidateStableKey(paper);
+      candidateArchiveStates.set(key, "adding");
+      renderTokenStats();
+      try {
+        const response = await fetch("/api/archive/candidate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paper })
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        candidateArchiveStates.set(key, payload.existed ? "exists" : "added");
+        if (payload.paper) recentPapers = mergePaperPool(recentPapers, [normalizePaperForView(payload.paper)]);
+        if (payload.archive) recentDataMeta = { ...(recentDataMeta || {}), archivedCount: payload.archive.count, archiveFile: payload.archive.archiveFile };
+        showToast(payload.existed ? "这篇论文已存在于全部论文" : "已加入全部论文");
+      } catch (error) {
+        candidateArchiveStates.delete(key);
+        showToast(`加入失败：${error.message}`);
+      }
+      renderTokenStats();
+    }
+
+    async function removeCandidateFromArchive(index) {
+      const entry = fetchLogEntries[activeFetchLogDetailIndex];
+      const paper = fetchLogCandidateSnapshot(entry, "beforeDomain").papers[index];
+      if (!paper) return;
+      const key = candidateStableKey(paper);
+      candidateArchiveStates.set(key, "removing");
+      renderTokenStats();
+      try {
+        const response = await fetch("/api/archive/candidate", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paper })
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        candidateArchiveStates.set(key, "removed");
+        recentPapers = removePaperFromPool(recentPapers, payload.paper || paper).map(normalizePaperForView);
+        if (payload.archive) recentDataMeta = { ...(recentDataMeta || {}), archivedCount: payload.archive.count, archiveFile: payload.archive.archiveFile };
+        showToast(payload.removed ? "已从全部论文撤销" : "这篇论文不在全部论文中");
+      } catch (error) {
+        candidateArchiveStates.set(key, "exists");
+        showToast(`撤销失败：${error.message}`);
       }
       renderTokenStats();
     }
 
     function renderTokenStats() {
       const stats = tokenStats || {};
+      if (activeFetchLogDetailIndex !== null) {
+        mainContent.innerHTML = pageShell("统计", "查看某次抓取在进入领域过滤前的候选论文。", renderFetchLogCandidateDetail());
+        bindFetchLogPanel();
+        return;
+      }
       const body = `
         <section class="stats-grid">
           ${statCard("今日 Token", stats.today)}
@@ -1375,8 +3981,108 @@
             <div style="margin-top:12px">${modelChartRows(stats)}</div>
           </aside>
         </section>
+        <section class="panel" style="margin-top:16px">
+          <div class="panel-head">
+            <div>
+              <h2>最近抓取日志</h2>
+              <div class="panel-note">每次抓取都会记录各信源数量、失败原因和筛选漏斗；即使最终 0 篇也会记录。</div>
+            </div>
+          </div>
+          <div style="margin-top:12px">${fetchLogPanel()}</div>
+        </section>
       `;
-      mainContent.innerHTML = pageShell("Token 统计", "统计每天、近 7 天、近 30 天的 AI Token 消耗，并按模型展示分布。", body);
+      mainContent.innerHTML = pageShell("统计", "查看 AI Token 消耗（每天 / 近 7 天 / 近 30 天、按模型分布）以及最近的论文抓取日志。", body);
+      bindFetchLogPanel();
+    }
+
+    async function loadOperationLog() {
+      if (location.protocol === "file:") {
+        operationLogEntries = [];
+        operationLogStatus = "直接打开 HTML 时无法读取后端操作日志";
+        renderOperationLog();
+        return;
+      }
+      operationLogStatus = "正在读取操作日志...";
+      renderOperationLog();
+      try {
+        const response = await fetch("/api/operation-log");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        operationLogEntries = Array.isArray(payload.entries) ? payload.entries : [];
+        operationLogStatus = `共 ${operationLogEntries.length} 条操作记录`;
+      } catch (error) {
+        operationLogEntries = [];
+        operationLogStatus = `操作日志接口暂不可用：${error.message}`;
+      }
+      renderOperationLog();
+    }
+
+    function operationActionLabel(action) {
+      if (action === "add") return "增加";
+      if (action === "delete") return "删除";
+      return "修改";
+    }
+
+    function operationPaperTitle(entry) {
+      const papers = Array.isArray(entry.papers) ? entry.papers : [];
+      const first = papers[0] || entry.paper || {};
+      if (!first.title) return "";
+      const more = papers.length > 1 ? ` 等 ${papers.length} 篇` : "";
+      return `${first.title}${more}`;
+    }
+
+    function operationLogRow(entry) {
+      const when = entry.at ? new Date(entry.at).toLocaleString("zh-CN") : "";
+      const counts = [
+        entry.beforeCount !== undefined && entry.afterCount !== undefined ? `${entry.beforeCount} → ${entry.afterCount}` : "",
+        entry.addedCount ? `新增 ${entry.addedCount}` : "",
+        entry.removedCount ? `移除 ${entry.removedCount}` : "",
+        entry.modifiedCount ? `修改 ${entry.modifiedCount}` : ""
+      ].filter(Boolean).join("；");
+      const title = operationPaperTitle(entry);
+      return `
+        <tr>
+          <td>${escapeHTML(when)}</td>
+          <td>${escapeHTML(operationActionLabel(entry.action))}</td>
+          <td>${escapeHTML(entry.operation || "")}</td>
+          <td>${escapeHTML(counts || "-")}</td>
+          <td>${escapeHTML(title || "-")}</td>
+        </tr>
+      `;
+    }
+
+    function renderOperationLog() {
+      const rows = operationLogEntries.map(operationLogRow).join("");
+      const body = `
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>操作日志</h2>
+              <div class="panel-note">${escapeHTML(operationLogStatus || "")}</div>
+            </div>
+            <button class="ghost-btn" type="button" data-refresh-operation-log>刷新</button>
+          </div>
+          ${rows ? `
+            <div class="candidate-table-wrap">
+              <table class="candidate-table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>动作</th>
+                    <th>操作</th>
+                    <th>数量</th>
+                    <th>论文</th>
+                  </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          ` : `<div class="empty">还没有操作日志。新增、删除、修改全部论文库后会在这里记录。</div>`}
+        </section>
+      `;
+      mainContent.innerHTML = pageShell("日志", "记录全部论文库的增加、删除、修改操作。日志文件只追加，不自动清理。", body);
+      const refresh = document.querySelector("[data-refresh-operation-log]");
+      if (refresh) refresh.addEventListener("click", loadOperationLog);
     }
 
     function renderAbout() {
@@ -1385,8 +4091,10 @@
           <h2>paperHOT 是什么</h2>
           <p class="small-text" style="margin-top:10px">paperHOT 是面向科研领域的论文热点入口。它根据领域配置收集论文和科研动态，生成摘要、标签、相关性解释，并支持个人收藏。</p>
         </section>
+        ${renderUserBackgroundConfig()}
       `;
       mainContent.innerHTML = pageShell("关于", "当前是本地 HTML 原型，后续实现时会接入真实信源、摘要生成和收藏持久化。", body);
+      bindUserBackgroundConfig();
     }
 
     function setActiveNav(page) {
@@ -1418,20 +4126,17 @@
     ];
     const defaultKeywordState = {
       primary: [
-        { text: "计算显微", enabled: true },
-        { text: "computational microscopy", enabled: true },
-        { text: "microscopy reconstruction", enabled: true }
+        { text: "structured illumination microscopy", enabled: true },
+        { text: "SIM", enabled: true }
       ],
       secondary: [
-        { text: "SIM", enabled: true },
-        { text: "RIM", enabled: true },
-        { text: "PRIM", enabled: true },
+        { text: "SIM", enabled: false },
         { text: "speckle illumination", enabled: false },
         { text: "structured illumination", enabled: false }
       ],
       inspiration: [
-        { text: "物理先验重建", enabled: true },
-        { text: "diffusion prior", enabled: true },
+        { text: "物理先验重建", enabled: false },
+        { text: "diffusion prior", enabled: false },
         { text: "self-supervised restoration", enabled: false },
         { text: "deconvolution", enabled: false }
       ]
@@ -1743,26 +4448,32 @@
     const defaultSourceState = [
       {
         title: "Google 搜索",
-        desc: "补充机构新闻、项目主页、论文代码页和 Nature / Science 网页结果。",
-        tags: ["关键词搜索", "网页结果", "项目主页"],
+        desc: "通过 SerpApi Google JSON 结果按当前关键词做普通网页搜索；需要在外部接口配置中填写 Endpoint 和 API Key。",
+        tags: ["网页搜索", "需配置 API", "SerpApi"],
         enabled: true
       },
       {
+        title: "Google Scholar",
+        desc: "通过 SerpApi / Scholar JSON API 补充论文发现信号；需要在外部接口配置中填写 Endpoint 和 API Key。",
+        tags: ["论文搜索", "需配置 API", "SerpApi"],
+        enabled: false
+      },
+      {
         title: "arXiv",
-        desc: "抓取 cs.CV、eess.IV、cs.AI、q-bio.QM 等分类。",
-        tags: ["论文源", "每日更新", "摘要可用"],
+        desc: "通过 arXiv 官方 API 检索预印本；不需要填写密钥。",
+        tags: ["论文源", "无需配置", "预印本"],
         enabled: true
       },
       {
         title: "bioRxiv",
-        desc: "追踪生物图像、显微实验、细胞成像和生物物理预印本。",
-        tags: ["预印本", "BioImage", "生命科学"],
+        desc: "通过 bioRxiv API 追踪生命科学预印本；不需要填写密钥。",
+        tags: ["预印本", "无需配置", "生命科学"],
         enabled: true
       },
       {
-        title: "Nature / Nature Methods",
-        desc: "捕捉高影响力论文、方法文章和期刊新闻。",
-        tags: ["期刊", "方法文章", "高权重"],
+        title: "Semantic Scholar",
+        desc: "通过 Semantic Scholar Paper Search API 补充论文、引用和开放 PDF；当前不需要填写密钥。",
+        tags: ["论文数据库", "无需配置", "开放 PDF"],
         enabled: true
       }
     ];
@@ -1777,18 +4488,28 @@
       }));
     }
 
+    function mergeSourceDefaults(items) {
+      const supportedTitles = new Set(defaultSourceState.map(source => source.title.toLowerCase()));
+      const merged = cloneSourceItems(items).filter(source => supportedTitles.has(source.title.toLowerCase()));
+      defaultSourceState.forEach(defaultSource => {
+        const hasSource = merged.some(source => source.title.toLowerCase() === defaultSource.title.toLowerCase());
+        if (!hasSource) merged.push(cloneSourceItems([defaultSource])[0]);
+      });
+      return merged;
+    }
+
     function loadSourceState() {
       try {
         const savedSources = JSON.parse(localStorage.getItem(sourceStorageKey) || "[]");
         if (!Array.isArray(savedSources) || !savedSources.length) return cloneSourceItems(defaultSourceState);
-        return savedSources
+        return mergeSourceDefaults(savedSources
           .map(item => ({
             title: String(item.title || "").trim(),
             desc: String(item.desc || "").trim(),
             tags: Array.isArray(item.tags) ? item.tags.map(tag => String(tag).trim()).filter(Boolean) : [],
             enabled: item.enabled !== false
           }))
-          .filter(item => item.title);
+          .filter(item => item.title));
       } catch (error) {
         console.warn("Source config load failed", error);
         return cloneSourceItems(defaultSourceState);
@@ -1796,6 +4517,66 @@
     }
 
     let sourceState = loadSourceState();
+    const defaultIntegrationState = {
+      llm: {
+        provider: "aliyun-modelstudio",
+        enabled: false,
+        activeProviderId: "aliyun-coding",
+        host: "ws-yo0l2l0j1634flxf.ap-southeast-1.maas.aliyuncs.com",
+        endpoint: "https://ws-yo0l2l0j1634flxf.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+        dashscopeEndpoint: "https://ws-yo0l2l0j1634flxf.ap-southeast-1.maas.aliyuncs.com/api/v1",
+        apiKey: "",
+        hasApiKey: false,
+        model: "",
+        apiMode: "openai",
+        contextWindow: 131000,
+        reasoning: "auto",
+        providers: [
+          { id: "anthropic", name: "Anthropic (Claude)", desc: "Official Claude API", provider: "anthropic", enabled: false, apiMode: "anthropic", endpoint: "https://api.anthropic.com", apiKey: "", model: "", modelPresets: ["claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"], contextWindow: 200000, reasoning: "auto" },
+          { id: "claude-code-local", name: "Claude Code CLI (local)", desc: "Uses the local claude binary -- no API key needed", provider: "claude-code-local", enabled: false, apiMode: "local", endpoint: "", apiKey: "", model: "local", modelPresets: ["local"], contextWindow: 200000, reasoning: "auto" },
+          { id: "codex-cli-local", name: "Codex CLI (local)", desc: "Uses the local codex binary -- no API key needed", provider: "codex-cli-local", enabled: false, apiMode: "local", endpoint: "", apiKey: "", model: "local", modelPresets: ["local"], contextWindow: 128000, reasoning: "auto" },
+          { id: "openai", name: "OpenAI (GPT)", desc: "Official OpenAI API", provider: "openai", enabled: false, apiMode: "openai", endpoint: "https://api.openai.com/v1", apiKey: "", model: "", modelPresets: ["gpt-4.1", "gpt-4.1-mini", "gpt-5"], contextWindow: 128000, reasoning: "auto" },
+          { id: "gemini", name: "Google (Gemini)", desc: "Generative Language API", provider: "gemini", enabled: false, apiMode: "openai", endpoint: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: "", model: "", modelPresets: ["gemini-2.5-pro", "gemini-2.5-flash"], contextWindow: 1000000, reasoning: "auto" },
+          { id: "deepseek", name: "DeepSeek", desc: "api.deepseek.com", provider: "deepseek", enabled: false, apiMode: "openai", endpoint: "https://api.deepseek.com/v1", apiKey: "", model: "", modelPresets: ["deepseek-chat", "deepseek-reasoner"], contextWindow: 64000, reasoning: "auto" },
+          { id: "groq", name: "Groq", desc: "api.groq.com", provider: "groq", enabled: false, apiMode: "openai", endpoint: "https://api.groq.com/openai/v1", apiKey: "", model: "", modelPresets: ["llama-3.3-70b-versatile"], contextWindow: 128000, reasoning: "auto" },
+          { id: "xai", name: "xAI (Grok)", desc: "api.x.ai", provider: "xai", enabled: false, apiMode: "openai", endpoint: "https://api.x.ai/v1", apiKey: "", model: "", modelPresets: ["grok-4", "grok-3"], contextWindow: 128000, reasoning: "auto" },
+          { id: "nvidia", name: "NVIDIA NIM", desc: "integrate.api.nvidia.com", provider: "nvidia", enabled: false, apiMode: "openai", endpoint: "https://integrate.api.nvidia.com/v1", apiKey: "", model: "", modelPresets: ["openai/gpt-oss-120b"], contextWindow: 128000, reasoning: "auto" },
+          { id: "moonshot-global", name: "Kimi (Moonshot)", desc: "api.moonshot.ai", provider: "moonshot", enabled: false, apiMode: "openai", endpoint: "https://api.moonshot.ai/v1", apiKey: "", model: "", modelPresets: ["kimi-k2.5", "kimi-latest"], contextWindow: 128000, reasoning: "auto" },
+          { id: "moonshot-cn", name: "Kimi (Moonshot, 中国)", desc: "api.moonshot.cn", provider: "moonshot-cn", enabled: false, apiMode: "openai", endpoint: "https://api.moonshot.cn/v1", apiKey: "", model: "", modelPresets: ["kimi-k2.5", "kimi-latest"], contextWindow: 128000, reasoning: "auto" },
+          { id: "zhipu", name: "智谱 GLM (Zhipu)", desc: "open.bigmodel.cn", provider: "zhipu", enabled: false, apiMode: "openai", endpoint: "https://open.bigmodel.cn/api/paas/v4", apiKey: "", model: "", modelPresets: ["glm-4.7", "glm-4-flash"], contextWindow: 128000, reasoning: "auto" },
+          { id: "minimax-global", name: "MiniMax (Global)", desc: "api.minimax.io/anthropic", provider: "minimax-global", enabled: false, apiMode: "anthropic", endpoint: "https://api.minimax.io/anthropic", apiKey: "", model: "", modelPresets: ["MiniMax-M2.5"], contextWindow: 128000, reasoning: "auto" },
+          { id: "minimax-cn", name: "MiniMax (中国)", desc: "api.minimax.com/anthropic", provider: "minimax-cn", enabled: false, apiMode: "anthropic", endpoint: "https://api.minimax.com/anthropic", apiKey: "", model: "", modelPresets: ["MiniMax-M2.5"], contextWindow: 128000, reasoning: "auto" },
+          { id: "aliyun-coding", name: "阿里百炼 Coding Plan", desc: "dashscope.aliyuncs.com", provider: "aliyun-modelstudio", enabled: false, apiMode: "openai", host: "ws-yo0l2l0j1634flxf.ap-southeast-1.maas.aliyuncs.com", endpoint: "https://ws-yo0l2l0j1634flxf.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1", dashscopeEndpoint: "https://ws-yo0l2l0j1634flxf.ap-southeast-1.maas.aliyuncs.com/api/v1", apiKey: "", model: "qwen-plus", modelPresets: ["qwen-plus", "qwen-max", "qwen3-coder-plus", "qwen3-coder-next"], contextWindow: 131000, reasoning: "auto" },
+          { id: "xiaomi", name: "小米 MiMo (Xiaomi)", desc: "api.xiaomimimo.com", provider: "xiaomi", enabled: false, apiMode: "openai", endpoint: "https://api.xiaomimimo.com/v1", apiKey: "", model: "", modelPresets: ["MiMo"], contextWindow: 128000, reasoning: "auto" },
+          { id: "volcengine", name: "火山引擎 Ark (Volcengine)", desc: "ark.cn-beijing.volces.com/api/coding/v3", provider: "volcengine", enabled: false, apiMode: "openai", endpoint: "https://ark.cn-beijing.volces.com/api/coding/v3", apiKey: "", model: "Doubao-Seed-2.0-Code", modelPresets: ["Doubao-Seed-2.0-Code", "Doubao-Seed-2.0-pro", "Doubao-Seed-2.0-lite"], contextWindow: 128000, reasoning: "auto" },
+          { id: "ollama-local", name: "Ollama (Local)", desc: "Self-hosted llama.cpp / Ollama", provider: "ollama-local", enabled: false, apiMode: "openai", endpoint: "http://127.0.0.1:11434/v1", apiKey: "", model: "", modelPresets: ["qwen2.5", "llama3.1"], contextWindow: 128000, reasoning: "off" },
+          { id: "ollama-cloud", name: "Ollama Cloud", desc: "ollama.com", provider: "ollama-cloud", enabled: false, apiMode: "openai", endpoint: "https://ollama.com/v1", apiKey: "", model: "", modelPresets: ["gpt-oss"], contextWindow: 128000, reasoning: "auto" },
+          { id: "custom", name: "Custom", desc: "Any OpenAI- or Anthropic-compatible endpoint", provider: "custom", enabled: false, apiMode: "openai", endpoint: "http://127.0.0.1:8080/v1", apiKey: "", model: "gpt-5.5", modelPresets: ["gpt-5.5"], contextWindow: 262000, reasoning: "auto" }
+        ],
+        userBackground: "用户背景：3D-SIM、多层聚焦结构光照明 MPSIM、RIM、PRIM、2D-SIM；当前正在做 PRIM 伪随机的结构光照明显微镜算法。"
+      },
+      googleScholar: {
+        provider: "google-scholar-api",
+        enabled: false,
+        endpoint: "https://serpapi.com/search.json",
+        apiKey: "",
+        maxPages: 3,
+        num: 20,
+        rollingFetch: false,
+        hasApiKey: false
+      },
+      journalMetrics: {
+        provider: "easyscholar",
+        enabled: false,
+        endpoint: "https://easyscholar.cc/open/getPublicationRank",
+        apiKey: "",
+        hasApiKey: false
+      }
+    };
+    let integrationState = JSON.parse(JSON.stringify(defaultIntegrationState));
+    let expandedLlmProviderId = "";
+    const savedSecretMask = "********";
+    let integrationSecrets = null;
 
     function saveSourceStateLocal() {
       try {
@@ -1809,7 +4590,7 @@
       if (!state || typeof state !== "object") return;
       userProfile = state.profile || null;
       if (state.config?.keywords) keywordState = state.config.keywords;
-      if (Array.isArray(state.config?.sources)) sourceState = state.config.sources;
+      if (Array.isArray(state.config?.sources)) sourceState = mergeSourceDefaults(state.config.sources);
       saveKeywordStateLocal();
       saveSourceStateLocal();
     }
@@ -1825,6 +4606,129 @@
       }
     }
 
+    function applyIntegrationState(payload) {
+      const items = payload?.integrations || payload || {};
+      const incomingLlm = items.llm || {};
+      const mergedProviders = [
+        ...(incomingLlm.providers || []),
+        ...defaultIntegrationState.llm.providers.filter(defaultProvider => (
+          !(incomingLlm.providers || []).some(provider => provider.id === defaultProvider.id)
+        ))
+      ];
+      integrationState = {
+        llm: { ...defaultIntegrationState.llm, ...incomingLlm, providers: mergedProviders },
+        googleScholar: { ...defaultIntegrationState.googleScholar, ...(items.googleScholar || {}) },
+        journalMetrics: { ...defaultIntegrationState.journalMetrics, ...(items.journalMetrics || {}) }
+      };
+      if (!expandedLlmProviderId) {
+        expandedLlmProviderId = integrationState.llm.activeProviderId || integrationState.llm.providers?.[0]?.id || "";
+      }
+    }
+
+    async function loadIntegrationConfig() {
+      if (location.protocol === "file:") return;
+      try {
+        const response = await fetch("/api/integrations/config");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        applyIntegrationState(await response.json());
+      } catch (error) {
+        console.warn("Integration config load failed", error);
+      }
+    }
+
+    async function loadIntegrationSecrets() {
+      if (location.protocol === "file:") return null;
+      if (integrationSecrets) return integrationSecrets;
+      const response = await fetch("/api/integrations/secrets");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      integrationSecrets = payload.secrets || {};
+      return integrationSecrets;
+    }
+
+    function secretInputValue(item) {
+      return item.hasApiKey ? savedSecretMask : "";
+    }
+
+    function secretButtonLabel(item, revealed) {
+      if (!item.hasApiKey && !String(item.apiKey || "").trim()) return "无密钥";
+      return revealed ? "隐藏" : "显示";
+    }
+
+    function sourceSecretField(key, item) {
+      const revealed = item.apiKey && item.apiKey !== savedSecretMask;
+      return `
+        <div class="secret-row">
+          <input type="password" data-source-integration-field="apiKey" data-secret-path="${escapeHTML(key)}" value="${escapeHTML(secretInputValue(item))}" placeholder="${escapeHTML(integrationSecretText(item))}">
+          <button class="secret-toggle" type="button" data-secret-toggle="${escapeHTML(key)}" ${item.hasApiKey ? "" : "disabled"}>${secretButtonLabel(item, revealed)}</button>
+        </div>
+      `;
+    }
+
+    function llmSecretField(provider) {
+      const path = `llm.providers.${provider.id}`;
+      const revealed = provider.apiKey && provider.apiKey !== savedSecretMask;
+      return `
+        <div class="secret-row">
+          <input type="password" data-llm-field="apiKey" data-secret-path="${escapeHTML(path)}" value="${escapeHTML(secretInputValue(provider))}" placeholder="${escapeHTML(integrationSecretText(provider))}">
+          <button class="secret-toggle" type="button" data-secret-toggle="${escapeHTML(path)}" ${provider.hasApiKey ? "" : "disabled"}>${secretButtonLabel(provider, revealed)}</button>
+        </div>
+      `;
+    }
+
+    function findSecretValue(secrets, path) {
+      if (path === "googleScholar") return secrets?.googleScholar?.apiKey || "";
+      if (path === "journalMetrics") return secrets?.journalMetrics?.apiKey || "";
+      if (path === "llm") return secrets?.llm?.apiKey || "";
+      if (path.startsWith("llm.providers.")) {
+        const providerId = path.slice("llm.providers.".length);
+        return (secrets?.llm?.providers || []).find(provider => provider.id === providerId)?.apiKey || "";
+      }
+      return "";
+    }
+
+    function sourceIntegrationFields(source) {
+      const title = String(source?.title || "").toLowerCase();
+      if (title.includes("google 搜索") || title.includes("google scholar") || title.includes("谷歌学术")) {
+        const google = integrationState.googleScholar;
+        const label = title.includes("google scholar") || title.includes("谷歌学术") ? "Google Scholar" : "Google 搜索";
+        return `
+          <div class="config-section source-form" data-source-integration="googleScholar">
+            <label><span><input type="checkbox" data-source-integration-field="enabled" ${google.enabled ? "checked" : ""}> 启用 SerpApi / Google JSON API</span></label>
+            <div class="small-text">${label} 使用这份 Google API 配置；Google 搜索会请求 engine=google，Google Scholar 会使用 Endpoint 中配置的 scholar engine。</div>
+            <label>Endpoint
+              <input data-source-integration-field="endpoint" value="${escapeHTML(google.endpoint)}" placeholder="https://serpapi.com/search.json">
+            </label>
+            <label>API Key
+              ${sourceSecretField("googleScholar", google)}
+            </label>
+            <div class="input-row">
+              <label>抓取页数
+                <input type="number" min="1" max="10" step="1" data-source-integration-field="maxPages" value="${escapeHTML(google.maxPages || 3)}">
+              </label>
+              <label>每页数量 num
+                <input type="number" min="1" max="20" step="1" data-source-integration-field="num" value="${escapeHTML(google.num || 20)}">
+              </label>
+            </div>
+            <label><span><input type="checkbox" data-source-integration-field="rollingFetch" ${google.rollingFetch ? "checked" : ""}> 启动滚动抓取</span></label>
+            <div class="small-text">开启后，同一信源、关键词和 num 会从本地保存的 SerpApi start 继续抓取；例如本次抓 1-3 页，下次自动接着抓 4-6 页。</div>
+            <div class="small-text">建议 1-3 页，每页 20 条；页数越高越容易触发 Google Scholar / SerpApi 限流。</div>
+          </div>
+        `;
+      }
+      return `<div class="config-section source-form"><div class="small-text">这个信源由后端内置 API 直接抓取，当前不需要填写 Endpoint 或 API Key。</div></div>`;
+    }
+
+    function sourceEditSummary(source) {
+      return `
+        <div>
+          <h3>${escapeHTML(source.title)}</h3>
+          <p class="source-desc">${escapeHTML(source.desc)}</p>
+          <div class="tags">${source.tags.map(tag => `<span class="tag">${escapeHTML(tag)}</span>`).join("")}</div>
+        </div>
+      `;
+    }
+
     function renderSourceConfig() {
       const list = document.getElementById("source-list");
       if (!list) return;
@@ -1834,15 +4738,8 @@
           return `
             <article class="source-card editing" data-source-index="${index}">
               <div class="source-form">
-                <label>信源名称
-                  <input data-source-field="title" value="${escapeHTML(source.title)}">
-                </label>
-                <label>说明
-                  <textarea data-source-field="desc">${escapeHTML(source.desc)}</textarea>
-                </label>
-                <label>标签，用顿号、逗号或空格分隔
-                  <input data-source-field="tags" value="${escapeHTML(source.tags.join("、"))}">
-                </label>
+                ${sourceEditSummary(source)}
+                ${sourceIntegrationFields(source)}
                 <div class="source-form-actions">
                   <button class="ghost-btn" data-source-cancel>取消</button>
                   <button class="primary-btn" data-source-save>保存</button>
@@ -1871,49 +4768,421 @@
       list.onkeydown = handleSourceKeydown;
     }
 
-    function parseSourceTags(value) {
-      return value.split(/[、,\s]+/).map(tag => tag.trim()).filter(Boolean);
+    function integrationSecretText(item) {
+      return item.hasApiKey ? "已保存密钥；留空不覆盖" : "尚未保存密钥";
+    }
+
+    function llmProviderBody(provider) {
+      const modelPresets = Array.isArray(provider.modelPresets) ? provider.modelPresets : [];
+      const reasoningOptions = ["auto", "off", "low", "medium", "high", "max", "custom"];
+      return `
+        <div class="llm-provider-body source-form" data-llm-provider-body="${escapeHTML(provider.id)}">
+          ${provider.id === "custom" ? `
+          <label>显示名称
+            <input data-llm-field="name" value="${escapeHTML(provider.name || "Custom")}">
+          </label>
+          <label>说明
+            <input data-llm-field="desc" value="${escapeHTML(provider.desc || "")}">
+          </label>
+          ` : ""}
+          <label>API 模式
+            <div class="segmented" data-llm-field="apiMode">
+              ${["openai", "anthropic"].map(mode => `<button class="segment ${provider.apiMode === mode ? "active" : ""}" data-llm-value="${mode}">${mode === "openai" ? "OpenAI 兼容" : "Anthropic 兼容"}</button>`).join("")}
+            </div>
+          </label>
+          <label>Endpoint
+            <input data-llm-field="endpoint" value="${escapeHTML(provider.endpoint || "")}">
+          </label>
+          <label>API 密钥
+            ${llmSecretField(provider)}
+          </label>
+          <label>模型
+            <div class="model-chip-row">
+              ${modelPresets.map(model => `<button class="model-chip ${provider.model === model ? "active" : ""}" data-model-preset="${escapeHTML(model)}">${escapeHTML(model)}</button>`).join("")}
+              <button class="model-chip" data-model-preset="">自定义...</button>
+            </div>
+            <input data-llm-field="model" value="${escapeHTML(provider.model || "")}">
+          </label>
+          <label>上下文窗口
+            <div class="range-row">
+              <input type="range" min="4000" max="1000000" step="1000" data-llm-field="contextWindow" value="${Number(provider.contextWindow || 128000)}">
+              <span>${Math.round(Number(provider.contextWindow || 128000) / 1000)}K characters</span>
+            </div>
+          </label>
+          <label>Reasoning / thinking
+            <div class="segmented" data-llm-field="reasoning">
+              ${reasoningOptions.map(option => `<button class="segment ${provider.reasoning === option ? "active" : ""}" data-llm-value="${option}">${escapeHTML({ auto: "自动", off: "关闭", low: "低", medium: "中", high: "高", max: "最大", custom: "自定义" }[option])}</button>`).join("")}
+            </div>
+          </label>
+          <div class="llm-test-result" data-llm-test-result="${escapeHTML(provider.id)}"></div>
+          <div class="llm-provider-actions">
+            <button class="ghost-btn" data-llm-test="${escapeHTML(provider.id)}">测试</button>
+            <button class="primary-btn" data-llm-confirm="${escapeHTML(provider.id)}">确定</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderLlmProviderList(llm) {
+      const providers = Array.isArray(llm.providers) ? llm.providers : [];
+      const activeId = llm.activeProviderId || providers.find(provider => provider.enabled)?.id || "custom";
+      return `
+        <div class="llm-provider-list" id="llm-provider-list">
+          ${providers.map(provider => {
+            const active = provider.id === activeId && llm.enabled !== false;
+            const expanded = provider.id === expandedLlmProviderId;
+            return `
+              <article class="llm-provider" data-llm-provider="${escapeHTML(provider.id)}">
+                <button class="llm-provider-head" data-llm-expand="${escapeHTML(provider.id)}">
+                  <span class="llm-arrow">${expanded ? "⌄" : "›"}</span>
+                  <span>
+                    <span class="llm-provider-name">${escapeHTML(provider.name)}</span>
+                    <span class="llm-provider-desc">${escapeHTML(provider.desc || provider.endpoint || "")}</span>
+                  </span>
+                  <span class="switch ${active ? "on" : ""}" data-llm-toggle="${escapeHTML(provider.id)}" role="switch" aria-checked="${active ? "true" : "false"}"></span>
+                </button>
+                ${expanded ? llmProviderBody(provider) : ""}
+              </article>
+            `;
+          }).join("")}
+        </div>
+      `;
+    }
+
+    function renderIntegrationConfig() {
+      const form = document.getElementById("integration-config-form");
+      if (!form) return;
+      const llm = integrationState.llm;
+      form.innerHTML = `
+        <div class="config-section" data-integration-section="llm">
+          <div class="keyword-section-head">
+            <h3>LLM 模型</h3>
+            <div class="keyword-section-note">每个厂商一条独立配置；右侧开关负责启用，左侧箭头只展开/收缩。填写完成后点击该模型的确定按钮保存。</div>
+          </div>
+          ${renderLlmProviderList(llm)}
+        </div>
+      `;
+    }
+
+    function renderUserBackgroundConfig() {
+      return `
+        <section class="panel" style="margin-top:16px">
+          <div class="background-config">
+            <div class="background-config-head">
+              <h4>个人研究背景</h4>
+              <button class="primary-btn" type="button" data-background-confirm>确定</button>
+            </div>
+            <textarea class="user-background-input" data-integration-field="userBackground">${escapeHTML(integrationState.llm.userBackground)}</textarea>
+          </div>
+        </section>
+      `;
+    }
+
+    function bindUserBackgroundConfig() {
+      const button = mainContent.querySelector("[data-background-confirm]");
+      if (button) button.addEventListener("click", saveIntegrationConfig);
+    }
+
+    function readIntegrationSection(section) {
+      if (section.getAttribute("data-integration-section") === "llm") {
+        return currentLlmConfig();
+      }
+      const result = {};
+      section.querySelectorAll("[data-integration-field]").forEach(input => {
+        const key = input.getAttribute("data-integration-field");
+        result[key] = input.type === "checkbox" ? input.checked : input.value.trim();
+      });
+      return result;
+    }
+
+    function readActiveLlmProvider(provider) {
+      const body = document.querySelector(`[data-llm-provider-body="${provider.id}"]`);
+      if (!body) return provider;
+      const next = { ...provider };
+      body.querySelectorAll("[data-llm-field]").forEach(input => {
+        const key = input.getAttribute("data-llm-field");
+        if (input.matches("input, textarea")) {
+          const value = input.type === "range" ? Number(input.value) : input.value.trim();
+          next[key] = key === "apiKey" && value === savedSecretMask ? "" : value;
+        }
+      });
+      body.querySelectorAll(".segmented[data-llm-field]").forEach(group => {
+        const active = group.querySelector(".segment.active");
+        if (active) next[group.getAttribute("data-llm-field")] = active.getAttribute("data-llm-value");
+      });
+      return next;
+    }
+
+    function currentLlmConfig() {
+      const backgroundInput = document.querySelector('[data-integration-field="userBackground"]');
+      const background = backgroundInput ? backgroundInput.value.trim() : integrationState.llm.userBackground;
+      const providers = (integrationState.llm.providers || []).map(provider => {
+        const active = provider.id === integrationState.llm.activeProviderId && integrationState.llm.enabled !== false;
+        return {
+          ...readActiveLlmProvider(provider),
+          enabled: active
+        };
+      });
+      const activeProvider = providers.find(provider => provider.enabled) || {};
+      return {
+        ...integrationState.llm,
+        enabled: Boolean(activeProvider.id),
+        activeProviderId: activeProvider.id || integrationState.llm.activeProviderId,
+        provider: activeProvider.provider || integrationState.llm.provider,
+        endpoint: activeProvider.endpoint || integrationState.llm.endpoint,
+        apiKey: activeProvider.apiKey || "",
+        model: activeProvider.model || integrationState.llm.model,
+        apiMode: activeProvider.apiMode || integrationState.llm.apiMode,
+        contextWindow: activeProvider.contextWindow || integrationState.llm.contextWindow,
+        reasoning: activeProvider.reasoning || integrationState.llm.reasoning,
+        providers,
+        userBackground: background
+      };
+    }
+
+    function currentIntegrationConfig() {
+      const form = document.getElementById("integration-config-form");
+      const payload = {
+        llm: currentLlmConfig(),
+        googleScholar: integrationState.googleScholar,
+        journalMetrics: integrationState.journalMetrics
+      };
+      if (form) {
+        form.querySelectorAll("[data-integration-section]").forEach(section => {
+          payload[section.getAttribute("data-integration-section")] = readIntegrationSection(section);
+        });
+      }
+      return payload;
+    }
+
+    function applySourceIntegrationFields(card) {
+      const section = card.querySelector("[data-source-integration]");
+      if (!section) return;
+      const key = section.getAttribute("data-source-integration");
+      const next = { ...(integrationState[key] || {}) };
+      section.querySelectorAll("[data-source-integration-field]").forEach(input => {
+        const field = input.getAttribute("data-source-integration-field");
+        if (field === "apiKey") {
+          const value = input.value.trim();
+          next[field] = value === savedSecretMask ? "" : value;
+          return;
+        }
+        if (input.type === "number") {
+          next[field] = Number(input.value);
+          return;
+        }
+        next[field] = input.type === "checkbox" ? input.checked : input.value.trim();
+      });
+      integrationState[key] = next;
+    }
+
+    function setLlmTestResult(providerId, message, status = "") {
+      const result = document.querySelector(`[data-llm-test-result="${providerId}"]`);
+      if (!result) return;
+      result.textContent = message;
+      result.className = `llm-test-result ${status}`.trim();
+    }
+
+    function currentSingleLlmTestPayload(providerId) {
+      const llm = currentLlmConfig();
+      return {
+        llm: {
+          ...llm,
+          enabled: true,
+          activeProviderId: providerId,
+          providers: (llm.providers || []).map(provider => ({
+            ...provider,
+            enabled: provider.id === providerId
+          }))
+        }
+      };
+    }
+
+    async function testLlmProvider(providerId) {
+      if (location.protocol === "file:") {
+        showToast("请通过本地服务页面测试模型");
+        return;
+      }
+      setLlmTestResult(providerId, "正在测试模型连接...");
+      try {
+        const response = await fetch("/api/integrations/llm/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(currentSingleLlmTestPayload(providerId))
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
+        const usage = payload.tokenUsage || {};
+        const total = Number(usage.total || 0);
+        setLlmTestResult(providerId, `连接成功：${payload.model || "模型已响应"}${total ? `，token ${total}` : ""}`, "ok");
+        showToast("模型连接测试成功");
+      } catch (error) {
+        setLlmTestResult(providerId, `连接失败：${error.message}`, "error");
+        showToast("模型连接测试失败");
+      }
+    }
+    async function saveIntegrationConfig() {
+      if (location.protocol === "file:") {
+        showToast("请通过本地服务页面保存接口配置");
+        return;
+      }
+      try {
+        const response = await fetch("/api/integrations/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(currentIntegrationConfig())
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        applyIntegrationState(await response.json());
+        renderIntegrationConfig();
+        bindIntegrationAutosave();
+        showToast("配置已保存");
+      } catch (error) {
+        console.warn("Integration config save failed", error);
+        showToast("配置保存失败");
+      }
+    }
+
+    function scheduleIntegrationSave() {
+      clearTimeout(window.paperhotIntegrationSaveTimer);
+      window.paperhotIntegrationSaveTimer = setTimeout(saveIntegrationConfig, 500);
+    }
+
+    function activateLlmProvider(providerId) {
+      integrationState.llm.activeProviderId = providerId;
+      integrationState.llm.enabled = true;
+      expandedLlmProviderId = providerId;
+      integrationState.llm.providers = (integrationState.llm.providers || []).map(provider => ({
+        ...provider,
+        enabled: provider.id === providerId
+      }));
+      renderIntegrationConfig();
+      scheduleIntegrationSave();
+    }
+
+    async function toggleSecretVisibility(button) {
+      const path = button.getAttribute("data-secret-toggle");
+      const row = button.closest(".secret-row");
+      const input = row?.querySelector("[data-secret-path]");
+      if (!input || !path) return;
+      if (input.type === "text") {
+        input.type = "password";
+        input.value = savedSecretMask;
+        button.textContent = "显示";
+        return;
+      }
+      try {
+        button.disabled = true;
+        button.textContent = "读取中";
+        const secrets = await loadIntegrationSecrets();
+        const value = findSecretValue(secrets, path);
+        if (!value) {
+          input.value = "";
+          input.placeholder = "尚未保存密钥";
+          button.textContent = "无密钥";
+          showToast("未找到已保存的密钥");
+          return;
+        }
+        input.type = "text";
+        input.value = value;
+        button.textContent = "隐藏";
+      } catch (error) {
+        console.warn("Integration secret load failed", error);
+        button.textContent = "显示";
+        showToast("密钥读取失败");
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function handleIntegrationClick(event) {
+      const secretToggle = event.target.closest("[data-secret-toggle]");
+      if (secretToggle) {
+        event.preventDefault();
+        toggleSecretVisibility(secretToggle);
+        return;
+      }
+      const toggle = event.target.closest("[data-llm-toggle]");
+      if (toggle) {
+        event.preventDefault();
+        event.stopPropagation();
+        activateLlmProvider(toggle.getAttribute("data-llm-toggle"));
+        return;
+      }
+      const expand = event.target.closest("[data-llm-expand]");
+      if (expand) {
+        event.preventDefault();
+        const providerId = expand.getAttribute("data-llm-expand");
+        expandedLlmProviderId = expandedLlmProviderId === providerId ? "" : providerId;
+        renderIntegrationConfig();
+        bindIntegrationAutosave();
+        return;
+      }
+      const segment = event.target.closest(".segment[data-llm-value]");
+      if (segment) {
+        event.preventDefault();
+        const group = segment.closest(".segmented");
+        group.querySelectorAll(".segment").forEach(item => item.classList.remove("active"));
+        segment.classList.add("active");
+        return;
+      }
+      const model = event.target.closest("[data-model-preset]");
+      if (model) {
+        event.preventDefault();
+        const value = model.getAttribute("data-model-preset");
+        const body = model.closest("[data-llm-provider-body]");
+        body.querySelectorAll("[data-model-preset]").forEach(item => item.classList.remove("active"));
+        model.classList.add("active");
+        if (value) body.querySelector('[data-llm-field="model"]').value = value;
+        return;
+      }
+      const test = event.target.closest("[data-llm-test]");
+      if (test) {
+        event.preventDefault();
+        testLlmProvider(test.getAttribute("data-llm-test"));
+        return;
+      }
+      const confirm = event.target.closest("[data-llm-confirm]");
+      if (confirm) {
+        event.preventDefault();
+        saveIntegrationConfig();
+      }
+    }
+
+    function bindIntegrationAutosave() {
+      const form = document.getElementById("integration-config-form");
+      if (!form) return;
+      form.onclick = handleIntegrationClick;
+      form.oninput = event => {
+        if (event.target.matches("[data-integration-field]")) scheduleIntegrationSave();
+      };
+      form.onchange = event => {
+        if (event.target.matches("[data-integration-field]")) scheduleIntegrationSave();
+      };
     }
 
     function saveSourceEdit(card) {
       const index = Number(card.getAttribute("data-source-index"));
-      const title = card.querySelector('[data-source-field="title"]').value.trim();
-      const desc = card.querySelector('[data-source-field="desc"]').value.trim();
-      const tags = parseSourceTags(card.querySelector('[data-source-field="tags"]').value);
-      if (!title) {
-        showToast("请填写信源名称");
-        card.querySelector('[data-source-field="title"]').focus();
-        return;
-      }
-      sourceState[index] = {
-        ...sourceState[index],
-        title,
-        desc: desc || "待补充信源说明。",
-        tags: tags.length ? tags : ["待配置"]
-      };
+      sourceState[index] = { ...sourceState[index] };
+      applySourceIntegrationFields(card);
       editingSourceIndex = null;
       saveUserConfig();
+      saveIntegrationConfig();
       renderSourceConfig();
       showToast("信源已保存");
-    }
-
-    function addExampleSource(title) {
-      sourceState.push({
-        title,
-        desc: "新增示例信源。这里可以填写 URL、抓取方式、更新频率和领域映射。",
-        tags: ["自定义信源", "待配置"],
-        enabled: true
-      });
-      editingSourceIndex = sourceState.length - 1;
-      saveUserConfig();
-      renderSourceConfig();
-      showToast("已添加信源，请继续编辑");
     }
 
     function handleSourceClick(event) {
       const card = event.target.closest("[data-source-index]");
       if (!card) return;
       const index = Number(card.getAttribute("data-source-index"));
+
+      const secretToggle = event.target.closest("[data-secret-toggle]");
+      if (secretToggle) {
+        event.preventDefault();
+        toggleSecretVisibility(secretToggle);
+        return;
+      }
 
       if (event.target.closest("[data-source-toggle]")) {
         sourceState[index].enabled = !sourceState[index].enabled;
@@ -1950,10 +5219,9 @@
       mainContent.innerHTML = configHTML;
       editingSourceIndex = null;
       renderSourceConfig();
+      renderIntegrationConfig();
+      bindIntegrationAutosave();
       renderKeywordConfig();
-      document.querySelectorAll("[data-add-example]").forEach(button => {
-        button.addEventListener("click", () => addExampleSource(button.getAttribute("data-add-example")));
-      });
       document.querySelectorAll("[data-token-group]").forEach(group => {
         group.addEventListener("click", event => {
           if (event.target.classList.contains("remove")) {
@@ -1988,10 +5256,12 @@
         saveUserConfig();
         showToast("配置已保存到本地浏览器");
       });
+      const saveIntegrations = document.getElementById("save-integrations");
+      if (saveIntegrations) saveIntegrations.addEventListener("click", saveIntegrationConfig);
     }
 
     function renderPage(page) {
-      const normalized = ["today", "all", "favorites", "config", "tokens", "about"].includes(page) ? page : "today";
+      const normalized = ["today", "all", "favorites", "config", "tokens", "logs", "about"].includes(page) ? page : "today";
       setActiveNav(normalized);
       if (normalized === "today") renderToday();
       if (normalized === "all") renderAll();
@@ -2000,6 +5270,10 @@
       if (normalized === "tokens") {
         renderTokenStats();
         loadTokenStats();
+      }
+      if (normalized === "logs") {
+        renderOperationLog();
+        loadOperationLog();
       }
       if (normalized === "about") renderAbout();
     }
@@ -2012,11 +5286,27 @@
     window.addEventListener("hashchange", () => renderPage(location.hash.replace("#", "")));
     async function startApp() {
       await loadUserState();
+      await loadIntegrationConfig();
+      await loadFavoritesData();
+      await loadPaperNotesData();
       renderPage(location.hash.replace("#", "") || "today");
+      loadGoogleRollingStatus();
+      loadFetchLogData().then(() => {
+        if ((location.hash.replace("#", "") || "today") === "today") renderToday();
+      });
       loadPaperData("today", false);
-      loadPaperData("recent", false);
+      loadArchiveData();
     }
     startApp();
   </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
