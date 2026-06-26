@@ -1874,6 +1874,7 @@ test("stores multiple LLM providers with one active provider", async () => {
 });
 
 test("tests an LLM provider using saved or submitted configuration", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-test-log-"));
   let seenUrl = "";
   const result = await testLlmConfig({
     llm: {
@@ -1893,6 +1894,7 @@ test("tests an LLM provider using saved or submitted configuration", async () =>
       userBackground: "PRIM 伪随机结构光照明显微镜算法"
     }
   }, {
+    dataDir: tempDir,
     fetchImpl: async (url, request) => {
       seenUrl = String(url);
       assert.equal(request.headers.Authorization, "Bearer test-key");
@@ -1915,6 +1917,16 @@ test("tests an LLM provider using saved or submitted configuration", async () =>
   assert.equal(result.model, "qwen-plus");
   assert.equal(result.llmSummary, "");
   assert.equal(result.tokenUsage.total, 10);
+  const operations = await readOperationLog(tempDir);
+  assert.equal(operations[0].operation, "llm-config-test");
+  assert.deepEqual(operations[0].llm, {
+    models: [
+      { model: "qwen-plus", calls: 1, prompt: 6, completion: 4, total: 10 }
+    ],
+    calls: 1,
+    totalTokens: 10
+  });
+  await fs.rm(tempDir, { recursive: true, force: true });
 });
 test("calls OpenAI-compatible LLM with chat completions path", async () => {
   let seenUrl = "";
@@ -2111,6 +2123,13 @@ test("refreshes one archived paper with LLM when requested", async () => {
   assert.equal(archive.papers.find(paper => paper.id === "needs-one").reason, "单篇推荐理由。");
   assert.equal(archive.papers.find(paper => paper.id === "keep-other").reason, "其他推荐理由");
   assert.equal(operations[0].operation, "archive-llm-refresh-one");
+  assert.deepEqual(operations[0].llm, {
+    models: [
+      { model: "test-llm", calls: 1, prompt: 12, completion: 8, total: 20 }
+    ],
+    calls: 1,
+    totalTokens: 20
+  });
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -3937,6 +3956,170 @@ test("builds today's token statistics from archive fetch timestamps", async () =
   assert.equal(stats.daily.at(-1).total, 400);
   assert.deepEqual(stats.byModel, [
     { model: "qwen-plus", prompt: 330, completion: 110, total: 440, papers: 3 }
+  ]);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("builds token statistics from fetch log LLM usage before cached paper totals", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-token-stats-fetch-log-"));
+  await fs.writeFile(path.join(tempDir, "2026-06-26-recent.json"), `${JSON.stringify({
+    papers: [
+      { title: "shown-a", tokenUsage: { prompt: 500, completion: 100, total: 600, model: "qwen-plus" } },
+      { title: "shown-b", tokenUsage: { prompt: 400, completion: 200, total: 600, model: "qwen-plus" } }
+    ]
+  }, null, 2)}\n`, "utf8");
+  await fs.writeFile(path.join(tempDir, "fetch-log.json"), `${JSON.stringify({
+    entries: [
+      {
+        at: "2026-06-26T02:05:25.430Z",
+        llm: {
+          models: [
+            { model: "qwen-plus", calls: 30, prompt: 15159, completion: 5340, total: 20499 }
+          ],
+          calls: 30,
+          totalTokens: 20499
+        }
+      },
+      {
+        at: "2026-06-25T08:25:16.249Z",
+        llm: {
+          models: [
+            { model: "qwen-plus", calls: 10, prompt: 7379, completion: 3589, total: 10968 }
+          ],
+          calls: 10,
+          totalTokens: 10968
+        }
+      }
+    ]
+  }, null, 2)}\n`, "utf8");
+
+  const stats = await buildTokenStats({ dataDir: tempDir, today: "2026-06-26" });
+
+  assert.equal(stats.today.total, 20499);
+  assert.equal(stats.today.prompt, 15159);
+  assert.equal(stats.today.completion, 5340);
+  assert.equal(stats.today.papers, 30);
+  assert.equal(stats.last7Days.total, 31467);
+  assert.equal(stats.daily.at(-1).total, 20499);
+  assert.deepEqual(stats.byModel, [
+    { model: "qwen-plus", prompt: 22538, completion: 8929, total: 31467, papers: 40 }
+  ]);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("builds token statistics from operation log LLM usage for manual refreshes", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-token-stats-operation-log-"));
+  await fs.writeFile(path.join(tempDir, "operation-log.jsonl"), [
+    JSON.stringify({
+      at: "2026-06-26T12:39:25.774Z",
+      action: "modify",
+      operation: "archive-llm-refresh-one",
+      paper: { id: "manual-refresh-paper", title: "Manual LLM refresh paper" },
+      llm: {
+        models: [
+          { model: "qwen-plus", calls: 1, prompt: 730, completion: 288, total: 1018 }
+        ],
+        calls: 1,
+        totalTokens: 1018
+      }
+    }),
+    JSON.stringify({
+      at: "2026-06-26T13:00:00.000Z",
+      action: "modify",
+      operation: "archive-llm-refresh-missing",
+      papers: [{ id: "bulk-refresh-paper", title: "Bulk LLM refresh paper" }],
+      llm: {
+        models: [
+          { model: "qwen-plus", calls: 2, prompt: 20, completion: 10, total: 30 }
+        ],
+        calls: 2,
+        totalTokens: 30
+      }
+    })
+  ].join("\n") + "\n", "utf8");
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    papers: [
+      {
+        id: "manual-refresh-paper",
+        title: "Manual LLM refresh paper",
+        llmUpdatedAt: "2026-06-26T12:39:25.774Z",
+        tokenUsage: { prompt: 730, completion: 288, total: 1018, model: "qwen-plus", status: "已调用 AI" }
+      }
+    ]
+  }, null, 2)}\n`, "utf8");
+
+  const stats = await buildTokenStats({ dataDir: tempDir, today: "2026-06-26" });
+
+  assert.equal(stats.today.total, 1048);
+  assert.equal(stats.today.prompt, 750);
+  assert.equal(stats.today.completion, 298);
+  assert.equal(stats.today.papers, 3);
+  assert.deepEqual(stats.byModel, [
+    { model: "qwen-plus", prompt: 750, completion: 298, total: 1048, papers: 3 }
+  ]);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("uses archived llmUpdatedAt token usage as fallback for older manual LLM refreshes", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-token-stats-llm-updated-fallback-"));
+  await fs.writeFile(path.join(tempDir, "fetch-log.json"), `${JSON.stringify({
+    entries: [
+      {
+        at: "2026-06-26T02:05:25.430Z",
+        llm: {
+          models: [
+            { model: "qwen-plus", calls: 30, prompt: 15159, completion: 5340, total: 20499 }
+          ],
+          calls: 30,
+          totalTokens: 20499
+        }
+      }
+    ]
+  }, null, 2)}\n`, "utf8");
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    papers: [
+      {
+        id: "old-manual-refresh",
+        title: "Old manual refresh paper",
+        fetchedAt: "2026-06-20T08:00:00.000Z",
+        llmUpdatedAt: "2026-06-26T12:39:25.774Z",
+        tokenUsage: { prompt: 730, completion: 288, total: 1018, model: "qwen-plus", status: "已调用 AI" }
+      },
+      {
+        id: "new-manual-refresh",
+        title: "New manual refresh paper",
+        llmUpdatedAt: "2026-06-26T13:00:00.000Z",
+        tokenUsage: { prompt: 20, completion: 10, total: 30, model: "qwen-plus", status: "已调用 AI" }
+      }
+    ]
+  }, null, 2)}\n`, "utf8");
+  await fs.writeFile(path.join(tempDir, "operation-log.jsonl"), `${JSON.stringify({
+    at: "2026-06-26T12:40:00.000Z",
+    action: "modify",
+    operation: "paper-note-update",
+    paper: { id: "old-manual-refresh", title: "Old manual refresh paper" }
+  })}\n${JSON.stringify({
+    at: "2026-06-26T13:00:00.000Z",
+    action: "modify",
+    operation: "archive-llm-refresh-one",
+    paper: { id: "new-manual-refresh", title: "New manual refresh paper" },
+    llm: {
+      models: [
+        { model: "qwen-plus", calls: 1, prompt: 20, completion: 10, total: 30 }
+      ],
+      calls: 1,
+      totalTokens: 30
+    }
+  })}\n`, "utf8");
+
+  const stats = await buildTokenStats({ dataDir: tempDir, today: "2026-06-26" });
+
+  assert.equal(stats.today.total, 21547);
+  assert.equal(stats.today.prompt, 15909);
+  assert.equal(stats.today.completion, 5638);
+  assert.equal(stats.today.papers, 32);
+  assert.deepEqual(stats.byModel, [
+    { model: "qwen-plus", prompt: 15909, completion: 5638, total: 21547, papers: 32 }
   ]);
   await fs.rm(tempDir, { recursive: true, force: true });
 });

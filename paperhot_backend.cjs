@@ -2600,6 +2600,19 @@ async function testLlmConfig(payload = {}, options = {}) {
     config,
     fetchImpl: options.fetchImpl || fetch
   });
+  const usage = insight?.tokenUsage || defaultTokenUsage();
+  await appendOperationLogSafe({
+    action: "test",
+    operation: "llm-config-test",
+    provider: config.provider,
+    model: config.model,
+    llm: summarizeLlmLog([{
+      model: usage.model || config.model || "未记录模型",
+      prompt: Number(usage.prompt || 0),
+      completion: Number(usage.completion || 0),
+      total: Number(usage.total || Number(usage.prompt || 0) + Number(usage.completion || 0))
+    }])
+  }, options.dataDir || DATA_DIR);
   return {
     ok: true,
     provider: config.provider,
@@ -2608,7 +2621,7 @@ async function testLlmConfig(payload = {}, options = {}) {
     abstractZh: compactText(insight?.abstractZh || insight?.summary || ""),
     llmSummary: compactText(insight?.llmSummary || ""),
     reason: compactText(insight?.reason || ""),
-    tokenUsage: insight?.tokenUsage || defaultTokenUsage()
+    tokenUsage: usage
   };
 }
 function applyLlmPaperInsight(paper, insight) {
@@ -3023,8 +3036,10 @@ async function retryFailedFetchLogEnrichment(index, options = {}) {
     afterCount: archive.count,
     modifiedCount: rescoredPapers.length,
     paperCount: rescoredPapers.length,
-    papers: rescoredPapers.slice(0, 20).map(summarizePaperForOperationLog)
+    papers: rescoredPapers.slice(0, 20).map(summarizePaperForOperationLog),
+    llm: summarizeLlmLog(llmLog)
   }, dataDir);
+  const llm = summarizeLlmLog(llmLog);
   return {
     ok: true,
     retried: true,
@@ -3032,11 +3047,7 @@ async function retryFailedFetchLogEnrichment(index, options = {}) {
     attemptedCount: retryPapers.length,
     updatedCount: rescoredPapers.length,
     remainingErrors: errors,
-    llm: {
-      calls: llmLog.length,
-      totalTokens: llmLog.reduce((sum, item) => sum + Number(item.total || 0), 0),
-      models: Array.from(new Set(llmLog.map(item => item.model).filter(Boolean)))
-    },
+    llm,
     archive,
     papers: rescoredPapers
   };
@@ -3810,8 +3821,10 @@ async function refreshArchivePaperLlmInsight(target = {}, options = {}) {
     action: "modify",
     operation: "archive-llm-refresh-one",
     updatedCount: 1,
-    paper: summarizePaperForOperationLog(nextPaper)
+    paper: summarizePaperForOperationLog(nextPaper),
+    llm: summarizeLlmLog(llmLog)
   }, dataDir);
+  const llm = summarizeLlmLog(llmLog);
   return {
     ok: true,
     updated: true,
@@ -3819,11 +3832,7 @@ async function refreshArchivePaperLlmInsight(target = {}, options = {}) {
     paper: nextPaper,
     archive: nextArchive,
     errors,
-    llm: {
-      calls: llmLog.length,
-      totalTokens: llmLog.reduce((sum, entry) => sum + Number(entry.total || 0), 0),
-      models: Array.from(new Set(llmLog.map(entry => entry.model).filter(Boolean)))
-    }
+    llm
   };
 }
 
@@ -3867,8 +3876,10 @@ async function refreshArchiveLlmInsights(options = {}, runtimeOptions = {}) {
     updatedCount: pending.length,
     skippedCount: archive.papers.length - pending.length,
     paperCount: papers.length,
-    papers: pending.slice(0, 20).map(entry => summarizePaperForOperationLog(papers[entry.index]))
+    papers: pending.slice(0, 20).map(entry => summarizePaperForOperationLog(papers[entry.index])),
+    llm: summarizeLlmLog(llmLog)
   }, dataDir);
+  const llm = summarizeLlmLog(llmLog);
   return {
     ok: true,
     updatedCount: pending.length,
@@ -3876,11 +3887,7 @@ async function refreshArchiveLlmInsights(options = {}, runtimeOptions = {}) {
     archive: nextArchive,
     papers,
     errors,
-    llm: {
-      calls: llmLog.length,
-      totalTokens: llmLog.reduce((sum, entry) => sum + Number(entry.total || 0), 0),
-      models: Array.from(new Set(llmLog.map(entry => entry.model).filter(Boolean)))
-    }
+    llm
   };
 }
 
@@ -3989,6 +3996,40 @@ function addTokenUsage(bucket, usage = {}) {
   bucket.papers += total > 0 ? 1 : 0;
 }
 
+function addTokenLogUsage(bucket, usage = {}) {
+  const prompt = Number(usage.prompt || 0);
+  const completion = Number(usage.completion || 0);
+  const total = Number(usage.total || usage.totalTokens || prompt + completion);
+  bucket.prompt += prompt;
+  bucket.completion += completion;
+  bucket.total += total;
+  bucket.papers += Number(usage.calls || (total > 0 ? 1 : 0));
+}
+
+function summarizeLlmLog(llmLog = []) {
+  const byModel = new Map();
+  let totalTokens = 0;
+  llmLog.forEach(entry => {
+    const model = entry.model || "未记录模型";
+    const prompt = Number(entry.prompt || 0);
+    const completion = Number(entry.completion || 0);
+    const total = Number(entry.total || prompt + completion);
+    if (total <= 0) return;
+    const current = byModel.get(model) || { model, calls: 0, prompt: 0, completion: 0, total: 0 };
+    current.calls += 1;
+    current.prompt += prompt;
+    current.completion += completion;
+    current.total += total;
+    byModel.set(model, current);
+    totalTokens += total;
+  });
+  return {
+    models: Array.from(byModel.values()),
+    calls: llmLog.length,
+    totalTokens
+  };
+}
+
 function paperTokenStatsKey(paper, fallback = "") {
   const archiveKey = paperArchiveKey(paper);
   return archiveKey || `fallback:${fallback}`;
@@ -4020,9 +4061,42 @@ async function buildTokenStats(options = {}) {
   const last7DaysBucket = emptyTokenBucket("last7Days");
   const last30DaysBucket = emptyTokenBucket("last30Days");
   const countedKeys = new Set();
+  const loggedDates = new Set();
+  const loggedPaperKeys = new Set();
 
-  const recordPaperUsage = (paper, date, fallbackKey) => {
+  const recordLogUsage = (entry, index, source = "log") => {
+    const date = dateString(entry?.at || entry?.fetchedAt || entry?.createdAt);
     if (!date || date < start30 || date > today) return;
+    const models = Array.isArray(entry?.llm?.models) ? entry.llm.models : [];
+    models.forEach((usage, modelIndex) => {
+      const total = Number(usage.total || usage.totalTokens || Number(usage.prompt || 0) + Number(usage.completion || 0));
+      if (total <= 0) return;
+      loggedDates.add(date);
+      const key = `${source}:${index}:${modelIndex}`;
+      if (countedKeys.has(key)) return;
+      countedKeys.add(key);
+      const dayBucket = dailyMap.get(date) || { date, ...emptyTokenBucket() };
+      addTokenLogUsage(dayBucket, usage);
+      addTokenLogUsage(last30DaysBucket, usage);
+      if (date >= start7) addTokenLogUsage(last7DaysBucket, usage);
+      if (date === today) addTokenLogUsage(todayBucket, usage);
+      const model = usage.model || "未记录模型";
+      const modelBucket = modelMap.get(model) || { model, ...emptyTokenBucket() };
+      addTokenLogUsage(modelBucket, usage);
+      modelMap.set(model, modelBucket);
+      dailyMap.set(date, dayBucket);
+    });
+    if (source === "operation-log" && models.some(usage => Number(usage.total || usage.totalTokens || Number(usage.prompt || 0) + Number(usage.completion || 0)) > 0)) {
+      paperFlexibleLookupKeys(entry?.paper || {}).forEach(key => loggedPaperKeys.add(key));
+      (Array.isArray(entry?.papers) ? entry.papers : []).forEach(paper => {
+        paperFlexibleLookupKeys(paper).forEach(key => loggedPaperKeys.add(key));
+      });
+    }
+  };
+
+  const recordPaperUsage = (paper, date, fallbackKey, options = {}) => {
+    if (!date || date < start30 || date > today) return;
+    if (!options.allowLoggedDate && loggedDates.has(date)) return;
     const usage = paper.tokenUsage || {};
     const prompt = Number(usage.prompt || 0);
     const completion = Number(usage.completion || 0);
@@ -4043,8 +4117,35 @@ async function buildTokenStats(options = {}) {
     dailyMap.set(date, dayBucket);
   };
 
+  const recordArchivePaperUsage = (paper, index) => {
+    const usage = paper.tokenUsage || {};
+    const hasLlmUpdateFallback = Boolean(paper?.llmUpdatedAt)
+      && Number(usage.total || Number(usage.prompt || 0) + Number(usage.completion || 0)) > 0
+      && !paperFlexibleLookupKeys(paper).some(key => loggedPaperKeys.has(key));
+    if (hasLlmUpdateFallback) {
+      recordPaperUsage(paper, dateString(paper.llmUpdatedAt), `${PAPER_ARCHIVE_NAME}:llmUpdatedAt:${index}`, { allowLoggedDate: true });
+      return;
+    }
+    recordPaperUsage(paper, paperTokenStatsDate(paper), `${PAPER_ARCHIVE_NAME}:${index}`);
+  };
+
   try {
     const files = await fs.readdir(dataDir);
+    try {
+      const fetchLogPayload = JSON.parse(await fs.readFile(path.join(dataDir, FETCH_LOG_NAME), "utf8"));
+      const entries = Array.isArray(fetchLogPayload.entries) ? fetchLogPayload.entries : [];
+      entries.forEach((entry, index) => recordLogUsage(entry, index, "fetch-log"));
+    } catch {
+      // Older installs may not have fetch logs yet; fall back to paper tokenUsage below.
+    }
+
+    try {
+      const operationLogEntries = await readOperationLog(dataDir);
+      operationLogEntries.forEach((entry, index) => recordLogUsage(entry, index, "operation-log"));
+    } catch {
+      // Operation log is optional for fresh installs.
+    }
+
     await Promise.all(files.map(async fileName => {
       const date = dateKeyFromCacheFile(fileName);
       if (!date || date < start30 || date > today) return;
@@ -4056,9 +4157,7 @@ async function buildTokenStats(options = {}) {
     try {
       const archivePayload = JSON.parse(await fs.readFile(path.join(dataDir, PAPER_ARCHIVE_NAME), "utf8"));
       const archivePapers = Array.isArray(archivePayload.papers) ? archivePayload.papers : [];
-      archivePapers.forEach((paper, index) => {
-        recordPaperUsage(paper, paperTokenStatsDate(paper), `${PAPER_ARCHIVE_NAME}:${index}`);
-      });
+      archivePapers.forEach(recordArchivePaperUsage);
     } catch {
       // Archive is optional for fresh installs.
     }

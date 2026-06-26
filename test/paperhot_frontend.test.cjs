@@ -30,6 +30,19 @@ test("all papers page exposes search and short-title controls", async () => {
   assert.match(html, /paperMatchesSearchQuery/);
 });
 
+test("today and favorites pages expose paper search controls", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /let todayPaperSearchQuery = ""/);
+  assert.match(html, /let favoritePaperSearchQuery = ""/);
+  assert.match(html, /function paperSearchPanel\(scope, query, totalCount, shownCount\)/);
+  assert.match(html, /data-paper-search="\$\{escapeHTML\(scope\)\}"/);
+  assert.match(html, /搜索当前抓取结果|搜索收藏论文/);
+  assert.match(html, /bindPaperSearch\("today"\)/);
+  assert.match(html, /bindPaperSearch\("favorites"\)/);
+  assert.match(html, /paperMatchesSearchQuery\(paper, todayPaperSearchQuery\)/);
+  assert.match(html, /paperMatchesSearchQuery\(paper, favoritePaperSearchQuery\)/);
+});
+
 test("paper card orders date journal metrics short title and citation controls", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /paper-source-row[\s\S]*publishedDoiControl[\s\S]*paperSourceLabel\(paper\)[\s\S]*journalMetricTags\(journalMetrics\)/);
@@ -69,8 +82,10 @@ test("all papers page moves archive actions to the hero and removes type chips f
   assert.match(html, /function pageShell\(title, subtitle, body, side = "", heroActions = ""\)/);
   assert.match(html, /if \(normalized === "all"\) renderAll\(\)/);
   assert.match(html, /pageShell\("全部论文"[\s\S]*archiveActionButtons\(\)/);
-  assert.match(html, /allPaperSideFilter[\s\S]*关注标签/);
-  assert.doesNotMatch(html, /allPaperSideFilter[\s\S]*论文类型/);
+  const sideFilterMatch = html.match(/function allPaperSideFilter\(\) \{[\s\S]*?\n    function toggleSetValue/);
+  assert.ok(sideFilterMatch, "expected allPaperSideFilter function");
+  assert.match(sideFilterMatch[0], /关注标签/);
+  assert.doesNotMatch(sideFilterMatch[0], /论文类型/);
 });
 
 test("sidebar stays fixed while paper lists scroll", async () => {
@@ -106,6 +121,12 @@ test("token stats page exposes fetch-log candidate detail view", async () => {
   assert.match(html, /data-fetch-log-detail/);
   assert.match(html, /renderFetchLogCandidateDetail/);
   assert.match(html, /领域过滤前候选论文/);
+});
+
+test("token stats cards label LLM usage count as calls", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /调用 \$\{formatToken\(bucket\?\.papers\)\} 次/);
+  assert.doesNotMatch(html, /输出 \$\{formatToken\(bucket\?\.completion\)\} · \$\{formatToken\(bucket\?\.papers\)\} 篇/);
 });
 
 test("candidate detail view exposes archive action and sortable columns", async () => {
@@ -182,6 +203,15 @@ test("saved papers are visually muted outside the favorites page", async () => {
   assert.match(html, /\.paper-card\.saved-muted/);
   assert.match(html, /const isSavedMuted = isSaved && scope !== "favorites"/);
   assert.match(html, /isSavedMuted \? "saved-muted" : ""/);
+});
+
+test("today papers move to the end after being favorited", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /function moveTodayPaperToEnd\(paper\)/);
+  assert.match(html, /const targetKeys = new Set\(paperLookupKeys\(paper\)\)/);
+  assert.match(html, /nextList\.push\(matchedPaper\)/);
+  assert.match(html, /session\.id !== activeTodayFetchSessionId/);
+  assert.match(html, /if \(favorite\) moveTodayPaperToEnd\(paper\)/);
 });
 
 test("favorites page uses tabbed reading views and defaults to unread", async () => {
