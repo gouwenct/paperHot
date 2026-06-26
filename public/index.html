@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>paperHOT 领域配置交互原型</title>
+  <link rel="icon" type="image/png" href="/paperhot-logo.png">
   <style>
     * { box-sizing: border-box; }
     body {
@@ -27,6 +28,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      gap: 8px;
       border: 1px solid #dce7ee;
       border-radius: 14px;
       background: #fff;
@@ -35,7 +37,14 @@
       letter-spacing: 2px;
       box-shadow: 0 6px 20px rgba(24,67,101,0.05);
     }
-    .brand span { color: #0ea6c8; }
+    .brand-logo {
+      width: 30px;
+      height: 30px;
+      flex: 0 0 auto;
+      border-radius: 8px;
+      object-fit: contain;
+    }
+    .brand-hot { color: #0ea6c8; }
     .nav { margin-top: 16px; display: grid; gap: 8px; }
     .nav-item {
       height: 40px;
@@ -1500,7 +1509,10 @@
 <body>
   <div class="app">
     <aside class="sidebar">
-      <div class="brand">PAPER<span>HOT</span></div>
+      <div class="brand">
+        <img class="brand-logo" src="/paperhot-logo.png" alt="" aria-hidden="true">
+        <span class="brand-text">PAPER<span class="brand-hot">HOT</span></span>
+      </div>
       <nav class="nav">
         <a class="nav-item" href="#today">⚡ 今日论文</a>
         <a class="nav-item" href="#all">☰ 全部论文</a>
@@ -2000,7 +2012,7 @@
 
     function paperLlmRefreshButton(paper, scope = "") {
       const page = location.hash.replace("#", "");
-      if (page !== "all" && scope !== "favorites") return "";
+      if (page !== "all" && scope !== "today" && scope !== "favorites") return "";
       const key = paperStableKey(paper);
       if (!key) return "";
       const loading = archiveLlmRefreshingKeys.has(key);
@@ -3475,10 +3487,14 @@
         const payload = await response.json();
         applyArchivePayload(payload);
         if (payload.paper) recentPapers = mergePaperPool(recentPapers, [normalizePaperForView(payload.paper)]);
-        recentDataStatus = payload.updated ? "已重新生成该论文的摘要翻译和推荐理由" : "没有找到这篇论文的入库记录";
+        if (payload.paper) todayPapers = mergePaperPool(todayPapers, [normalizePaperForView(payload.paper)]);
+        const statusText = payload.updated ? "已重新生成该论文的摘要翻译和推荐理由" : "没有找到这篇论文的入库记录";
+        recentDataStatus = statusText;
+        paperDataStatus = statusText;
         showToast(payload.updated ? "LLM 已更新该论文" : "没有找到该论文");
       } catch (error) {
         recentDataStatus = `单篇 LLM 失败：${error.message}`;
+        paperDataStatus = recentDataStatus;
         showToast(`LLM 失败：${error.message}`);
       } finally {
         archiveLlmRefreshingKeys.delete(key);

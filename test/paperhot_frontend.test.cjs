@@ -4,6 +4,17 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const htmlFile = path.join(__dirname, "..", "public", "index.html");
+const logoFile = path.join(__dirname, "..", "public", "paperhot-logo.png");
+
+test("app exposes Paper Hot logo and favicon", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const logo = await fs.readFile(logoFile);
+  assert.match(html, /<link rel="icon" type="image\/png" href="\/paperhot-logo\.png">/);
+  assert.match(html, /class="brand-logo"/);
+  assert.match(html, /src="\/paperhot-logo\.png"/);
+  assert.match(html, /class="brand-text">PAPER<span class="brand-hot">HOT<\/span>/);
+  assert.equal(logo.subarray(1, 4).toString("ascii"), "PNG");
+});
 
 test("all papers page exposes search and short-title controls", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
@@ -146,6 +157,15 @@ test("all papers page exposes archive LLM refresh actions", async () => {
   assert.match(html, /data-refresh-archive-llm/);
   assert.match(html, /data-refresh-paper-llm/);
   assert.match(html, /\/api\/archive\/llm/);
+  assert.match(html, /\/api\/archive\/llm\/paper/);
+});
+
+test("today papers page exposes single paper LLM refresh actions", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /page !== "all" && scope !== "today" && scope !== "favorites"/);
+  assert.match(html, /renderPaperTimeline\(filteredPapers, "today"\)/);
+  assert.match(html, /todayPapers = mergePaperPool\(todayPapers, \[normalizePaperForView\(payload\.paper\)\]\)/);
+  assert.match(html, /document\.querySelectorAll\("\[data-refresh-paper-llm\]"\)/);
   assert.match(html, /\/api\/archive\/llm\/paper/);
 });
 
