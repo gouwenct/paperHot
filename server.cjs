@@ -38,6 +38,7 @@ const portArgIndex = process.argv.indexOf("--port");
 const argPort = portArgIndex >= 0 ? process.argv[portArgIndex + 1] : "";
 const PORT = Number(argPort || process.env.PAPERHOT_PORT || 50751);
 const HTML_FILE = path.join(__dirname, "public", "index.html");
+const LOGO_FILE = path.join(__dirname, "public", "paperhot-logo.png");
 const fetchJobs = new Map();
 const FETCH_JOB_TTL_MS = 30 * 60 * 1000;
 
@@ -411,6 +412,16 @@ async function serveHtml(res) {
   res.end(html);
 }
 
+async function serveLogo(res) {
+  const logo = await fs.readFile(LOGO_FILE);
+  res.writeHead(200, {
+    "Content-Type": "image/png",
+    "Cache-Control": "no-store",
+    "Content-Length": logo.length
+  });
+  res.end(logo);
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${HOST}:${PORT}`);
@@ -427,6 +438,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/favicon.ico") {
       res.writeHead(204);
       res.end();
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/paperhot-logo.png") {
+      await serveLogo(res);
       return;
     }
 
