@@ -106,6 +106,19 @@ test("paper timelines render in batches of twenty with demand loading", async ()
   assert.match(html, /slice\(0, visibleLimit\)/);
 });
 
+test("paper timeline stamps toggle date sorting on all paper pages", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /timelineSortDirections/);
+  assert.match(html, /function paperTimelineSortDirection\(scope\)/);
+  assert.match(html, /function sortPaperTimelinePapers\(list, scope\)/);
+  assert.match(html, /data-paper-timeline-sort="\$\{escapeHTML\(scope\)\}"/);
+  assert.match(html, /aria-label="切换时间轴排序"/);
+  assert.match(html, /function bindPaperTimelineSort\(\)/);
+  assert.match(html, /bindPaperTimelineSort\(\)/);
+  assert.match(html, /if \(scope === "all"\) allPaperSortDirection = allPaperSortDirection === "asc" \? "desc" : "asc"/);
+  assert.match(html, /timelineSortDirections\[scope\] = paperTimelineSortDirection\(scope\) === "asc" \? "desc" : "asc"/);
+});
+
 test("paper card puts publication date in source row and copies DOI", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /published-date-pill/);

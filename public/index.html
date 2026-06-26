@@ -701,6 +701,29 @@
       color: #5f6f84;
       line-height: 1.35;
     }
+    .timeline-sort-button {
+      display: grid;
+      gap: 4px;
+      width: 100%;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      line-height: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .timeline-sort-button:hover .timeline-date,
+    .timeline-sort-button:hover .timeline-time {
+      color: #0b94b2;
+    }
+    .timeline-sort-indicator {
+      color: #0b94b2;
+      font-size: 11px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
     .timeline-date {
       color: #738397;
       font-size: 11px;
@@ -1634,6 +1657,7 @@
     let activePaperCategory = "all";
     let allPaperSortMode = "fetched";
     let allPaperSortDirection = "desc";
+    const timelineSortDirections = { today: "desc", favorites: "desc" };
     let allPaperDateFilter = "all";
     const selectedAllPaperKeywords = new Set();
     const samplePapers = [
@@ -2298,21 +2322,46 @@
 
     function timelineItem(paper, scope = "") {
       const stamp = paperTimelineStamp(paper);
+      const direction = paperTimelineSortDirection(scope);
+      const directionText = direction === "asc" ? "正序" : "倒序";
       return `
         <div class="timeline-item">
           <div class="timeline-stamp">
-            <div class="timeline-date">${escapeHTML(stamp.date)}</div>
-            <div class="timeline-time">${escapeHTML(stamp.time)}</div>
-            <div class="timeline-source-type">${escapeHTML(paperSourceChannelLabel(paper))}</div>
+            <button class="timeline-sort-button" type="button" data-paper-timeline-sort="${escapeHTML(scope)}" aria-label="切换时间轴排序" title="点击切换时间轴正序/倒序">
+              <div class="timeline-date">${escapeHTML(stamp.date)}</div>
+              <div class="timeline-time">${escapeHTML(stamp.time)}</div>
+              <div class="timeline-source-type">${escapeHTML(paperSourceChannelLabel(paper))}</div>
+              <div class="timeline-sort-indicator">${directionText}</div>
+            </button>
           </div>
           ${paperCard(paper, scope)}
         </div>
       `;
     }
 
+    function paperTimelineSortDirection(scope) {
+      if (scope === "all") return allPaperSortDirection;
+      return timelineSortDirections[scope] || "desc";
+    }
+
+    function paperTimelineSortValue(paper, scope) {
+      const mode = scope === "all" ? allPaperSortMode : "fetched";
+      return paperDateValue(paper, mode) || paperDateValue(paper, "published") || "";
+    }
+
+    function sortPaperTimelinePapers(list, scope) {
+      const direction = paperTimelineSortDirection(scope) === "asc" ? 1 : -1;
+      return list.slice().sort((a, b) => {
+        const left = paperTimelineSortValue(a, scope);
+        const right = paperTimelineSortValue(b, scope);
+        if (left !== right) return left > right ? direction : -direction;
+        return String(a.title || "").localeCompare(String(b.title || ""), "zh-Hans-CN");
+      });
+    }
+
     function paperVisibleLimitKey(scope) {
       const base = String(scope || "papers");
-      if (base === "today") return `today:${activePaperCategory}:${activeTodayFetchSessionId || "current"}`;
+      if (base === "today") return `today:${activePaperCategory}:${activeTodayFetchSessionId || "current"}:${paperTimelineSortDirection("today")}`;
       if (base === "all") {
         return [
           "all",
@@ -2323,7 +2372,7 @@
           [...selectedAllPaperKeywords].sort().join(",")
         ].join(":");
       }
-      if (base === "favorites") return `favorites:${favoriteActiveTab}`;
+      if (base === "favorites") return `favorites:${favoriteActiveTab}:${paperTimelineSortDirection("favorites")}`;
       return base;
     }
 
@@ -2346,13 +2395,14 @@
 
     function renderPaperTimeline(list, scope) {
       const visibleLimit = paperVisibleLimit(scope);
-      const visiblePapers = list.slice(0, visibleLimit);
-      const hasMore = list.length > visibleLimit;
+      const sortedPapers = sortPaperTimelinePapers(list, scope);
+      const visiblePapers = sortedPapers.slice(0, visibleLimit);
+      const hasMore = sortedPapers.length > visibleLimit;
       const timeline = visiblePapers.length
         ? `<div class="timeline-list">${visiblePapers.map(paper => timelineItem(paper, scope)).join("")}</div>`
         : "";
       const sentinel = hasMore
-        ? `<div class="lazy-paper-sentinel" data-lazy-paper-sentinel="${escapeHTML(scope)}">继续加载后 ${Math.min(paperPageSize, list.length - visibleLimit)} 篇</div>`
+        ? `<div class="lazy-paper-sentinel" data-lazy-paper-sentinel="${escapeHTML(scope)}">继续加载后 ${Math.min(paperPageSize, sortedPapers.length - visibleLimit)} 篇</div>`
         : "";
       return `${timeline}${sentinel}`;
     }
@@ -2939,6 +2989,20 @@
           favoriteActiveTab = button.getAttribute("data-favorites-tab") || "reading";
           resetPaperVisibleLimit("favorites");
           renderFavorites();
+        });
+      });
+    }
+
+    function bindPaperTimelineSort() {
+      document.querySelectorAll("[data-paper-timeline-sort]").forEach(button => {
+        button.addEventListener("click", () => {
+          const scope = button.getAttribute("data-paper-timeline-sort") || "";
+          if (scope === "all") allPaperSortDirection = allPaperSortDirection === "asc" ? "desc" : "asc";
+          else timelineSortDirections[scope] = paperTimelineSortDirection(scope) === "asc" ? "desc" : "asc";
+          resetPaperVisibleLimit(scope);
+          if (scope === "today") renderToday();
+          if (scope === "all") renderAll();
+          if (scope === "favorites") renderFavorites();
         });
       });
     }
@@ -3683,6 +3747,7 @@
       bindStarredStatus();
       bindCitationCopy();
       bindShortTitleEditors();
+      bindPaperTimelineSort();
       bindLazyPaperLoading();
     }
 
@@ -3705,6 +3770,7 @@
       bindStarredStatus();
       bindCitationCopy();
       bindShortTitleEditors();
+      bindPaperTimelineSort();
       bindLazyPaperLoading();
     }
 
@@ -3761,6 +3827,7 @@
       bindStarredStatus();
       bindCitationCopy();
       bindShortTitleEditors();
+      bindPaperTimelineSort();
       bindLazyPaperLoading();
     }
 
