@@ -19,6 +19,7 @@ const USER_CONFIG_FILE = path.join(USER_DATA_DIR, "config.json");
 const USER_PROFILE_FILE = path.join(USER_DATA_DIR, "profile.json");
 const JOURNAL_METRICS_CONFIG_FILE = path.join(__dirname, "config", "journal-metrics.json");
 const GOOGLE_SCHOLAR_CONFIG_FILE = path.join(__dirname, "config", "google-scholar.json");
+const WEB_OF_SCIENCE_CONFIG_FILE = path.join(__dirname, "config", "web-of-science.json");
 const LLM_CONFIG_FILE = path.join(__dirname, "config", "llm.json");
 // “最近”抓取模式的默认起始日期（含当日）。从该日期一直抓取到今天。
 const RECENT_RANGE_START = "2026-05-01";
@@ -29,6 +30,7 @@ const API_LABELS = {
   semanticscholar: "Semantic Scholar",
   googlescholar: "Google Scholar (SerpApi)",
   googlesearch: "Google 搜索 (SerpApi)",
+  webofscience: "Web of Science",
   crossref: "Crossref 元数据",
   easyscholar: "EasyScholar 期刊指标",
   llm: "LLM 摘要 / 推荐"
@@ -166,6 +168,36 @@ const DEFAULT_USER_PROFILE = {
   locale: "zh-CN",
   background: DEFAULT_USER_BACKGROUND
 };
+const DEFAULT_WEB_OF_SCIENCE_CONFIG = {
+  provider: "web-of-science",
+  enabled: false,
+  endpoint: "https://api.clarivate.com/apis/wos-starter/v1/documents",
+  apiKey: "",
+  databaseId: "WOS",
+  maxPages: 2,
+  pageSize: 25,
+  queryTemplate: "TS=({query})",
+  request: {
+    method: "GET",
+    queryName: "q",
+    databaseQueryName: "db",
+    pageQueryName: "page",
+    limitQueryName: "limit",
+    apiKeyHeader: "X-ApiKey",
+    apiKeyPrefix: "",
+    useApiKeyHeader: true
+  },
+  responseMap: {
+    items: "hits",
+    title: "title",
+    summary: "abstract",
+    doi: "identifiers.doi",
+    journal: "source.sourceTitle",
+    year: "source.publishYear",
+    url: "links.record",
+    authors: "names.authors"
+  }
+};
 const DEFAULT_USER_CONFIG = {
   keywords: {
     primary: [],
@@ -183,6 +215,12 @@ const DEFAULT_USER_CONFIG = {
       title: "Google Scholar",
       desc: "通过 SerpApi / Scholar JSON API 补充论文发现信号；需要在外部接口配置中填写 Endpoint 和 API Key。",
       tags: ["论文搜索", "需配置 API", "SerpApi"],
+      enabled: false
+    },
+    {
+      title: "Web of Science",
+      desc: "通过 Clarivate Web of Science API 纳入订阅数据库检索结果；建议每次仅抓取少量页面。",
+      tags: ["论文数据库", "需配置 API", "有限分页"],
       enabled: false
     },
     {
@@ -207,6 +245,8 @@ const DEFAULT_USER_CONFIG = {
 };
 const GOOGLE_SCHOLAR_MAX_PAGES_LIMIT = 10;
 const GOOGLE_SCHOLAR_NUM_LIMIT = 20;
+const WEB_OF_SCIENCE_MAX_PAGES_LIMIT = 5;
+const WEB_OF_SCIENCE_PAGE_SIZE_LIMIT = 50;
 const JOURNAL_METRICS_RATE_LIMITER = {
   lastRequestAt: 0,
   chain: Promise.resolve()
@@ -928,6 +968,33 @@ function cleanGoogleScholarConfig(value) {
 async function readGoogleScholarConfig(file = GOOGLE_SCHOLAR_CONFIG_FILE) {
   return cleanGoogleScholarConfig(await readJsonFile(file, DEFAULT_GOOGLE_SCHOLAR_CONFIG));
 }
+
+function cleanWebOfScienceConfig(value) {
+  const input = value && typeof value === "object" ? value : {};
+  return {
+    provider: String(input.provider || DEFAULT_WEB_OF_SCIENCE_CONFIG.provider),
+    enabled: input.enabled === true,
+    endpoint: String(input.endpoint || ""),
+    apiKey: String(input.apiKey || ""),
+    databaseId: String(input.databaseId || DEFAULT_WEB_OF_SCIENCE_CONFIG.databaseId),
+    maxPages: clampPositiveInteger(input.maxPages, DEFAULT_WEB_OF_SCIENCE_CONFIG.maxPages, 1, WEB_OF_SCIENCE_MAX_PAGES_LIMIT),
+    pageSize: clampPositiveInteger(input.pageSize, DEFAULT_WEB_OF_SCIENCE_CONFIG.pageSize, 1, WEB_OF_SCIENCE_PAGE_SIZE_LIMIT),
+    queryTemplate: String(input.queryTemplate || DEFAULT_WEB_OF_SCIENCE_CONFIG.queryTemplate),
+    request: {
+      ...DEFAULT_WEB_OF_SCIENCE_CONFIG.request,
+      ...(input.request && typeof input.request === "object" ? input.request : {})
+    },
+    responseMap: {
+      ...DEFAULT_WEB_OF_SCIENCE_CONFIG.responseMap,
+      ...(input.responseMap && typeof input.responseMap === "object" ? input.responseMap : {})
+    }
+  };
+}
+
+async function readWebOfScienceConfig(file = WEB_OF_SCIENCE_CONFIG_FILE) {
+  return cleanWebOfScienceConfig(await readJsonFile(file, DEFAULT_WEB_OF_SCIENCE_CONFIG));
+}
+
 function cleanLlmProvider(value, fallback = {}) {
   const input = value && typeof value === "object" ? value : {};
   const id = String(input.id || fallback.id || input.provider || fallback.provider || "custom").trim();
@@ -1027,10 +1094,12 @@ async function readIntegrationConfigs(options = {}) {
   const llm = await readLlmConfig(options.llmConfigFile);
   const googleScholar = await readGoogleScholarConfig(options.googleScholarConfigFile);
   const journalMetrics = await readJournalMetricsConfig(options.journalMetricsConfigFile);
+  const webOfScience = await readWebOfScienceConfig(options.webOfScienceConfigFile);
   return {
     llm: maskSecretConfig(llm),
     googleScholar: maskSecretConfig(googleScholar),
-    journalMetrics: maskSecretConfig(journalMetrics)
+    journalMetrics: maskSecretConfig(journalMetrics),
+    webOfScience: maskSecretConfig(webOfScience)
   };
 }
 
@@ -1038,6 +1107,7 @@ async function readIntegrationSecrets(options = {}) {
   const llm = await readLlmConfig(options.llmConfigFile);
   const googleScholar = await readGoogleScholarConfig(options.googleScholarConfigFile);
   const journalMetrics = await readJournalMetricsConfig(options.journalMetricsConfigFile);
+  const webOfScience = await readWebOfScienceConfig(options.webOfScienceConfigFile);
   return {
     llm: {
       apiKey: llm.apiKey || "",
@@ -1047,7 +1117,8 @@ async function readIntegrationSecrets(options = {}) {
       }))
     },
     googleScholar: { apiKey: googleScholar.apiKey || "" },
-    journalMetrics: { apiKey: journalMetrics.apiKey || "" }
+    journalMetrics: { apiKey: journalMetrics.apiKey || "" },
+    webOfScience: { apiKey: webOfScience.apiKey || "" }
   };
 }
 
@@ -1098,22 +1169,27 @@ async function writeIntegrationConfigs(payload = {}, options = {}) {
   const llmFile = options.llmConfigFile || LLM_CONFIG_FILE;
   const googleFile = options.googleScholarConfigFile || GOOGLE_SCHOLAR_CONFIG_FILE;
   const journalFile = options.journalMetricsConfigFile || JOURNAL_METRICS_CONFIG_FILE;
+  const webOfScienceFile = options.webOfScienceConfigFile || WEB_OF_SCIENCE_CONFIG_FILE;
   const previousLlm = await readLlmConfig(llmFile);
   const previousGoogle = await readGoogleScholarConfig(googleFile);
   const previousJournal = await readJournalMetricsConfig(journalFile);
+  const previousWebOfScience = await readWebOfScienceConfig(webOfScienceFile);
   const llm = mergeLlmConfig(previousLlm, payload.llm);
   const googleScholar = mergeSecretConfig(previousGoogle, payload.googleScholar, cleanGoogleScholarConfig);
   const journalMetrics = mergeSecretConfig(previousJournal, payload.journalMetrics, cleanJournalMetricsConfig);
+  const webOfScience = mergeSecretConfig(previousWebOfScience, payload.webOfScience, cleanWebOfScienceConfig);
 
   await Promise.all([
     writeJsonFile(llmFile, llm),
     writeJsonFile(googleFile, googleScholar),
-    writeJsonFile(journalFile, journalMetrics)
+    writeJsonFile(journalFile, journalMetrics),
+    writeJsonFile(webOfScienceFile, webOfScience)
   ]);
   return {
     llm: maskSecretConfig(llm),
     googleScholar: maskSecretConfig(googleScholar),
-    journalMetrics: maskSecretConfig(journalMetrics)
+    journalMetrics: maskSecretConfig(journalMetrics),
+    webOfScience: maskSecretConfig(webOfScience)
   };
 }
 
@@ -1492,7 +1568,8 @@ async function exportLocalData(options = {}) {
     payload.data.integrations = {
       llm: await readLlmConfig(options.llmConfigFile),
       googleScholar: await readGoogleScholarConfig(options.googleScholarConfigFile),
-      journalMetrics: await readJournalMetricsConfig(options.journalMetricsConfigFile)
+      journalMetrics: await readJournalMetricsConfig(options.journalMetricsConfigFile),
+      webOfScience: await readWebOfScienceConfig(options.webOfScienceConfigFile)
     };
   }
   return includeSecrets ? payload : sanitizeLocalExportValue(payload);
@@ -1552,7 +1629,8 @@ async function buildLocalDataExportFiles(options = {}) {
     files.push(
       { path: "config/llm.json", content: jsonText(data.integrations.llm || {}) },
       { path: "config/google-scholar.json", content: jsonText(data.integrations.googleScholar || {}) },
-      { path: "config/journal-metrics.json", content: jsonText(data.integrations.journalMetrics || {}) }
+      { path: "config/journal-metrics.json", content: jsonText(data.integrations.journalMetrics || {}) },
+      { path: "config/web-of-science.json", content: jsonText(data.integrations.webOfScience || {}) }
     );
   }
   return files;
@@ -1688,6 +1766,7 @@ async function importLocalDataZip(input, options = {}) {
   const llm = parseZipJsonEntry(entries, "config/llm.json");
   const googleScholar = parseZipJsonEntry(entries, "config/google-scholar.json");
   const journalMetrics = parseZipJsonEntry(entries, "config/journal-metrics.json");
+  const webOfScience = parseZipJsonEntry(entries, "config/web-of-science.json");
   const paperCacheFiles = {};
   Object.keys(entries).forEach(entryName => {
     const match = entryName.match(/^data\/papers\/(\d{4}-\d{2}-\d{2}(?:-recent)?\.json)$/);
@@ -1705,11 +1784,12 @@ async function importLocalDataZip(input, options = {}) {
   if (journalMetricsCache) payload.papers.journalMetricsCache = journalMetricsCache;
   if (googleRollingCursors) payload.papers.googleRollingCursors = googleRollingCursors;
   if (Object.keys(paperCacheFiles).length) payload.papers.paperCacheFiles = paperCacheFiles;
-  if (llm || googleScholar || journalMetrics) {
+  if (llm || googleScholar || journalMetrics || webOfScience) {
     payload.integrations = {};
     if (llm) payload.integrations.llm = llm;
     if (googleScholar) payload.integrations.googleScholar = googleScholar;
     if (journalMetrics) payload.integrations.journalMetrics = journalMetrics;
+    if (webOfScience) payload.integrations.webOfScience = webOfScience;
   }
 
   return importLocalData(payload, options);
@@ -1818,6 +1898,7 @@ function parseEnabledSources(sourceNames) {
   if (names.some(name => name.includes("semantic scholar") || name.includes("semanticscholar"))) sources.push("semanticscholar");
   if (names.some(name => name.includes("google scholar") || name.includes("googlescholar") || name.includes("谷歌学术"))) sources.push("googlescholar");
   if (names.some(name => (name.includes("google") || name.includes("谷歌")) && !name.includes("scholar") && !name.includes("学术"))) sources.push("googlesearch");
+  if (names.some(name => name.includes("web of science") || name.includes("webofscience") || name.includes("wos"))) sources.push("webofscience");
   return Array.from(new Set(sources));
 }
 
@@ -2166,6 +2247,68 @@ async function fetchSerpApiPages(url, { request, headers, fetchImpl, sourceLabel
     pages,
     skippedPages,
     nextStart: nextSerpApiStart(currentUrl, lastStart, pageSize)
+  };
+}
+
+function normalizeWebOfScienceAuthors(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map(author => compactText(author?.displayName || author?.name || author?.fullName || author))
+      .filter(Boolean);
+  }
+  return normalizeScholarAuthors(value);
+}
+
+function webOfSciencePublishedDate(record, responseMap = DEFAULT_WEB_OF_SCIENCE_CONFIG.responseMap) {
+  const explicitDate = compactText(record?.published || record?.publicationDate || record?.date);
+  if (/^(19|20)\d{2}(?:-\d{2}(?:-\d{2})?)?$/.test(explicitDate)) return explicitDate;
+  const year = compactText(getNestedValue(record, responseMap.year) || record?.source?.publishYear || record?.year);
+  const month = compactText(record?.source?.publishMonth || record?.month);
+  const day = compactText(record?.source?.publishDay || record?.day);
+  if (/^(19|20)\d{2}$/.test(year) && /^\d{1,2}$/.test(month) && /^\d{1,2}$/.test(day)) {
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  if (/^(19|20)\d{2}$/.test(year) && /^\d{1,2}$/.test(month)) return `${year}-${month.padStart(2, "0")}`;
+  return /^(19|20)\d{2}$/.test(year) ? year : "";
+}
+
+function normalizeWebOfScienceRecord(record, keywords = DEFAULT_KEYWORDS, responseMap = DEFAULT_WEB_OF_SCIENCE_CONFIG.responseMap) {
+  const title = compactText(getNestedValue(record, responseMap.title) || record?.title);
+  const summary = compactText(getNestedValue(record, responseMap.summary) || record?.abstract || record?.summary);
+  const journal = compactText(getNestedValue(record, responseMap.journal) || record?.source?.sourceTitle || record?.journal || "Web of Science");
+  const doi = normalizeDoi(getNestedValue(record, responseMap.doi) || record?.doi || record?.identifiers?.doi);
+  const url = compactText(getNestedValue(record, responseMap.url) || record?.url || record?.links?.record || "");
+  const authors = normalizeWebOfScienceAuthors(getNestedValue(record, responseMap.authors) || record?.names?.authors || record?.authors);
+  const published = webOfSciencePublishedDate(record, responseMap);
+  const keywordTags = [
+    ...(Array.isArray(record?.keywords?.authorKeywords) ? record.keywords.authorKeywords : []),
+    ...(Array.isArray(record?.keywords) ? record.keywords : [])
+  ].map(compactText).filter(Boolean);
+  const text = `${title} ${summary} ${journal} ${keywordTags.join(" ")}`;
+  const classified = classifyPaper(text);
+  const uid = compactText(record?.uid || record?.id || record?.UT || "");
+  return {
+    id: `webofscience-${doi || uid.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || hashText(`${title}|${journal}`)}`,
+    doi,
+    journal,
+    citation: formatCitation({ authors, year: paperYear(published), title, journal, doi }),
+    time: timeString(published),
+    sourceType: "论文数据库",
+    category: classified.category,
+    categoryLabel: classified.categoryLabel,
+    categories: classified.categories,
+    categoryLabels: classified.categoryLabels,
+    source: `Web of Science · ${journal}`,
+    title,
+    summary,
+    tags: ["Web of Science", journal, ...keywordTags, ...authors.slice(0, 2)].filter(Boolean).slice(0, 5),
+    score: scorePaper(text, keywords),
+    reason: makeReason(text, keywords),
+    tokenUsage: defaultTokenUsage(),
+    journalMetrics: defaultJournalMetrics(),
+    url,
+    authors,
+    published
   };
 }
 
@@ -2808,6 +2951,80 @@ async function fetchGoogleSearchPapers(keywords = DEFAULT_KEYWORDS, options = {}
   if (!items.length) return [];
   return filterPapersByKeywords(
     items.map(item => normalizeGoogleSearchPaper(item, keywords, responseMap)),
+    keywords
+  );
+}
+
+function buildWebOfScienceQuery(keywords = DEFAULT_KEYWORDS, template = DEFAULT_WEB_OF_SCIENCE_CONFIG.queryTemplate) {
+  const query = buildSemanticScholarQuery(keywords).replace(/[()]/g, " ").replace(/\s+/g, " ").trim();
+  return String(template || "{query}").replace("{query}", query || "computational microscopy reconstruction");
+}
+
+function emitWebOfSciencePageProgress(onProgress, { page, pageSize, maxPages }) {
+  if (typeof onProgress !== "function") return;
+  const itemStart = ((page - 1) * pageSize) + 1;
+  const itemEnd = page * pageSize;
+  onProgress({
+    stage: "source-page",
+    percent: Math.min(18, 8 + Math.round((page / Math.max(1, maxPages)) * 10)),
+    message: `Web of Science 第 ${page} 页正在抓取`,
+    detail: `正在抓第 ${page} 页，第 ${itemStart}-${itemEnd} 篇`,
+    sourcePage: {
+      sourceLabel: "Web of Science",
+      page,
+      maxPages,
+      start: itemStart,
+      num: pageSize,
+      itemStart,
+      itemEnd
+    }
+  });
+}
+
+async function fetchWebOfSciencePapers(keywords = DEFAULT_KEYWORDS, options = {}) {
+  const config = options.config || await readWebOfScienceConfig(options.configFile);
+  if (!config.enabled || !config.endpoint) {
+    throw new Error("Web of Science 信源未配置：请填写 config/web-of-science.json 后再启用");
+  }
+
+  const request = config.request || {};
+  const fetchImpl = options.fetchImpl || fetch;
+  const headers = { Accept: "application/json" };
+  if (request.useApiKeyHeader !== false && request.apiKeyHeader && config.apiKey) {
+    headers[request.apiKeyHeader] = `${request.apiKeyPrefix || ""}${config.apiKey}`;
+  }
+  const query = buildWebOfScienceQuery(keywords, config.queryTemplate);
+  const maxPages = clampPositiveInteger(options.maxPages || config.maxPages, DEFAULT_WEB_OF_SCIENCE_CONFIG.maxPages, 1, WEB_OF_SCIENCE_MAX_PAGES_LIMIT);
+  const pageSize = clampPositiveInteger(options.pageSize || config.pageSize, DEFAULT_WEB_OF_SCIENCE_CONFIG.pageSize, 1, WEB_OF_SCIENCE_PAGE_SIZE_LIMIT);
+  const pages = [];
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const url = new URL(config.endpoint);
+    url.searchParams.set(request.queryName || "q", query);
+    url.searchParams.set(request.databaseQueryName || "db", config.databaseId || DEFAULT_WEB_OF_SCIENCE_CONFIG.databaseId);
+    url.searchParams.set(request.pageQueryName || "page", String(page));
+    url.searchParams.set(request.limitQueryName || "limit", String(pageSize));
+    if (request.apiKeyQueryName && config.apiKey) url.searchParams.set(request.apiKeyQueryName, config.apiKey);
+    emitWebOfSciencePageProgress(options.onProgress, { page, pageSize, maxPages });
+    const response = await fetchImpl(url, {
+      method: request.method || "GET",
+      headers,
+      signal: AbortSignal.timeout(20000)
+    });
+    if (!response.ok) throw new Error(`Web of Science 信源失败：HTTP ${response.status}`);
+    const payload = typeof response.json === "function" ? await response.json() : JSON.parse(await response.text());
+    pages.push(payload);
+    const items = getNestedValue(payload, config.responseMap.items);
+    if (!Array.isArray(items) || items.length < pageSize) break;
+  }
+
+  const items = pages.flatMap(payload => {
+    const pageItems = getNestedValue(payload, config.responseMap.items);
+    return Array.isArray(pageItems) ? pageItems : [];
+  });
+  if (!items.length) return [];
+  return filterPapersByKeywords(
+    items.map(item => normalizeWebOfScienceRecord(item, keywords, config.responseMap)),
     keywords
   );
 }
@@ -4417,6 +4634,7 @@ async function fetchPaperPayload(options = {}) {
       else if (source === "semanticscholar") result = options.fetchers?.semanticscholar ? await options.fetchers.semanticscholar() : await fetchSemanticScholarPapers(keywords, mode === "today" ? {} : { startDate, endDate, limit: 100 });
       else if (source === "googlescholar") result = options.fetchers?.googlescholar ? await options.fetchers.googlescholar() : await fetchGoogleScholarPapers(keywords, { ...(options.googleScholar || {}), onProgress: progressForSource(source) });
       else if (source === "googlesearch") result = options.fetchers?.googlesearch ? await options.fetchers.googlesearch() : await fetchGoogleSearchPapers(keywords, { ...(options.googleScholar || {}), onProgress: progressForSource(source) });
+      else if (source === "webofscience") result = options.fetchers?.webofscience ? await options.fetchers.webofscience() : await fetchWebOfSciencePapers(keywords, { ...(options.webOfScience || {}), onProgress: progressForSource(source) });
       else result = [];
       apiCalls.push({ api: source, label: API_LABELS[source] || source, kind: "source", status: "ok", returned: result.length });
       emitFetchProgress(options, {
@@ -4676,9 +4894,11 @@ module.exports = {
   fetchGoogleSearchPapers,
   fetchJournalMetrics,
   fetchLast7DaysPapers,
+  fetchPaperPayload,
   fetchRecentPapers,
   fetchSemanticScholarPapers,
   fetchTodayPapers,
+  fetchWebOfSciencePapers,
   inferPaperShortTitle,
   importLocalData,
   importLocalDataZip,
@@ -4690,6 +4910,7 @@ module.exports = {
   normalizeArxivEntry,
   normalizeBioRxivItem,
   normalizeSemanticScholarPaper,
+  normalizeWebOfScienceRecord,
   parseArxivEntries,
   parseEnabledSources,
   readFetchLog,
@@ -4706,6 +4927,7 @@ module.exports = {
   readJournalMetricsCache,
   readLlmConfig,
   readUserState,
+  readWebOfScienceConfig,
   refinePaperPool,
   rescorePaperAfterEnrichment,
   refreshJournalMetricsForArchive,

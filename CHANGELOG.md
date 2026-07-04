@@ -114,6 +114,22 @@
 
 ## 未发布
 
+### 新增功能
+
+- 新增 Web of Science 信源，可在“领域配置”的信源卡片中填写 Clarivate API Endpoint、API Key、数据库、查询模板、抓取页数和每页数量；今日论文抓取会把 Web of Science 结果纳入统一去重、过滤、LLM 推荐、期刊指标和入库流程。
+
+### 配置与数据
+
+- 新增 `config/web-of-science.example.json`，真实 `config/web-of-science.json` 继续作为本机敏感配置保存；本地 ZIP 导出默认不包含 Web of Science API Key，只有勾选“包含 API Key 和外部接口配置”时才导出，并且导入仍需显式允许覆盖本机 API Key。
+
+### 文档
+
+- 更新 README 和 BACKUP_FORMAT，说明 Web of Science 信源、示例配置文件、入库流程、架构图和 ZIP 备份文件清单。
+
+### 测试与验证
+
+- 增加 Web of Science 配置、密钥遮蔽、有限分页抓取、论文归一化、今日论文抓取汇总、ZIP 导入导出和前端配置入口测试。
+
 ## 0.1.3 - 2026-06-26
 
 ### 新增功能

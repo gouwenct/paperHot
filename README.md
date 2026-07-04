@@ -24,6 +24,7 @@ Paper Hot 的主要目的只有两个：
 
 - Google Scholar via SerpApi。
 - Google Search via SerpApi。
+- Web of Science via Clarivate API。
 - arXiv。
 - bioRxiv。
 - Semantic Scholar。
@@ -84,6 +85,7 @@ http://127.0.0.1:50751
 - 启用的论文来源。
 - LLM Provider、模型、Endpoint 和 API Key。
 - SerpApi / Google Scholar 配置。
+- Web of Science API 配置。
 - EasyScholar API Key。
 - 用户研究背景和评分偏好。
 
@@ -96,6 +98,7 @@ http://127.0.0.1:50751
 ```powershell
 Copy-Item config\llm.example.json config\llm.json
 Copy-Item config\google-scholar.example.json config\google-scholar.json
+Copy-Item config\web-of-science.example.json config\web-of-science.json
 Copy-Item config\journal-metrics.example.json config\journal-metrics.json
 Copy-Item data\user\config.example.json data\user\config.json
 Copy-Item data\user\profile.example.json data\user\profile.json
@@ -107,6 +110,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 | --- | --- |
 | `config/llm.json` | LLM 提供商、模型、Endpoint、API Key |
 | `config/google-scholar.json` | SerpApi、Google Scholar、Google Search 配置 |
+| `config/web-of-science.json` | Web of Science API 配置 |
 | `config/journal-metrics.json` | EasyScholar 期刊指标查询配置 |
 | `data/user/config.json` | 关键词、信源开关和前端领域配置 |
 | `data/user/profile.json` | 用户资料、研究背景和语言偏好 |
@@ -262,8 +266,8 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 点击抓取后，前端不会直接访问外部论文网站，而是向本地后端创建抓取任务。后端流程如下：
 
-1. 读取用户配置：关键词、信源、日期范围、LLM、SerpApi、EasyScholar。
-2. 多来源检索：Google Scholar、Google Search、arXiv、bioRxiv、Semantic Scholar。
+1. 读取用户配置：关键词、信源、日期范围、LLM、SerpApi、Web of Science、EasyScholar。
+2. 多来源检索：Google Scholar、Google Search、Web of Science、arXiv、bioRxiv、Semantic Scholar。
 3. 候选归一化：统一标题、摘要、作者、DOI、URL、来源、日期等字段。
 4. 关键词和领域过滤：用字符串规则和领域上下文过滤候选。
 5. 日期筛选：按前端选择范围筛选；不伪造 `YYYY-01-01` 作为真实日期。
@@ -290,12 +294,13 @@ flowchart TD
     Frontend --> Server["server.cjs<br/>HTTP 服务和 API 路由"]
     Server --> Core["paperhot_backend.cjs<br/>抓取、过滤、富集、归档"]
 
-    Core --> Config["config/*.json<br/>LLM / SerpApi / EasyScholar"]
+    Core --> Config["config/*.json<br/>LLM / SerpApi / Web of Science / EasyScholar"]
     Core --> UserData["data/user/*.json<br/>关键词 / 信源 / 用户资料"]
     Core --> PaperData["data/papers/*.json<br/>论文库 / 日志 / 收藏 / 阅读状态"]
 
     Core --> Sources["外部论文和元数据来源"]
     Sources --> Google["Google Scholar / Google Search via SerpApi"]
+    Sources --> WoS["Web of Science via Clarivate API"]
     Sources --> Arxiv["arXiv"]
     Sources --> Biorxiv["bioRxiv"]
     Sources --> Semantic["Semantic Scholar"]

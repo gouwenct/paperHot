@@ -10,6 +10,7 @@ const {
   normalizeArxivEntry,
   normalizeBioRxivItem,
   normalizeSemanticScholarPaper,
+  normalizeWebOfScienceRecord,
   parseEnabledSources,
   refinePaperPool,
   buildArxivQuery,
@@ -22,6 +23,8 @@ const {
   fetchJournalMetrics,
   fetchGoogleScholarPapers,
   fetchGoogleSearchPapers,
+  fetchPaperPayload,
+  fetchWebOfSciencePapers,
   readGoogleRollingCursorStatus,
   resetGoogleRollingCursors,
   fetchLast7DaysPapers,
@@ -36,6 +39,7 @@ const {
   readIntegrationConfigs,
   readIntegrationSecrets,
   readJournalMetricsConfig,
+  readWebOfScienceConfig,
   readJournalMetricsCache,
   readFavoritesPayload,
   readPaperNotesPayload,
@@ -171,6 +175,29 @@ test("normalizes year-only Semantic Scholar dates without inventing January firs
   });
 
   assert.equal(paper.published, "2025");
+});
+
+test("normalizes Web of Science records into the frontend paper schema", () => {
+  const paper = normalizeWebOfScienceRecord({
+    uid: "WOS:000123456789",
+    title: "Structured illumination microscopy reconstruction with diffusion priors",
+    names: { authors: [{ displayName: "A. Author" }, { displayName: "B. Scientist" }] },
+    source: { sourceTitle: "Nature Methods", publishYear: 2026, publishMonth: "06", publishDay: "18" },
+    identifiers: { doi: "10.1038/s41592-026-00001-1" },
+    links: { record: "https://www.webofscience.com/wos/woscc/full-record/WOS:000123456789" },
+    keywords: { authorKeywords: ["structured illumination microscopy", "diffusion prior"] }
+  }, ["structured illumination microscopy"]);
+
+  assert.equal(paper.id, "webofscience-10.1038/s41592-026-00001-1");
+  assert.equal(paper.doi, "10.1038/s41592-026-00001-1");
+  assert.equal(paper.journal, "Nature Methods");
+  assert.equal(paper.sourceType, "论文数据库");
+  assert.equal(paper.source, "Web of Science · Nature Methods");
+  assert.equal(paper.published, "2026-06-18");
+  assert.equal(paper.url, "https://www.webofscience.com/wos/woscc/full-record/WOS:000123456789");
+  assert.deepEqual(paper.authors, ["A. Author", "B. Scientist"]);
+  assert.ok(paper.tags.includes("Web of Science"));
+  assert.match(paper.citation, /A\. Author, B\. Scientist \(2026\)\. Structured illumination microscopy reconstruction with diffusion priors\. Nature Methods\. doi:10\.1038\/s41592-026-00001-1/);
 });
 
 test("filters papers by configured keywords", () => {
@@ -322,6 +349,53 @@ test("last 7 days paper refresh uses a rolling 7 day range", async () => {
   assert.deepEqual(payload.papers.map(paper => paper.title), ["recent structured illumination microscopy"]);
   assert.match(payload.cacheFile, /2026-06-22-last7\.json$/);
   await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("today fetch includes Web of Science as a first-class source", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-wos-today-"));
+  try {
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      mode: "today",
+      refresh: true,
+      date: "2026-06-18",
+      keywords: ["structured illumination microscopy"],
+      sources: ["Web of Science"],
+      fetchers: {
+        webofscience: async () => [
+          {
+            id: "webofscience-wos-1",
+            title: "Structured illumination microscopy reconstruction",
+            summary: "A structured illumination microscopy method.",
+            journal: "Nature Methods",
+            source: "Web of Science · Nature Methods",
+            sourceType: "论文数据库",
+            tags: ["Web of Science", "Nature Methods"],
+            published: "2026-06-18",
+            score: 90,
+            tokenUsage: { prompt: 0, completion: 0, total: 0, status: "未调用 AI" },
+            journalMetrics: { impactFactor: "", partition: "", upgradedPartition: "", source: "", status: "未查询" }
+          }
+        ],
+        crossref: async () => null,
+        llm: async ({ paper }) => ({
+          abstractZh: `中文摘要：${paper.summary}`,
+          reason: "与结构光照显微重建直接相关。",
+          tokenUsage: { prompt: 1, completion: 1, total: 2, model: "test-llm", status: "已调用 AI" }
+        })
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+    const logs = await readFetchLog(tempDir);
+
+    assert.equal(payload.count, 1);
+    assert.deepEqual(payload.sources, ["webofscience"]);
+    assert.equal(payload.papers[0].source, "Web of Science · Nature Methods");
+    assert.equal(payload.fetchReport.apis.find(call => call.api === "webofscience").returned, 1);
+    assert.equal(logs[0].sources.find(source => source.api === "webofscience").count, 1);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("fetch report records APIs called, LLM usage, and fetched papers", async () => {
@@ -2581,6 +2655,94 @@ test("fetches Google Scholar papers through a configured API source", async () =
   assert.equal(papers[1].source, "Google Scholar · Optica");
 });
 
+test("fetches Web of Science papers through a configured API source with limited pages", async () => {
+  const seen = [];
+  const papers = await fetchWebOfSciencePapers(["structured illumination microscopy"], {
+    config: {
+      provider: "web-of-science",
+      enabled: true,
+      endpoint: "https://api.clarivate.test/apis/wos-starter/v1/documents",
+      apiKey: "wos-key",
+      databaseId: "WOS",
+      maxPages: 2,
+      pageSize: 2,
+      queryTemplate: "TS=({query})",
+      request: {
+        method: "GET",
+        queryName: "q",
+        databaseQueryName: "db",
+        pageQueryName: "page",
+        limitQueryName: "limit",
+        apiKeyHeader: "X-ApiKey",
+        useApiKeyHeader: true
+      },
+      responseMap: {
+        items: "hits",
+        title: "title",
+        summary: "abstract",
+        doi: "identifiers.doi",
+        journal: "source.sourceTitle",
+        year: "source.publishYear",
+        url: "links.record",
+        authors: "names.authors"
+      }
+    },
+    fetchImpl: async (url, options) => {
+      const page = Number(url.searchParams.get("page"));
+      seen.push({
+        page,
+        limit: url.searchParams.get("limit"),
+        db: url.searchParams.get("db"),
+        query: url.searchParams.get("q"),
+        apiKey: options.headers["X-ApiKey"]
+      });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          hits: page === 1
+            ? [{
+                uid: "WOS:1",
+                title: "Structured illumination microscopy reconstruction",
+                abstract: "A structured illumination microscopy method.",
+                identifiers: { doi: "10.1000/wos1" },
+                source: { sourceTitle: "Nature Methods", publishYear: 2026, publishMonth: "06", publishDay: "18" },
+                names: { authors: [{ displayName: "A. Author" }] },
+                links: { record: "https://www.webofscience.com/wos/woscc/full-record/WOS:1" }
+              }, {
+                uid: "WOS:1B",
+                title: "Structured illumination microscopy optics",
+                abstract: "Another structured illumination microscopy record on the first page.",
+                identifiers: { doi: "10.1000/wos1b" },
+                source: { sourceTitle: "Light Science", publishYear: 2026, publishMonth: "06", publishDay: "18" },
+                names: { authors: [{ displayName: "A. Second" }] },
+                links: { record: "https://www.webofscience.com/wos/woscc/full-record/WOS:1B" }
+              }]
+            : [{
+                uid: "WOS:2",
+                title: "Structured illumination microscopy reconstruction with adaptive optics",
+                abstract: "A structured illumination microscopy method.",
+                identifiers: { doi: "10.1000/wos2" },
+                source: { sourceTitle: "Optica", publishYear: 2026, publishMonth: "06", publishDay: "17" },
+                names: { authors: [{ displayName: "B. Author" }] },
+                links: { record: "https://www.webofscience.com/wos/woscc/full-record/WOS:2" }
+              }]
+        })
+      };
+    }
+  });
+
+  assert.equal(seen.length, 2);
+  assert.deepEqual(seen.map(item => item.page), [1, 2]);
+  assert.equal(seen[0].limit, "2");
+  assert.equal(seen[0].db, "WOS");
+  assert.match(seen[0].query, /TS=\(structured illumination microscopy\)/);
+  assert.equal(seen[0].apiKey, "wos-key");
+  assert.equal(papers.length, 3);
+  assert.equal(papers[0].source, "Web of Science · Nature Methods");
+  assert.equal(papers[2].source, "Web of Science · Optica");
+});
+
 test("continues Google Scholar rolling fetch from the next saved offset", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-scholar-roll-"));
   const requestedStarts = [];
@@ -3282,6 +3444,10 @@ test("can export optional profile and API secrets in zip when explicitly request
       enabled: true,
       apiKey: "easyscholar-private-key"
     }), "utf8");
+    await fs.writeFile(path.join(userDir, "web-of-science.json"), JSON.stringify({
+      enabled: true,
+      apiKey: "wos-private-key"
+    }), "utf8");
 
     const zip = await exportLocalDataZip({
       dataDir: tempDir,
@@ -3290,6 +3456,7 @@ test("can export optional profile and API secrets in zip when explicitly request
       llmConfigFile: path.join(userDir, "llm.json"),
       googleScholarConfigFile: path.join(userDir, "google-scholar.json"),
       journalMetricsConfigFile: path.join(userDir, "journal-metrics.json"),
+      webOfScienceConfigFile: path.join(userDir, "web-of-science.json"),
       includeProfile: true,
       includeSecrets: true
     });
@@ -3299,6 +3466,7 @@ test("can export optional profile and API secrets in zip when explicitly request
     assert.equal(JSON.parse(entries["config/llm.json"].toString("utf8")).apiKey, "sk-private-llm-key-123456");
     assert.equal(JSON.parse(entries["config/google-scholar.json"].toString("utf8")).apiKey, "serp-private-key");
     assert.equal(JSON.parse(entries["config/journal-metrics.json"].toString("utf8")).apiKey, "easyscholar-private-key");
+    assert.equal(JSON.parse(entries["config/web-of-science.json"].toString("utf8")).apiKey, "wos-private-key");
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
     await fs.rm(userDir, { recursive: true, force: true });
@@ -3315,6 +3483,7 @@ test("skips imported API configs by default and reports the skip", async () => {
     await fs.writeFile(path.join(sourceUserDir, "llm.json"), JSON.stringify({ enabled: true, apiKey: "imported-llm-secret" }), "utf8");
     await fs.writeFile(path.join(sourceUserDir, "google-scholar.json"), JSON.stringify({ enabled: true, apiKey: "imported-serp-secret" }), "utf8");
     await fs.writeFile(path.join(sourceUserDir, "journal-metrics.json"), JSON.stringify({ enabled: true, apiKey: "imported-easy-secret" }), "utf8");
+    await fs.writeFile(path.join(sourceUserDir, "web-of-science.json"), JSON.stringify({ enabled: true, apiKey: "imported-wos-secret" }), "utf8");
 
     const zip = await exportLocalDataZip({
       dataDir: sourceDir,
@@ -3322,6 +3491,7 @@ test("skips imported API configs by default and reports the skip", async () => {
       llmConfigFile: path.join(sourceUserDir, "llm.json"),
       googleScholarConfigFile: path.join(sourceUserDir, "google-scholar.json"),
       journalMetricsConfigFile: path.join(sourceUserDir, "journal-metrics.json"),
+      webOfScienceConfigFile: path.join(sourceUserDir, "web-of-science.json"),
       includeSecrets: true
     });
     const imported = await importLocalDataZip(zip, {
@@ -3329,7 +3499,8 @@ test("skips imported API configs by default and reports the skip", async () => {
       userConfigFile: path.join(targetUserDir, "config.json"),
       llmConfigFile: path.join(targetUserDir, "llm.json"),
       googleScholarConfigFile: path.join(targetUserDir, "google-scholar.json"),
-      journalMetricsConfigFile: path.join(targetUserDir, "journal-metrics.json")
+      journalMetricsConfigFile: path.join(targetUserDir, "journal-metrics.json"),
+      webOfScienceConfigFile: path.join(targetUserDir, "web-of-science.json")
     });
 
     assert.deepEqual(imported.skipped, ["integrations"]);
@@ -3337,6 +3508,7 @@ test("skips imported API configs by default and reports the skip", async () => {
     await assert.rejects(fs.readFile(path.join(targetUserDir, "llm.json"), "utf8"));
     await assert.rejects(fs.readFile(path.join(targetUserDir, "google-scholar.json"), "utf8"));
     await assert.rejects(fs.readFile(path.join(targetUserDir, "journal-metrics.json"), "utf8"));
+    await assert.rejects(fs.readFile(path.join(targetUserDir, "web-of-science.json"), "utf8"));
   } finally {
     await fs.rm(sourceDir, { recursive: true, force: true });
     await fs.rm(targetDir, { recursive: true, force: true });
@@ -3355,6 +3527,7 @@ test("imports API configs from zip only when explicitly allowed", async () => {
     await fs.writeFile(path.join(sourceUserDir, "llm.json"), JSON.stringify({ enabled: true, apiKey: "imported-llm-secret" }), "utf8");
     await fs.writeFile(path.join(sourceUserDir, "google-scholar.json"), JSON.stringify({ enabled: true, apiKey: "imported-serp-secret" }), "utf8");
     await fs.writeFile(path.join(sourceUserDir, "journal-metrics.json"), JSON.stringify({ enabled: true, apiKey: "imported-easy-secret" }), "utf8");
+    await fs.writeFile(path.join(sourceUserDir, "web-of-science.json"), JSON.stringify({ enabled: true, apiKey: "imported-wos-secret" }), "utf8");
 
     const zip = await exportLocalDataZip({
       dataDir: sourceDir,
@@ -3362,6 +3535,7 @@ test("imports API configs from zip only when explicitly allowed", async () => {
       llmConfigFile: path.join(sourceUserDir, "llm.json"),
       googleScholarConfigFile: path.join(sourceUserDir, "google-scholar.json"),
       journalMetricsConfigFile: path.join(sourceUserDir, "journal-metrics.json"),
+      webOfScienceConfigFile: path.join(sourceUserDir, "web-of-science.json"),
       includeSecrets: true
     });
     const imported = await importLocalDataZip(zip, {
@@ -3370,6 +3544,7 @@ test("imports API configs from zip only when explicitly allowed", async () => {
       llmConfigFile: path.join(targetUserDir, "llm.json"),
       googleScholarConfigFile: path.join(targetUserDir, "google-scholar.json"),
       journalMetricsConfigFile: path.join(targetUserDir, "journal-metrics.json"),
+      webOfScienceConfigFile: path.join(targetUserDir, "web-of-science.json"),
       allowSecrets: true
     });
 
@@ -3378,6 +3553,7 @@ test("imports API configs from zip only when explicitly allowed", async () => {
     assert.equal(JSON.parse(await fs.readFile(path.join(targetUserDir, "llm.json"), "utf8")).apiKey, "imported-llm-secret");
     assert.equal(JSON.parse(await fs.readFile(path.join(targetUserDir, "google-scholar.json"), "utf8")).apiKey, "imported-serp-secret");
     assert.equal(JSON.parse(await fs.readFile(path.join(targetUserDir, "journal-metrics.json"), "utf8")).apiKey, "imported-easy-secret");
+    assert.equal(JSON.parse(await fs.readFile(path.join(targetUserDir, "web-of-science.json"), "utf8")).apiKey, "imported-wos-secret");
   } finally {
     await fs.rm(sourceDir, { recursive: true, force: true });
     await fs.rm(targetDir, { recursive: true, force: true });
@@ -3493,6 +3669,79 @@ test("uses empty keyword defaults when user config is missing", async () => {
     inspiration: []
   });
   assert.ok(state.config.sources.length > 0);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("reads Web of Science configuration without embedding secrets in integration state", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-wos-config-"));
+  const webOfScienceConfigFile = path.join(tempDir, "web-of-science.json");
+  await fs.writeFile(webOfScienceConfigFile, JSON.stringify({
+    provider: "web-of-science",
+    enabled: true,
+    endpoint: "https://api.clarivate.com/apis/wos-starter/v1/documents",
+    apiKey: "wos-private-key",
+    databaseId: "WOS",
+    maxPages: 2,
+    pageSize: 25,
+    queryTemplate: "TS=({query})",
+    request: { method: "GET", queryName: "q", databaseQueryName: "db", pageQueryName: "page", limitQueryName: "limit", apiKeyHeader: "X-ApiKey", useApiKeyHeader: true },
+    responseMap: { items: "hits", title: "title", journal: "source.sourceTitle" }
+  }), "utf8");
+
+  const config = await readWebOfScienceConfig(webOfScienceConfigFile);
+  const integrations = await readIntegrationConfigs({
+    webOfScienceConfigFile,
+    llmConfigFile: path.join(tempDir, "missing-llm.json"),
+    googleScholarConfigFile: path.join(tempDir, "missing-google.json"),
+    journalMetricsConfigFile: path.join(tempDir, "missing-journal.json")
+  });
+  const secrets = await readIntegrationSecrets({
+    webOfScienceConfigFile,
+    llmConfigFile: path.join(tempDir, "missing-llm.json"),
+    googleScholarConfigFile: path.join(tempDir, "missing-google.json"),
+    journalMetricsConfigFile: path.join(tempDir, "missing-journal.json")
+  });
+
+  assert.equal(config.enabled, true);
+  assert.equal(config.apiKey, "wos-private-key");
+  assert.equal(config.databaseId, "WOS");
+  assert.equal(config.maxPages, 2);
+  assert.equal(config.pageSize, 25);
+  assert.equal(integrations.webOfScience.apiKey, "");
+  assert.equal(integrations.webOfScience.hasApiKey, true);
+  assert.equal(secrets.webOfScience.apiKey, "wos-private-key");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("preserves stored Web of Science API key when saving blank key fields", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-wos-save-"));
+  const webOfScienceConfigFile = path.join(tempDir, "web-of-science.json");
+  await fs.writeFile(webOfScienceConfigFile, JSON.stringify({
+    enabled: true,
+    endpoint: "https://old.example.test/wos",
+    apiKey: "stored-wos-key"
+  }), "utf8");
+
+  const integrations = await writeIntegrationConfigs({
+    webOfScience: {
+      enabled: true,
+      endpoint: "https://new.example.test/wos",
+      apiKey: "",
+      maxPages: 1,
+      pageSize: 10
+    }
+  }, {
+    webOfScienceConfigFile,
+    llmConfigFile: path.join(tempDir, "llm.json"),
+    googleScholarConfigFile: path.join(tempDir, "google-scholar.json"),
+    journalMetricsConfigFile: path.join(tempDir, "journal-metrics.json")
+  });
+  const saved = JSON.parse(await fs.readFile(webOfScienceConfigFile, "utf8"));
+
+  assert.equal(saved.endpoint, "https://new.example.test/wos");
+  assert.equal(saved.apiKey, "stored-wos-key");
+  assert.equal(integrations.webOfScience.hasApiKey, true);
+  assert.equal(integrations.webOfScience.apiKey, "");
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 

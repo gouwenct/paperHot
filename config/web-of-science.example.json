@@ -1,0 +1,30 @@
+{
+  "provider": "web-of-science",
+  "enabled": false,
+  "endpoint": "https://api.clarivate.com/apis/wos-starter/v1/documents",
+  "apiKey": "",
+  "databaseId": "WOS",
+  "maxPages": 2,
+  "pageSize": 25,
+  "queryTemplate": "TS=({query})",
+  "request": {
+    "method": "GET",
+    "queryName": "q",
+    "databaseQueryName": "db",
+    "pageQueryName": "page",
+    "limitQueryName": "limit",
+    "apiKeyHeader": "X-ApiKey",
+    "apiKeyPrefix": "",
+    "useApiKeyHeader": true
+  },
+  "responseMap": {
+    "items": "hits",
+    "title": "title",
+    "summary": "abstract",
+    "doi": "identifiers.doi",
+    "journal": "source.sourceTitle",
+    "year": "source.publishYear",
+    "url": "links.record",
+    "authors": "names.authors"
+  }
+}

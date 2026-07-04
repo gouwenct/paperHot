@@ -161,6 +161,17 @@ test("source config exposes Google rolling fetch option", async () => {
   assert.match(html, /启动滚动抓取/);
 });
 
+test("source config exposes Web of Science API settings", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /Web of Science/);
+  assert.match(html, /webOfScience:\s*\{/);
+  assert.match(html, /data-source-integration="webOfScience"/);
+  assert.match(html, /data-api-help="webofscience"/);
+  assert.match(html, /Web of Science API Key/);
+  assert.match(html, /每次仅抓取少量页面/);
+  assert.match(html, /webOfScience:\s*integrationState\.webOfScience/);
+});
+
 test("fetch progress panel exposes source page detail", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /sourcePage/);

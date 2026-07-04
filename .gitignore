@@ -9,6 +9,7 @@ node_modules/
 .env.*
 config/journal-metrics.json
 config/google-scholar.json
+config/web-of-science.json
 config/llm.json
 
 # Runtime logs and process files

@@ -61,6 +61,7 @@ data/user/profile.json
 config/llm.json
 config/google-scholar.json
 config/journal-metrics.json
+config/web-of-science.json
 ```
 
 勾选“包含统计缓存和抓取进度缓存”时额外包含：

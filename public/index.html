@@ -4544,12 +4544,15 @@
       const hasEnabledLlm = integrationState.llm.enabled !== false && Boolean(integrationState.llm.activeProviderId);
       const hasGoogleKey = integrationState.googleScholar.hasApiKey || Boolean(integrationState.googleScholar.apiKey);
       const hasJournalKey = integrationState.journalMetrics.hasApiKey || Boolean(integrationState.journalMetrics.apiKey);
+      const hasWebOfScienceKey = integrationState.webOfScience.hasApiKey || Boolean(integrationState.webOfScience.apiKey);
       const googleEnabled = enabledSources.some(source => /google/i.test(source.title));
+      const webOfScienceEnabled = enabledSources.some(source => /web of science/i.test(source.title));
       const items = [
         { label: "关键词", ok: primaryKeywords > 0, detail: `${primaryKeywords} 个主要关键词` },
         { label: "信源", ok: enabledSources.length > 0, detail: `${enabledSources.length} 个信源已启用` },
         { label: "LLM", ok: hasEnabledLlm, detail: hasEnabledLlm ? "已选择模型" : "未启用模型" },
         { label: "Google / SerpApi", ok: hasGoogleKey || !googleEnabled, detail: hasGoogleKey ? "已保存密钥" : "启用 Google 信源时需要填写" },
+        { label: "Web of Science", ok: hasWebOfScienceKey || !webOfScienceEnabled, detail: hasWebOfScienceKey ? "已保存密钥" : "启用 Web of Science 时需要填写" },
         { label: "EasyScholar", ok: hasJournalKey || !integrationState.journalMetrics.enabled, detail: hasJournalKey ? "已保存密钥" : "启用期刊指标时需要填写" }
       ];
       panel.innerHTML = `
@@ -4757,6 +4760,12 @@
         enabled: false
       },
       {
+        title: "Web of Science",
+        desc: "通过 Clarivate Web of Science API 纳入订阅数据库检索结果；建议每次仅抓取少量页面。",
+        tags: ["论文数据库", "需配置 API", "有限分页"],
+        enabled: false
+      },
+      {
         title: "arXiv",
         desc: "通过 arXiv 官方 API 检索预印本；不需要填写密钥。",
         tags: ["论文源", "无需配置", "预印本"],
@@ -4869,6 +4878,17 @@
         endpoint: "https://easyscholar.cc/open/getPublicationRank",
         apiKey: "",
         hasApiKey: false
+      },
+      webOfScience: {
+        provider: "web-of-science",
+        enabled: false,
+        endpoint: "https://api.clarivate.com/apis/wos-starter/v1/documents",
+        apiKey: "",
+        databaseId: "WOS",
+        maxPages: 2,
+        pageSize: 25,
+        queryTemplate: "TS=({query})",
+        hasApiKey: false
       }
     };
     let integrationState = JSON.parse(JSON.stringify(defaultIntegrationState));
@@ -4916,7 +4936,8 @@
       integrationState = {
         llm: { ...defaultIntegrationState.llm, ...incomingLlm, providers: mergedProviders },
         googleScholar: { ...defaultIntegrationState.googleScholar, ...(items.googleScholar || {}) },
-        journalMetrics: { ...defaultIntegrationState.journalMetrics, ...(items.journalMetrics || {}) }
+        journalMetrics: { ...defaultIntegrationState.journalMetrics, ...(items.journalMetrics || {}) },
+        webOfScience: { ...defaultIntegrationState.webOfScience, ...(items.webOfScience || {}) }
       };
       if (!expandedLlmProviderId) {
         expandedLlmProviderId = integrationState.llm.activeProviderId || integrationState.llm.providers?.[0]?.id || "";
@@ -4977,6 +4998,7 @@
     function findSecretValue(secrets, path) {
       if (path === "googleScholar") return secrets?.googleScholar?.apiKey || "";
       if (path === "journalMetrics") return secrets?.journalMetrics?.apiKey || "";
+      if (path === "webOfScience") return secrets?.webOfScience?.apiKey || "";
       if (path === "llm") return secrets?.llm?.apiKey || "";
       if (path.startsWith("llm.providers.")) {
         const providerId = path.slice("llm.providers.".length);
@@ -5011,6 +5033,38 @@
             <label><span><input type="checkbox" data-source-integration-field="rollingFetch" ${google.rollingFetch ? "checked" : ""}> 启动滚动抓取</span></label>
             <div class="small-text">开启后，同一信源、关键词和 num 会从本地保存的 SerpApi start 继续抓取；例如本次抓 1-3 页，下次自动接着抓 4-6 页。</div>
             <div class="small-text">建议 1-3 页，每页 20 条；页数越高越容易触发 Google Scholar / SerpApi 限流。</div>
+          </div>
+        `;
+      }
+      if (title.includes("web of science")) {
+        const wos = integrationState.webOfScience;
+        return `
+          <div class="config-section source-form" data-source-integration="webOfScience">
+            <label><span><input type="checkbox" data-source-integration-field="enabled" ${wos.enabled ? "checked" : ""}> 启用 Web of Science API</span></label>
+            <div class="small-text">Web of Science 使用 Clarivate API，不抓网页页面；建议每次仅抓取少量页面，降低限流和额度消耗风险。</div>
+            <label>Endpoint
+              <input data-source-integration-field="endpoint" value="${escapeHTML(wos.endpoint)}" placeholder="https://api.clarivate.com/apis/wos-starter/v1/documents">
+            </label>
+            <label><span class="field-title-row">Web of Science API Key <button class="help-btn" type="button" data-api-help="webofscience" title="如何获取 Web of Science API Key">?</button></span>
+              ${sourceSecretField("webOfScience", wos)}
+            </label>
+            <div class="input-row">
+              <label>数据库
+                <input data-source-integration-field="databaseId" value="${escapeHTML(wos.databaseId || "WOS")}">
+              </label>
+              <label>查询模板
+                <input data-source-integration-field="queryTemplate" value="${escapeHTML(wos.queryTemplate || "TS=({query})")}">
+              </label>
+            </div>
+            <div class="input-row">
+              <label>抓取页数
+                <input type="number" min="1" max="5" step="1" data-source-integration-field="maxPages" value="${escapeHTML(wos.maxPages || 2)}">
+              </label>
+              <label>每页数量
+                <input type="number" min="1" max="50" step="1" data-source-integration-field="pageSize" value="${escapeHTML(wos.pageSize || 25)}">
+              </label>
+            </div>
+            <div class="small-text">默认查询模板会把当前主要关键词拼入 TS=({query})；如需使用机构订阅支持的其它语法，可在这里调整。</div>
           </div>
         `;
       }
@@ -5100,6 +5154,16 @@
           "在期刊指标配置里填写 API Key，用于查询影响因子和分区。"
         ],
         note: "EasyScholar 用于期刊指标增强；没有配置时不影响基础论文抓取。"
+      },
+      webofscience: {
+        title: "如何获取 Web of Science API Key",
+        url: "https://developer.clarivate.com/apis",
+        steps: [
+          "打开 Clarivate Developer Portal。",
+          "确认机构或账号已开通 Web of Science API 权限。",
+          "创建或查看 API Key，然后回到本页面填写 Endpoint、数据库和抓取页数。"
+        ],
+        note: "Web of Science API 权限取决于 Clarivate 订阅；没有 API 权限时不要改用网页翻页抓取。"
       }
     };
 
@@ -5310,7 +5374,8 @@
       const payload = {
         llm: currentLlmConfig(),
         googleScholar: integrationState.googleScholar,
-        journalMetrics: integrationState.journalMetrics
+        journalMetrics: integrationState.journalMetrics,
+        webOfScience: integrationState.webOfScience
       };
       if (form) {
         form.querySelectorAll("[data-integration-section]").forEach(section => {
