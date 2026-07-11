@@ -337,6 +337,15 @@ flowchart TD
 | `scripts/` | 维护脚本目录，目前包含发布前归档 changelog 的脚本。只提交通用维护脚本，不提交依赖个人环境的一次性脚本。 | 是，限通用脚本 |
 | `data/` | 本地用户数据目录。GitHub 上只保留 example 文件；真实论文库、收藏、日志和用户资料应保留在本机。 | 只上传 example |
 
+### 补充文档
+
+| 路径 | 用途 |
+| --- | --- |
+| `docs/easyscholar-config.md` | EasyScholar API 获取和期刊指标配置说明 |
+| `docs/google-scholar-config.md` | SerpApi / Google Scholar 配置说明 |
+| `docs/paperhot-ingestion-flow.html` | 从页面抓取按钮到归档、日志和富集流程的可视化说明 |
+| `docs/superpowers/specs/2026-07-11-recent-paper-discovery-design.md` | 已确认的近期论文发现、多信源检索、断点恢复和今日论文页面设计 |
+
 ### 主要数据文件
 
 | 路径 | 作用 |
