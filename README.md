@@ -345,6 +345,7 @@ flowchart TD
 | `docs/google-scholar-config.md` | SerpApi / Google Scholar 配置说明 |
 | `docs/paperhot-ingestion-flow.html` | 从页面抓取按钮到归档、日志和富集流程的可视化说明 |
 | `docs/superpowers/specs/2026-07-11-recent-paper-discovery-design.md` | 已确认的近期论文发现、多信源检索、断点恢复和今日论文页面设计 |
+| `docs/superpowers/plans/2026-07-11-recent-paper-discovery.md` | 近期论文发现功能的分步实现、测试和验证计划 |
 
 ### 主要数据文件
 
