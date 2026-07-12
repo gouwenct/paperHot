@@ -204,6 +204,10 @@ const DEFAULT_USER_CONFIG = {
     secondary: [],
     inspiration: []
   },
+  searchLogic: {
+    activeKeywords: [],
+    andEdges: []
+  },
   sources: [
     {
       title: "Google 搜索",
@@ -874,6 +878,74 @@ function cleanKeywordConfig(value) {
   }));
 }
 
+function cleanSearchLogic(value, keywordConfig) {
+  const hasStoredLogic = value && typeof value === "object"
+    && (Array.isArray(value.activeKeywords) || Array.isArray(value.andEdges));
+  const available = new Map(
+    Object.values(keywordConfig).flat().map(item => [compactText(item.text).toLowerCase(), compactText(item.text)])
+  );
+  const defaultActive = Object.values(keywordConfig).flat()
+    .filter(item => item.enabled !== false)
+    .map(item => item.text);
+  const activeKeywords = Array.from(new Set((hasStoredLogic ? value.activeKeywords || [] : defaultActive)
+    .map(item => available.get(compactText(item).toLowerCase()))
+    .filter(Boolean)));
+  const andEdges = [];
+  const seen = new Set();
+  for (const pair of Array.isArray(value?.andEdges) ? value.andEdges : []) {
+    const left = available.get(compactText(pair?.[0]).toLowerCase());
+    const right = available.get(compactText(pair?.[1]).toLowerCase());
+    if (!left || !right || left === right) continue;
+    const key = [left.toLowerCase(), right.toLowerCase()].sort().join("::");
+    if (!seen.has(key)) andEdges.push([left, right]);
+    seen.add(key);
+  }
+  return { activeKeywords, andEdges };
+}
+
+function searchLogicGroups(searchLogic) {
+  const graph = new Map();
+  for (const [left, right] of searchLogic.andEdges || []) {
+    if (!graph.has(left)) graph.set(left, new Set());
+    if (!graph.has(right)) graph.set(right, new Set());
+    graph.get(left).add(right);
+    graph.get(right).add(left);
+  }
+  const groups = [];
+  const visited = new Set();
+  for (const keyword of graph.keys()) {
+    if (visited.has(keyword)) continue;
+    const stack = [keyword];
+    const group = [];
+    while (stack.length) {
+      const current = stack.pop();
+      if (visited.has(current)) continue;
+      visited.add(current);
+      group.push(current);
+      for (const next of graph.get(current) || []) stack.push(next);
+    }
+    groups.push(group);
+  }
+  return groups;
+}
+
+function buildSearchExpression(searchLogic = {}) {
+  const connected = new Set((searchLogic.andEdges || []).flat());
+  const clauses = searchLogicGroups(searchLogic).map(group => `(${group.join(" AND ")})`);
+  for (const keyword of searchLogic.activeKeywords || []) {
+    if (!connected.has(keyword)) clauses.push(keyword);
+  }
+  return clauses.join(" OR ");
+}
+
+function paperMatchesSearchLogic(paper, searchLogic) {
+  const text = `${paper.title || ""} ${paper.summary || ""} ${(paper.tags || []).join(" ")}`.toLowerCase();
+  const connected = new Set((searchLogic.andEdges || []).flat());
+  const groups = searchLogicGroups(searchLogic);
+  if (groups.some(group => group.every(keyword => text.includes(keyword.toLowerCase())))) return true;
+  return (searchLogic.activeKeywords || []).some(keyword => !connected.has(keyword) && text.includes(keyword.toLowerCase()));
+}
+
 function cleanSourceConfig(value) {
   const supportedTitles = new Set(DEFAULT_USER_CONFIG.sources.map(source => source.title.toLowerCase()));
   const items = Array.isArray(value) ? value : DEFAULT_USER_CONFIG.sources;
@@ -894,8 +966,10 @@ function cleanSourceConfig(value) {
 }
 
 function cleanUserConfig(value) {
+  const keywords = cleanKeywordConfig(value?.keywords);
   return {
-    keywords: cleanKeywordConfig(value?.keywords),
+    keywords,
+    searchLogic: cleanSearchLogic(value?.searchLogic, keywords),
     sources: cleanSourceConfig(value?.sources)
   };
 }
@@ -4879,7 +4953,9 @@ module.exports = {
   dedupePaperArchive,
   buildTokenStats,
   buildArxivQuery,
+  buildSearchExpression,
   classifyPaper,
+  cleanSearchLogic,
   cleanKeywords,
   enrichPapersWithCrossref,
   enrichPapersWithJournalMetrics,
@@ -4913,6 +4989,7 @@ module.exports = {
   normalizeWebOfScienceRecord,
   parseArxivEntries,
   parseEnabledSources,
+  paperMatchesSearchLogic,
   readFetchLog,
   readFavoritesPayload,
   readGoogleRollingCursorStatus,

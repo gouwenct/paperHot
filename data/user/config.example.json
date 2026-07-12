@@ -4,5 +4,9 @@
     "secondary": [],
     "inspiration": []
   },
+  "searchLogic": {
+    "activeKeywords": [],
+    "andEdges": []
+  },
   "sources": []
 }

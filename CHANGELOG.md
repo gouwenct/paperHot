@@ -116,10 +116,12 @@
 
 ### 新增功能
 
+- 后端新增 Boolean 搜索逻辑的持久化与计算：可把相连关键词组成 AND 条件，并将多个条件组以 OR 连接；论文匹配只检查标题、摘要和标签，不改写来源标题。
 - 新增 Web of Science 信源，可在“领域配置”的信源卡片中填写 Clarivate API Endpoint、API Key、数据库、查询模板、抓取页数和每页数量；今日论文抓取会把 Web of Science 结果纳入统一去重、过滤、LLM 推荐、期刊指标和入库流程。
 
 ### 配置与数据
 
+- `data/user/config.json` 与示例配置新增可选 `searchLogic`，随现有本地数据 ZIP 默认导出和导入；旧配置缺少该字段时会自动启用原有已启用关键词，无需迁移且不涉及 API Key 或个人资料。
 - 新增 `config/web-of-science.example.json`，真实 `config/web-of-science.json` 继续作为本机敏感配置保存；本地 ZIP 导出默认不包含 Web of Science API Key，只有勾选“包含 API Key 和外部接口配置”时才导出，并且导入仍需显式允许覆盖本机 API Key。
 
 ### 文档
@@ -130,6 +132,7 @@
 
 ### 测试与验证
 
+- 增加 Boolean 搜索逻辑清洗、表达式生成、论文匹配和持久化测试；聚焦覆盖多边连通 AND 分量与独立 OR 词、显式空逻辑往返、旧配置排除 disabled 关键词、删除关键词清除关联边，以及 ZIP 导出导入保留搜索逻辑。
 - 增加 Web of Science 配置、密钥遮蔽、有限分页抓取、论文归一化、今日论文抓取汇总、ZIP 导入导出和前端配置入口测试。
 
 ## 0.1.3 - 2026-06-26

@@ -12,8 +12,10 @@ const {
   normalizeSemanticScholarPaper,
   normalizeWebOfScienceRecord,
   parseEnabledSources,
+  paperMatchesSearchLogic,
   refinePaperPool,
   buildArxivQuery,
+  buildSearchExpression,
   buildTokenStats,
   enrichPapersWithCrossref,
   enrichPapersWithJournalMetrics,
@@ -3134,6 +3136,123 @@ test("classifies papers with multiple research tags", () => {
   ]);
   assert.equal(classified.category, "neural");
   assert.equal(classified.categoryLabel, "带有神经网络算法");
+});
+
+test("boolean search logic joins a connected AND component and an independent keyword with OR", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-search-logic-"));
+  const configFile = path.join(tempDir, "config.json");
+  try {
+    await writeUserConfig({
+      keywords: {
+        primary: [{ text: "SIM", enabled: true }, { text: "super-resolution", enabled: true }],
+        secondary: [{ text: "microscopy", enabled: true }, { text: "RIM", enabled: true }],
+        inspiration: []
+      },
+      sources: [],
+      searchLogic: {
+        activeKeywords: ["RIM"],
+        andEdges: [["SIM", "super-resolution"], ["super-resolution", "microscopy"]]
+      }
+    }, configFile);
+    const saved = (await readUserState({ configFile })).config.searchLogic;
+    assert.equal(buildSearchExpression(saved), "(SIM AND super-resolution AND microscopy) OR RIM");
+    assert.equal(paperMatchesSearchLogic({ title: "RIM reconstruction" }, saved), true);
+    assert.equal(paperMatchesSearchLogic({ title: "SIM super-resolution", tags: ["microscopy"] }, saved), true);
+    assert.equal(paperMatchesSearchLogic({ title: "SIM without all paired terms" }, saved), false);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("explicitly clear search logic survives user config round trip", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-clear-search-logic-"));
+  const configFile = path.join(tempDir, "config.json");
+  try {
+    await writeUserConfig({
+      keywords: { primary: [{ text: "SIM", enabled: true }], secondary: [], inspiration: [] },
+      sources: [],
+      searchLogic: { activeKeywords: [], andEdges: [] }
+    }, configFile);
+    const saved = (await readUserState({ configFile })).config.searchLogic;
+    assert.deepEqual(saved, { activeKeywords: [], andEdges: [] });
+    assert.equal(buildSearchExpression(saved), "");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("legacy user config activates enabled keywords but not disabled keywords", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-legacy-search-logic-"));
+  const configFile = path.join(tempDir, "config.json");
+  try {
+    await fs.writeFile(configFile, JSON.stringify({
+      keywords: {
+        primary: [{ text: "SIM", enabled: true }],
+        secondary: [{ text: "disabled RIM", enabled: false }],
+        inspiration: []
+      },
+      sources: []
+    }), "utf8");
+    const saved = (await readUserState({ configFile })).config.searchLogic;
+    assert.deepEqual(saved.activeKeywords, ["SIM"]);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("search logic removes active keywords and incident edges when keywords no longer exist", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-clean-search-logic-"));
+  const configFile = path.join(tempDir, "config.json");
+  try {
+    await writeUserConfig({
+      keywords: {
+        primary: [{ text: "SIM", enabled: true }],
+        secondary: [{ text: "RIM", enabled: true }],
+        inspiration: []
+      },
+      sources: [],
+      searchLogic: {
+        activeKeywords: ["SIM", "deleted keyword"],
+        andEdges: [["SIM", "deleted keyword"], ["SIM", "RIM"]]
+      }
+    }, configFile);
+    const saved = (await readUserState({ configFile })).config.searchLogic;
+    assert.deepEqual(saved, {
+      activeKeywords: ["SIM"],
+      andEdges: [["SIM", "RIM"]]
+    });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("search logic survives local data zip export and import", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-search-logic-zip-"));
+  const sourceDataDir = path.join(tempDir, "source-data");
+  const sourceConfigFile = path.join(tempDir, "source-user", "config.json");
+  const targetDataDir = path.join(tempDir, "target-data");
+  const targetConfigFile = path.join(tempDir, "target-user", "config.json");
+  try {
+    const searchLogic = {
+      activeKeywords: ["RIM"],
+      andEdges: [["SIM", "microscopy"]]
+    };
+    await writeUserConfig({
+      keywords: {
+        primary: [{ text: "SIM", enabled: true }],
+        secondary: [{ text: "microscopy", enabled: true }, { text: "RIM", enabled: true }],
+        inspiration: []
+      },
+      sources: [],
+      searchLogic
+    }, sourceConfigFile);
+    const zip = await exportLocalDataZip({ dataDir: sourceDataDir, userConfigFile: sourceConfigFile });
+    await importLocalDataZip(zip, { dataDir: targetDataDir, userConfigFile: targetConfigFile });
+    const saved = (await readUserState({ configFile: targetConfigFile })).config.searchLogic;
+    assert.deepEqual(saved, searchLogic);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("keeps user configuration separate from fetched paper data", async () => {

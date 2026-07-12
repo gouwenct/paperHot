@@ -45,7 +45,7 @@ Paper Hot 的主要目的只有两个：
 - 抓取日志和候选论文快照。
 - 追加式操作日志。
 - 收藏、待读、已读、标星和短标题。
-- 用户关键词、信源、研究背景和外部接口配置。
+- 用户关键词、Boolean 搜索逻辑、信源、研究背景和外部接口配置。
 - ZIP 格式的本地数据导入导出。
 
 ### 页面交互
@@ -112,7 +112,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 | `config/google-scholar.json` | SerpApi、Google Scholar、Google Search 配置 |
 | `config/web-of-science.json` | Web of Science API 配置 |
 | `config/journal-metrics.json` | EasyScholar 期刊指标查询配置 |
-| `data/user/config.json` | 关键词、信源开关和前端领域配置 |
+| `data/user/config.json` | 关键词、Boolean 搜索逻辑、信源开关和前端领域配置 |
 | `data/user/profile.json` | 用户资料、研究背景和语言偏好 |
 
 真实 `config/*.json` 和本地 `data/papers/*` 不应提交到公共仓库；公共仓库只保留 `.example.json` 模板。
@@ -212,11 +212,12 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 本地数据导入导出：
 
-- 导出默认包含本地论文库、收藏、待读、已读和标星。
+- 导出默认包含本地论文库、收藏、待读、已读和标星，以及 `data/user/config.json` 中的关键词、Boolean 搜索逻辑和信源开关。
 - 可以选择是否包含统计缓存、抓取日志、操作日志、用户资料、API Key。
 - 导出默认不包含 API Key。
 - 导入默认不覆盖本机 API Key。
 - 只有勾选“允许导入并覆盖本机 API Key”后，导入包里的接口配置才会写入本机。
+- 旧版用户配置或备份缺少 `searchLogic` 时，会把原有仍处于启用状态的关键词作为默认活动关键词，无需手动迁移。
 
 页面重点：
 
