@@ -25,6 +25,7 @@
     "journal": "source.sourceTitle",
     "year": "source.publishYear",
     "url": "links.record",
-    "authors": "names.authors"
+    "authors": "names.authors",
+    "citationCount": "citations"
   }
 }

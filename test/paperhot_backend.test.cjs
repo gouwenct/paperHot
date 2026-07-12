@@ -6,6 +6,7 @@ const os = require("node:os");
 
 const {
   classifyPaper,
+  dedupePapers,
   filterPapersByKeywords,
   normalizeArxivEntry,
   normalizeBioRxivItem,
@@ -25,8 +26,10 @@ const {
   fetchJournalMetrics,
   fetchGoogleScholarPapers,
   fetchGoogleSearchPapers,
+  fetchCrossrefWorkByTitle,
   fetchPaperPayload,
   fetchWebOfSciencePapers,
+  googleScholarCitationCount,
   readGoogleRollingCursorStatus,
   resetGoogleRollingCursors,
   fetchLast7DaysPapers,
@@ -59,6 +62,7 @@ const {
   writeIntegrationConfigs,
   writeUserConfig,
   writeUserProfile,
+  webOfScienceCitationCount,
   exportLocalData,
   exportLocalDataZip,
   importLocalDataZip,
@@ -200,6 +204,173 @@ test("normalizes Web of Science records into the frontend paper schema", () => {
   assert.deepEqual(paper.authors, ["A. Author", "B. Scientist"]);
   assert.ok(paper.tags.includes("Web of Science"));
   assert.match(paper.citation, /A\. Author, B\. Scientist \(2026\)\. Structured illumination microscopy reconstruction with diffusion priors\. Nature Methods\. doi:10\.1038\/s41592-026-00001-1/);
+});
+
+test("source normalizers preserve citation database and preprint stage", () => {
+  const wos = normalizeWebOfScienceRecord({
+    uid: "WOS:0001",
+    title: "STRUCTURED ILLUMINATION MICROSCOPY WITH DNA AND 3D SIM",
+    source: { sourceTitle: "Photonix", publishYear: 2026 },
+    names: { authors: [{ displayName: "A. Author" }] },
+    citations: [{ db: "WOS", count: 18 }]
+  });
+  assert.equal(wos.title, "STRUCTURED ILLUMINATION MICROSCOPY WITH DNA AND 3D SIM");
+  assert.equal(wos.retrievalSource, "webofscience");
+  assert.equal(wos.sourceId, "WOS:0001");
+  assert.equal(wos.citationCount, 18);
+  assert.equal(wos.citationSource, "Web of Science");
+  assert.equal(wos.published, "2026");
+  assert.equal(wos.publishedPrecision, "year");
+  assert.equal(wos.displayTitle, "Structured Illumination Microscopy With DNA And 3D SIM");
+
+  const uncitedWos = normalizeWebOfScienceRecord({
+    uid: "WOS:0002",
+    title: "uncited microscopy study",
+    citations: [{ db: "WOS", count: null }]
+  });
+  assert.equal(uncitedWos.citationCount, null);
+  assert.equal(uncitedWos.citationSource, "");
+
+  const preprint = normalizeBioRxivItem({
+    doi: "10.1101/2026.01.01.123456",
+    title: "A microscopy preprint",
+    authors: "A. Author; B. Author",
+    date: "2026-01-01",
+    category: "Bioengineering"
+  });
+  assert.equal(preprint.publicationStage, "preprint");
+  assert.equal(preprint.citationCount, null);
+  assert.equal(preprint.citationSource, "");
+});
+
+test("citation helpers distinguish blank values from real zero counts", () => {
+  const cases = [
+    { input: undefined, expected: null },
+    { input: null, expected: null },
+    { input: "", expected: null },
+    { input: "   ", expected: null },
+    { input: 0, expected: 0 },
+    { input: "18", expected: 18 }
+  ];
+
+  cases.forEach(({ input, expected }) => {
+    const citations = input === undefined ? [] : [{ db: "WOS", count: input }];
+    assert.equal(webOfScienceCitationCount({ citations }), expected);
+    assert.equal(googleScholarCitationCount(input === undefined ? {} : {
+      inline_links: { cited_by: { total: input } }
+    }), expected);
+  });
+});
+
+test("preprint and formal versions remain separate and related", () => {
+  const formal = normalizeWebOfScienceRecord({
+    uid: "WOS:FORMAL1",
+    title: "MixedCase microscopy version study",
+    source: { sourceTitle: "Nature Methods", publishYear: 2026 },
+    identifiers: { doi: "10.1038/formal-version" },
+    names: { authors: [{ displayName: "A. Author" }] }
+  });
+  const preprint = normalizeBioRxivItem({
+    doi: "10.1101/preprint-version",
+    title: "MixedCase microscopy version study",
+    authors: "A. Author",
+    date: "2025-12-01",
+    category: "Bioengineering"
+  });
+  const duplicate = {
+    ...formal,
+    id: "googlescholar-formal-version",
+    retrievalSource: "googlescholar",
+    sourceId: "google-formal-version",
+    citationCount: 9,
+    citationSource: "Google Scholar"
+  };
+
+  const papers = dedupePapers([duplicate, preprint, formal]);
+
+  assert.equal(papers.length, 2);
+  const keptFormal = papers.find(paper => paper.publicationStage === "formal");
+  const keptPreprint = papers.find(paper => paper.publicationStage === "preprint");
+  assert.equal(keptFormal.retrievalSource, "webofscience");
+  assert.equal(keptFormal.displayTitle, "MixedCase microscopy version study");
+  assert.deepEqual(keptFormal.relatedVersions, [keptPreprint.id]);
+  assert.deepEqual(keptPreprint.relatedVersions, [keptFormal.id]);
+});
+
+test("version links require stable identity or meaningful author overlap", () => {
+  const unrelated = dedupePapers([
+    {
+      id: "formal-editorial",
+      doi: "10.1000/formal-editorial",
+      publicationStage: "formal",
+      title: "Editorial",
+      authors: ["Alice Smith"]
+    },
+    {
+      id: "preprint-editorial",
+      doi: "10.1101/preprint-editorial",
+      publicationStage: "preprint",
+      title: "Editorial",
+      authors: ["Bob Jones"]
+    }
+  ]);
+  assert.deepEqual(unrelated.map(paper => paper.relatedVersions), [[], []]);
+
+  const sameSurname = dedupePapers([
+    {
+      id: "formal-same-surname",
+      doi: "10.1000/formal-same-surname",
+      publicationStage: "formal",
+      title: "Same surname microscopy study",
+      authors: ["Alice Smith"]
+    },
+    {
+      id: "preprint-same-surname",
+      doi: "10.1101/preprint-same-surname",
+      publicationStage: "preprint",
+      title: "Same surname microscopy study",
+      authors: ["Bob Smith"]
+    }
+  ]);
+  assert.deepEqual(sameSurname.map(paper => paper.relatedVersions), [[], []]);
+
+  const compatibleInitial = dedupePapers([
+    {
+      id: "formal-compatible-initial",
+      doi: "10.1000/formal-compatible-initial",
+      publicationStage: "formal",
+      title: "Compatible author initial study",
+      authors: ["A. Smith"]
+    },
+    {
+      id: "preprint-compatible-initial",
+      doi: "10.1101/preprint-compatible-initial",
+      publicationStage: "preprint",
+      title: "Compatible author initial study",
+      authors: ["Alice Smith"]
+    }
+  ]);
+  assert.deepEqual(compatibleInitial[0].relatedVersions, [compatibleInitial[1].id]);
+  assert.deepEqual(compatibleInitial[1].relatedVersions, [compatibleInitial[0].id]);
+
+  const stableIdentity = dedupePapers([
+    {
+      id: "formal-stable",
+      doi: "10.1000/shared-version",
+      publicationStage: "formal",
+      title: "Formal title",
+      authors: []
+    },
+    {
+      id: "preprint-stable",
+      doi: "10.1000/shared-version",
+      publicationStage: "preprint",
+      title: "Preprint title",
+      authors: []
+    }
+  ]);
+  assert.deepEqual(stableIdentity[0].relatedVersions, [stableIdentity[1].id]);
+  assert.deepEqual(stableIdentity[1].relatedVersions, [stableIdentity[0].id]);
 });
 
 test("filters papers by configured keywords", () => {
@@ -1734,27 +1905,47 @@ test("enriches missing DOI papers through Crossref before archiving", async () =
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
-test("Crossref year-only dates do not invent January first", async () => {
-  const [paper] = await enrichPapersWithCrossref([
-    {
-      title: "Structured illumination microscopy year-only Crossref date",
+test("Crossref date parts preserve year month and day precision", async () => {
+  const cases = [
+    { parts: [2025], expected: "2025", precision: "year", byDoi: false },
+    { parts: [2025, 7], expected: "2025-07", precision: "month", byDoi: true },
+    { parts: [2025, 7, 12], expected: "2025-07-12", precision: "day", byDoi: false }
+  ];
+
+  for (const [index, item] of cases.entries()) {
+    const title = `Structured illumination microscopy Crossref precision ${index}`;
+    const doi = `10.1364/crossref-precision-${index}`;
+    const crossrefItem = {
+      DOI: `https://doi.org/${doi.toUpperCase()}`,
+      title: [title],
+      "container-title": ["Optica"],
+      published: { "date-parts": [item.parts] },
+      author: [{ given: "A.", family: "Author" }]
+    };
+    const metadata = await fetchCrossrefWorkByTitle({
+      title,
+      doi: item.byDoi ? doi : ""
+    }, {
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => item.byDoi
+          ? { message: crossrefItem }
+          : { message: { items: [crossrefItem] } }
+      })
+    });
+    const [paper] = await enrichPapersWithCrossref([{
+      title,
       summary: "A structured illumination microscopy paper.",
       journal: "Optica",
-      published: "2025",
-      url: "https://example.test/year-only",
+      published: "",
       score: 90
-    }
-  ], {
-    fetcher: async () => ({
-      doi: "10.1364/year-only",
-      title: "Structured illumination microscopy year-only Crossref date",
-      journal: "Optica",
-      authors: ["A. Author"],
-      published: "2025"
-    })
-  });
+    }], { fetcher: async () => metadata });
 
-  assert.equal(paper.published, "2025");
+    assert.equal(metadata.doi, doi);
+    assert.equal(paper.published, item.expected);
+    assert.equal(paper.publishedPrecision, item.precision);
+  }
 });
 
 test("uses Nature article URLs to fetch DOI metadata for truncated Google titles", async () => {
@@ -2634,6 +2825,7 @@ test("fetches Google Scholar papers through a configured API source", async () =
               snippet: "A structured illumination microscopy method improves biological imaging.",
               doi: "10.1038/s41592-026-00002-2",
               publication_info: { summary: "A Author, B Author - Nature Methods, 2026 - nature.com" },
+              inline_links: { cited_by: { total: 27 } },
               link: "https://example.test/paper"
             }
           ],
@@ -2653,6 +2845,9 @@ test("fetches Google Scholar papers through a configured API source", async () =
   assert.equal(papers[0].journal, "Nature Methods");
   assert.deepEqual(papers[0].authors, ["A Author", "B Author"]);
   assert.equal(papers[0].published, "2026");
+  assert.equal(papers[0].retrievalSource, "googlescholar");
+  assert.equal(papers[0].citationCount, 27);
+  assert.equal(papers[0].citationSource, "Google Scholar");
   assert.match(papers[0].citation, /Structured illumination microscopy for live-cell imaging\. Nature Methods\. doi:10\.1038\/s41592-026-00002-2/);
   assert.equal(papers[1].source, "Google Scholar · Optica");
 });

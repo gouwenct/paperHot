@@ -195,7 +195,8 @@ const DEFAULT_WEB_OF_SCIENCE_CONFIG = {
     journal: "source.sourceTitle",
     year: "source.publishYear",
     url: "links.record",
-    authors: "names.authors"
+    authors: "names.authors",
+    citationCount: "citations"
   }
 };
 const DEFAULT_USER_CONFIG = {
@@ -473,6 +474,32 @@ function inferJournal(paper) {
   return source || "";
 }
 
+const DISPLAY_TITLE_ACRONYMS = new Map(
+  ["SIM", "RIM", "DNA", "RNA", "AI", "3D", "2D", "PSF", "OTF"].map(value => [value.toLowerCase(), value])
+);
+
+function formatDisplayTitle(value) {
+  const title = compactText(value);
+  const letters = title.replace(/[^a-z]/gi, "");
+  if (!letters || (title !== title.toUpperCase() && title !== title.toLowerCase())) return title;
+  return title.toLowerCase().replace(/[a-z0-9]+/g, word => (
+    DISPLAY_TITLE_ACRONYMS.get(word) || `${word[0].toUpperCase()}${word.slice(1)}`
+  ));
+}
+
+function datePrecision(value) {
+  const clean = compactText(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return "day";
+  if (/^\d{4}-\d{2}$/.test(clean)) return "month";
+  if (/^\d{4}$/.test(clean)) return "year";
+  return "unknown";
+}
+
+function normalizeCitationCount(value) {
+  const clean = value === null || value === undefined ? "" : compactText(String(value));
+  return clean && Number.isFinite(Number(clean)) ? Number(clean) : null;
+}
+
 function completePaperRecord(paper) {
   const doi = normalizeDoi(paper?.doi);
   const journal = inferJournal(paper);
@@ -489,6 +516,14 @@ function completePaperRecord(paper) {
     ...paper,
     doi,
     title,
+    retrievalSource: compactText(paper?.retrievalSource),
+    sourceId: compactText(paper?.sourceId || paper?.id),
+    displayTitle: compactText(paper?.displayTitle || formatDisplayTitle(title)),
+    publishedPrecision: compactText(paper?.publishedPrecision || datePrecision(paper?.published)),
+    publicationStage: compactText(paper?.publicationStage || "formal"),
+    citationCount: normalizeCitationCount(paper?.citationCount),
+    citationSource: compactText(paper?.citationSource),
+    relatedVersions: Array.isArray(paper?.relatedVersions) ? paper.relatedVersions.map(compactText).filter(Boolean) : [],
     summary: compactText(paper?.summary),
     abstractZh: compactText(paper?.abstractZh),
     llmSummary: compactText(paper?.llmSummary),
@@ -1901,8 +1936,11 @@ function normalizeArxivEntry(entry, keywords = DEFAULT_KEYWORDS) {
   const doi = normalizeDoi(entry.doi);
   const journal = "arXiv";
   const published = entry.published || entry.updated || "";
-  return {
+  return completePaperRecord({
     id: `arxiv-${idPart || Buffer.from(title).toString("base64url").slice(0, 16)}`,
+    retrievalSource: "arxiv",
+    sourceId: idPart,
+    publicationStage: "preprint",
     doi,
     journal,
     citation: formatCitation({ authors, year: paperYear(published), title, journal, doi }),
@@ -1923,7 +1961,7 @@ function normalizeArxivEntry(entry, keywords = DEFAULT_KEYWORDS) {
     url: entry.id || "",
     authors,
     published
-  };
+  });
 }
 
 function normalizeBioRxivItem(item, keywords = DEFAULT_KEYWORDS) {
@@ -1939,8 +1977,11 @@ function normalizeBioRxivItem(item, keywords = DEFAULT_KEYWORDS) {
     .map(author => author.trim())
     .filter(Boolean);
   const published = item.date || item.preprint_date || "";
-  return {
+  return completePaperRecord({
     id: `biorxiv-${doi || Buffer.from(title).toString("base64url").slice(0, 16)}`,
+    retrievalSource: "biorxiv",
+    sourceId: doi,
+    publicationStage: "preprint",
     doi,
     journal,
     citation: formatCitation({ authors, year: paperYear(published), title, journal, doi }),
@@ -1961,7 +2002,7 @@ function normalizeBioRxivItem(item, keywords = DEFAULT_KEYWORDS) {
     url: doi.startsWith("10.") ? `https://www.biorxiv.org/content/${doi}v1` : "",
     authors,
     published
-  };
+  });
 }
 
 function parseEnabledSources(sourceNames) {
@@ -2046,8 +2087,10 @@ function normalizeSemanticScholarPaper(item, keywords = DEFAULT_KEYWORDS) {
   const published = item.publicationDate || (item.year ? String(item.year) : "");
   const doi = normalizeDoi(item.externalIds?.DOI || item.externalIds?.doi || item.doi);
   const journal = venue;
-  return {
+  return completePaperRecord({
     id: `semanticscholar-${compactText(item.paperId || title)}`,
+    retrievalSource: "semanticscholar",
+    sourceId: compactText(item.paperId),
     doi,
     journal,
     citation: formatCitation({ authors, year: paperYear(published), title, journal, doi }),
@@ -2071,7 +2114,7 @@ function normalizeSemanticScholarPaper(item, keywords = DEFAULT_KEYWORDS) {
     pdfUrl: item.openAccessPdf?.url || "",
     authors,
     published
-  };
+  });
 }
 
 function isRobotChallengeText(text) {
@@ -2346,6 +2389,13 @@ function webOfSciencePublishedDate(record, responseMap = DEFAULT_WEB_OF_SCIENCE_
   return /^(19|20)\d{2}$/.test(year) ? year : "";
 }
 
+function webOfScienceCitationCount(record, responseMap = DEFAULT_WEB_OF_SCIENCE_CONFIG.responseMap) {
+  const citations = getNestedValue(record, responseMap.citationCount) || record?.citations;
+  if (!Array.isArray(citations)) return null;
+  const citation = citations.find(item => /^(wos|web of science)$/i.test(compactText(item?.db || item?.database)));
+  return normalizeCitationCount(citation?.count);
+}
+
 function normalizeWebOfScienceRecord(record, keywords = DEFAULT_KEYWORDS, responseMap = DEFAULT_WEB_OF_SCIENCE_CONFIG.responseMap) {
   const title = compactText(getNestedValue(record, responseMap.title) || record?.title);
   const summary = compactText(getNestedValue(record, responseMap.summary) || record?.abstract || record?.summary);
@@ -2361,8 +2411,13 @@ function normalizeWebOfScienceRecord(record, keywords = DEFAULT_KEYWORDS, respon
   const text = `${title} ${summary} ${journal} ${keywordTags.join(" ")}`;
   const classified = classifyPaper(text);
   const uid = compactText(record?.uid || record?.id || record?.UT || "");
-  return {
+  const citationCount = webOfScienceCitationCount(record, responseMap);
+  return completePaperRecord({
     id: `webofscience-${doi || uid.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || hashText(`${title}|${journal}`)}`,
+    retrievalSource: "webofscience",
+    sourceId: uid,
+    citationCount,
+    citationSource: citationCount === null ? "" : "Web of Science",
     doi,
     journal,
     citation: formatCitation({ authors, year: paperYear(published), title, journal, doi }),
@@ -2383,7 +2438,7 @@ function normalizeWebOfScienceRecord(record, keywords = DEFAULT_KEYWORDS, respon
     url,
     authors,
     published
-  };
+  });
 }
 
 function normalizeScholarAuthors(value) {
@@ -2437,6 +2492,10 @@ function scholarPublishedDate(item, year) {
   return year && /^\d{4}$/.test(year) ? year : year;
 }
 
+function googleScholarCitationCount(item) {
+  return normalizeCitationCount(item?.inline_links?.cited_by?.total);
+}
+
 function normalizeGoogleScholarPaper(item, keywords = DEFAULT_KEYWORDS, responseMap = DEFAULT_GOOGLE_SCHOLAR_CONFIG.responseMap) {
   const title = compactText(getNestedValue(item, responseMap.title) || item.title);
   const summary = compactText(getNestedValue(item, responseMap.summary) || item.snippet || item.summary);
@@ -2452,8 +2511,13 @@ function normalizeGoogleScholarPaper(item, keywords = DEFAULT_KEYWORDS, response
   const authorList = authors.length ? authors : parsedPublication.authors;
   const text = `${title} ${summary} ${journal}`;
   const classified = classifyPaper(text);
-  return {
+  const citationCount = googleScholarCitationCount(item);
+  return completePaperRecord({
     id: `googlescholar-${doi || Buffer.from(title).toString("base64url").slice(0, 16)}`,
+    retrievalSource: "googlescholar",
+    sourceId: compactText(item?.result_id || item?.id || item?.cluster_id),
+    citationCount,
+    citationSource: citationCount === null ? "" : "Google Scholar",
     doi,
     journal,
     citation: formatCitation({ authors: authorList, year: paperYear(published), title, journal, doi }),
@@ -2474,7 +2538,7 @@ function normalizeGoogleScholarPaper(item, keywords = DEFAULT_KEYWORDS, response
     url: getNestedValue(item, responseMap.url) || item.link || item.url || "",
     authors: authorList,
     published
-  };
+  });
 }
 
 function hostnameFromUrl(value) {
@@ -2503,8 +2567,10 @@ function normalizeGoogleSearchPaper(item, keywords = DEFAULT_KEYWORDS, responseM
   const doi = normalizeDoi(getNestedValue(item, responseMap.doi) || item.doi);
   const text = `${title} ${summary} ${journal}`;
   const classified = classifyPaper(text);
-  return {
+  return completePaperRecord({
     id: `googlesearch-${doi || hashText(`${url}|${title}`)}`,
+    retrievalSource: "googlesearch",
+    sourceId: compactText(item?.result_id || item?.id),
     doi,
     journal,
     citation: formatCitation({ year: paperYear(published), title, journal, doi }),
@@ -2525,7 +2591,7 @@ function normalizeGoogleSearchPaper(item, keywords = DEFAULT_KEYWORDS, responseM
     url,
     authors: [],
     published
-  };
+  });
 }
 
 function cleanHtmlTitle(value) {
@@ -2606,8 +2672,7 @@ function crossrefTitleMatches(sourceTitle, metadataTitle) {
 function crossrefDate(parts) {
   const values = Array.isArray(parts?.["date-parts"]?.[0]) ? parts["date-parts"][0] : [];
   if (!values.length) return "";
-  const [year, month = 1, day = 1] = values;
-  return [year, month, day]
+  return values.slice(0, 3)
     .map((value, index) => index === 0 ? String(value).padStart(4, "0") : String(value).padStart(2, "0"))
     .join("-");
 }
@@ -2698,6 +2763,7 @@ function applyCrossrefMetadata(paper, metadata, options = {}) {
     source,
     authors,
     published,
+    publishedPrecision: datePrecision(published),
     citation: formatCitation({
       authors: Array.isArray(authors) ? authors : [],
       year: paperYear(published),
@@ -3120,14 +3186,100 @@ async function fetchSemanticScholarPapers(keywords = DEFAULT_KEYWORDS, options =
   });
 }
 
-function dedupePapers(papers) {
-  const seen = new Set();
-  return papers.filter(paper => {
-    const key = paper.id || `${paper.title}-${paper.source}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+const SOURCE_PRIORITY = { webofscience: 4, googlescholar: 3, arxiv: 2, biorxiv: 2 };
+
+function hasSameStableIdentity(left, right) {
+  const leftDoi = normalizeDoi(left?.doi);
+  const rightDoi = normalizeDoi(right?.doi);
+  if (leftDoi && rightDoi && leftDoi === rightDoi) return true;
+  const leftSourceId = compactText(left?.sourceId).toLowerCase();
+  const rightSourceId = compactText(right?.sourceId).toLowerCase();
+  return Boolean(leftSourceId && rightSourceId && leftSourceId === rightSourceId);
+}
+
+function samePaperVersion(left, right) {
+  if (hasSameStableIdentity(left, right)) return true;
+  const leftTitle = compactText(left?.title).toLowerCase();
+  return Boolean(leftTitle && leftTitle === compactText(right?.title).toLowerCase());
+}
+
+function isFormalPreprintPair(left, right) {
+  return left.publicationStage !== right.publicationStage
+    && [left.publicationStage, right.publicationStage].includes("preprint");
+}
+
+function authorIdentities(authors) {
+  return (Array.isArray(authors) ? authors : []).map(author => {
+    const tokens = compactText(author).toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+    if (!tokens.length) return null;
+    return {
+      fullName: tokens.join(""),
+      familyName: tokens.length > 1 ? tokens.at(-1) : "",
+      givenInitial: tokens.length > 1 ? tokens[0][0] : ""
+    };
+  }).filter(Boolean);
+}
+
+function hasMeaningfulAuthorOverlap(leftAuthors, rightAuthors) {
+  return authorIdentities(leftAuthors).some(left => authorIdentities(rightAuthors).some(right => (
+    left.fullName === right.fullName
+    || Boolean(
+      left.familyName
+      && left.familyName === right.familyName
+      && left.givenInitial
+      && left.givenInitial === right.givenInitial
+    )
+  )));
+}
+
+function shouldLinkRelatedVersions(left, right) {
+  if (!isFormalPreprintPair(left, right)) return false;
+  if (hasSameStableIdentity(left, right)) return true;
+  const leftTitle = compactText(left?.title).toLowerCase();
+  if (!leftTitle || leftTitle !== compactText(right?.title).toLowerCase()) return false;
+  return hasMeaningfulAuthorOverlap(left?.authors, right?.authors);
+}
+
+function mergeMissingPaperFields(preferred, fallback) {
+  const merged = { ...preferred };
+  Object.entries(fallback).forEach(([key, value]) => {
+    const current = merged[key];
+    if (current === undefined || current === null || current === "" || (Array.isArray(current) && !current.length)) {
+      merged[key] = value;
+    }
   });
+  return completePaperRecord(merged);
+}
+
+function linkRelatedVersions(left, right) {
+  left.relatedVersions = Array.from(new Set([...(left.relatedVersions || []), right.id].filter(Boolean)));
+  right.relatedVersions = Array.from(new Set([...(right.relatedVersions || []), left.id].filter(Boolean)));
+}
+
+function dedupePapers(papers) {
+  const deduped = [];
+  papers.map(completePaperRecord).forEach(paper => {
+    const duplicateIndex = deduped.findIndex(existing => (
+      existing.publicationStage === paper.publicationStage && samePaperVersion(existing, paper)
+    ));
+    if (duplicateIndex < 0) {
+      deduped.push(paper);
+      return;
+    }
+    const existing = deduped[duplicateIndex];
+    const paperHasPriority = (SOURCE_PRIORITY[paper.retrievalSource] || 0) > (SOURCE_PRIORITY[existing.retrievalSource] || 0);
+    deduped[duplicateIndex] = paperHasPriority
+      ? mergeMissingPaperFields(paper, existing)
+      : mergeMissingPaperFields(existing, paper);
+  });
+
+  // ponytail: batches are small; index exact identities if quadratic version linking becomes measurable.
+  deduped.forEach((paper, index) => {
+    deduped.slice(index + 1).forEach(other => {
+      if (shouldLinkRelatedVersions(paper, other)) linkRelatedVersions(paper, other);
+    });
+  });
+  return deduped;
 }
 
 function refinePaperPool(papers, keywords) {
@@ -4950,6 +5102,7 @@ module.exports = {
   DEFAULT_KEYWORDS,
   addCandidatePaperToArchive,
   removeCandidatePaperFromArchive,
+  dedupePapers,
   dedupePaperArchive,
   buildTokenStats,
   buildArxivQuery,
@@ -4975,6 +5128,7 @@ module.exports = {
   fetchSemanticScholarPapers,
   fetchTodayPapers,
   fetchWebOfSciencePapers,
+  googleScholarCitationCount,
   inferPaperShortTitle,
   importLocalData,
   importLocalDataZip,
@@ -5018,7 +5172,8 @@ module.exports = {
   updatePaperNote,
   writeIntegrationConfigs,
   writeUserConfig,
-  writeUserProfile
+  writeUserProfile,
+  webOfScienceCitationCount
 };
 
 

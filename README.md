@@ -32,7 +32,7 @@ Paper Hot 的主要目的只有两个：
 
 ### 论文处理
 
-- 论文字段归一化：标题、作者、摘要、DOI、URL、期刊、日期、来源。
+- 论文字段归一化：保留信源原始标题，并统一显示标题、作者、摘要、DOI、URL、期刊、日期精度、来源、引用数和正式版/预印本关系。
 - 关键词过滤和领域过滤。
 - 日期范围筛选。
 - LLM 摘要翻译和推荐理由生成。
@@ -269,7 +269,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 1. 读取用户配置：关键词、信源、日期范围、LLM、SerpApi、Web of Science、EasyScholar。
 2. 多来源检索：Google Scholar、Google Search、Web of Science、arXiv、bioRxiv、Semantic Scholar。
-3. 候选归一化：统一标题、摘要、作者、DOI、URL、来源、日期等字段。
+3. 候选归一化：保留信源原始标题，统一显示标题、摘要、作者、DOI、URL、来源、日期精度和引用数据库；同版本精确重复按信源优先级保留，正式版与预印本分别保留并互相关联。
 4. 关键词和领域过滤：用字符串规则和领域上下文过滤候选。
 5. 日期筛选：按前端选择范围筛选；不伪造 `YYYY-01-01` 作为真实日期。
 6. 初步排序：用本地规则控制进入后续富集的候选数量。
@@ -347,6 +347,7 @@ flowchart TD
 | `docs/paperhot-ingestion-flow.html` | 从页面抓取按钮到归档、日志和富集流程的可视化说明 |
 | `docs/superpowers/specs/2026-07-11-recent-paper-discovery-design.md` | 已确认的近期论文发现、多信源检索、断点恢复和今日论文页面设计 |
 | `docs/superpowers/plans/2026-07-11-recent-paper-discovery.md` | 近期论文发现功能的分步实现、测试和验证计划 |
+| `.superpowers/sdd/task-2-report.md` | Task 2 多信源元数据与正式版/预印本关联的实现、TDD 和验证报告 |
 
 ### 主要数据文件
 

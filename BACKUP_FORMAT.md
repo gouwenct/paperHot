@@ -51,6 +51,8 @@ data/papers/paper-notes.json
 
 `data/user/config.json` 可包含 `searchLogic.activeKeywords` 和 `searchLogic.andEdges`，用于跨设备保留关键词的 OR / AND 组合。旧备份缺少 `searchLogic` 时，导入后会把仍处于启用状态的关键词作为默认活动关键词，因此该兼容扩展继续使用格式版本 `1`。
 
+`data/papers/archive.json` 的论文记录可选包含 `displayTitle`、`publishedPrecision`、`publicationStage`、`retrievalSource`、`sourceId`、`citationCount`、`citationSource` 和 `relatedVersions`。这些字段用于保留信源、引用数据库和正式版/预印本关系；旧备份缺少时由读取流程补默认值，因此备份格式仍为版本 `1`，无需迁移。
+
 勾选“包含用户资料和研究背景”时额外包含：
 
 ```text
