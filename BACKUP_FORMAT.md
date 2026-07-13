@@ -84,7 +84,7 @@ data/papers/fetch-log.json
 data/papers/operation-log.jsonl
 ```
 
-近期抓取断点 `data/papers/recent-fetch-cursors.json` 是只对当前设备和完全相同任务有效的短期运行态，不进入默认或任何可选导出。`data/papers/web-of-science-usage.json` 只保存 PaperHot 本地聚合请求次数和最后状态，不保存请求 URL、Header 或 API Key；当前导出实现尚未把它加入 v1 ZIP 文件清单，因此本次持久化不改变格式版本。
+近期抓取断点 `data/papers/recent-fetch-cursors.json` 是只对当前设备和完全相同任务有效的短期运行态。Google、WoS、arXiv 等每个启用信源只保存 `nextPage` 和 `complete`；恢复时跳过已完成信源，从未完成信源的 `nextPage` 继续，全部启用信源完成后删除该任务。Google 的近期抓取和指定论文检索不与旧 `google-rolling-cursors.json` 同步。该文件不进入默认或任何可选导出。`data/papers/web-of-science-usage.json` 只保存 PaperHot 本地聚合请求次数和最后状态，不保存请求 URL、Header 或 API Key；当前导出实现尚未把它加入 v1 ZIP 文件清单，因此本次持久化不改变格式版本。
 
 ## Import Behavior
 

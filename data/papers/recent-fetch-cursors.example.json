@@ -1,3 +1,29 @@
 {
-  "tasks": {}
+  "tasks": {
+    "example-fingerprint": {
+      "query": "SIM OR RIM",
+      "startDate": "2026-01-01",
+      "endDate": "2026-01-31",
+      "sources": [
+        "arxiv",
+        "googlescholar",
+        "webofscience"
+      ],
+      "sourcePages": {
+        "arxiv": {
+          "nextPage": 3,
+          "complete": true
+        },
+        "googlescholar": {
+          "nextPage": 2,
+          "complete": false
+        },
+        "webofscience": {
+          "nextPage": 5,
+          "complete": false
+        }
+      },
+      "updatedAt": "2026-01-31T00:00:00.000Z"
+    }
+  }
 }

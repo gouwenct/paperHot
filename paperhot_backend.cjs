@@ -453,6 +453,17 @@ function normalizeDoi(value) {
     .toLowerCase();
 }
 
+function detectExactPaperInput(value) {
+  const clean = compactText(value);
+  const doi = normalizeDoi(clean);
+  if (/^10\.\d{4,9}\/\S+$/i.test(doi)) return { type: "doi", value: doi };
+  if (/^WOS:\d+$/i.test(clean)) return { type: "wos-ut", value: clean.toUpperCase() };
+  const arxiv = clean.match(/(?:^arXiv:|arxiv\.org\/abs\/)(\d{4}\.\d{4,5}(?:v\d+)?)/i);
+  if (arxiv) return { type: "arxiv", value: arxiv[1] };
+  if (/^https?:\/\//i.test(clean)) return { type: "url", value: clean };
+  return { type: "title", value: clean };
+}
+
 function paperYear(published) {
   const match = String(published || "").match(/^(\d{4})/);
   return match ? match[1] : "n.d.";
@@ -976,11 +987,12 @@ function buildSearchExpression(searchLogic = {}) {
 }
 
 function paperMatchesSearchLogic(paper, searchLogic) {
-  const text = `${paper.title || ""} ${paper.summary || ""} ${(paper.tags || []).join(" ")}`.toLowerCase();
+  const text = `${paper.title || ""} ${paper.summary || ""} ${(paper.tags || []).join(" ")}`;
+  const matches = keyword => keywordMatches(text, [keyword]).length > 0;
   const connected = new Set((searchLogic.andEdges || []).flat());
   const groups = searchLogicGroups(searchLogic);
-  if (groups.some(group => group.every(keyword => text.includes(keyword.toLowerCase())))) return true;
-  return (searchLogic.activeKeywords || []).some(keyword => !connected.has(keyword) && text.includes(keyword.toLowerCase()));
+  if (groups.some(group => group.every(matches))) return true;
+  return (searchLogic.activeKeywords || []).some(keyword => !connected.has(keyword) && matches(keyword));
 }
 
 function cleanSourceConfig(value) {
@@ -1596,34 +1608,64 @@ async function readRecentFetchCursors(dataDir = DATA_DIR) {
   return data && data.tasks && typeof data.tasks === "object" ? data : { tasks: {} };
 }
 
+// ponytail: serialized only within this process; use an atomic datastore if multi-process refreshes are introduced.
+const recentFetchCursorWriteQueues = new Map();
+
+function queueRecentFetchCursorUpdate(dataDir, operation) {
+  const key = path.resolve(dataDir, RECENT_FETCH_CURSORS_NAME);
+  const update = (recentFetchCursorWriteQueues.get(key) || Promise.resolve())
+    .catch(() => {})
+    .then(operation);
+  recentFetchCursorWriteQueues.set(key, update);
+  update.then(() => {
+    if (recentFetchCursorWriteQueues.get(key) === update) recentFetchCursorWriteQueues.delete(key);
+  }, () => {
+    if (recentFetchCursorWriteQueues.get(key) === update) recentFetchCursorWriteQueues.delete(key);
+  });
+  return update;
+}
+
 async function writeRecentFetchCursor(task = {}, dataDir = DATA_DIR) {
   const identity = discoveryTaskIdentity(task);
   const fingerprint = buildDiscoveryTaskFingerprint(task);
-  const sourcePages = {};
+  const incomingSourcePages = {};
   Object.entries(task.sourcePages || {}).sort(([left], [right]) => left.localeCompare(right)).forEach(([source, progress]) => {
     const normalizedSource = compactText(source).toLowerCase();
     if (!identity.sources.includes(normalizedSource)) return;
     const nextPage = Number(progress?.nextPage ?? progress);
-    if (Number.isFinite(nextPage) && nextPage > 0) sourcePages[normalizedSource] = { nextPage: Math.floor(nextPage) };
+    if (Number.isFinite(nextPage) && nextPage > 0) {
+      incomingSourcePages[normalizedSource] = {
+        nextPage: Math.floor(nextPage),
+        complete: progress?.complete === true
+      };
+    }
   });
-  const data = await readRecentFetchCursors(dataDir);
-  data.tasks[fingerprint] = {
-    query: compactText(task.queryExpression),
-    startDate: identity.startDate,
-    endDate: identity.endDate,
-    sources: identity.sources,
-    sourcePages,
-    updatedAt: new Date().toISOString()
-  };
-  await writeJsonFile(path.join(dataDir, RECENT_FETCH_CURSORS_NAME), data);
-  return { fingerprint, ...data.tasks[fingerprint] };
+  return queueRecentFetchCursorUpdate(dataDir, async () => {
+    const data = await readRecentFetchCursors(dataDir);
+    const previousSourcePages = data.tasks[fingerprint]?.sourcePages || {};
+    const sourcePages = Object.fromEntries(Object.entries({ ...previousSourcePages, ...incomingSourcePages })
+      .filter(([source]) => identity.sources.includes(source)));
+    data.tasks[fingerprint] = {
+      query: compactText(task.queryExpression),
+      startDate: identity.startDate,
+      endDate: identity.endDate,
+      sources: identity.sources,
+      sourcePages,
+      updatedAt: new Date().toISOString()
+    };
+    await writeJsonFile(path.join(dataDir, RECENT_FETCH_CURSORS_NAME), data);
+    return { fingerprint, ...data.tasks[fingerprint] };
+  });
 }
 
 async function clearRecentFetchCursor(fingerprint, dataDir = DATA_DIR) {
-  const data = await readRecentFetchCursors(dataDir);
-  delete data.tasks[compactText(fingerprint)];
-  await writeJsonFile(path.join(dataDir, RECENT_FETCH_CURSORS_NAME), data);
-  return data;
+  const cleanFingerprint = compactText(fingerprint);
+  return queueRecentFetchCursorUpdate(dataDir, async () => {
+    const data = await readRecentFetchCursors(dataDir);
+    delete data.tasks[cleanFingerprint];
+    await writeJsonFile(path.join(dataDir, RECENT_FETCH_CURSORS_NAME), data);
+    return data;
+  });
 }
 
 async function readWebOfScienceUsage(dataDir = DATA_DIR, now = new Date()) {
@@ -2131,7 +2173,21 @@ function parseEnabledSources(sourceNames) {
   return Array.from(new Set(sources));
 }
 
-function buildArxivQuery(keywords) {
+function arxivQueryTerm(keyword) {
+  const expanded = ACRONYM_EXPANSIONS[compactText(keyword).toLowerCase()] || compactText(keyword);
+  return `all:"${expanded.replace(/"/g, "")}"`;
+}
+
+function buildArxivQuery(keywords, searchLogic) {
+  if (searchLogic && typeof searchLogic === "object") {
+    const connected = new Set((searchLogic.andEdges || []).flat());
+    const clauses = searchLogicGroups(searchLogic)
+      .map(group => `(${group.map(arxivQueryTerm).join(" AND ")})`);
+    for (const keyword of searchLogic.activeKeywords || []) {
+      if (!connected.has(keyword)) clauses.push(arxivQueryTerm(keyword));
+    }
+    if (clauses.length) return clauses.join(" OR ");
+  }
   const clean = cleanKeywords(keywords)
     .map(keyword => ACRONYM_EXPANSIONS[keyword.toLowerCase()] || keyword)
     .slice(0, 8);
@@ -2140,15 +2196,6 @@ function buildArxivQuery(keywords) {
     return /\s/.test(escaped) ? `all:"${escaped}"` : `all:${escaped}`;
   });
   return terms.length ? terms.join(" OR ") : "all:microscopy";
-}
-
-async function fetchText(url) {
-  const response = await fetch(url, {
-    headers: { "User-Agent": "paperHOT/0.1 (local research prototype)" },
-    signal: AbortSignal.timeout(20000)
-  });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  return response.text();
 }
 
 async function fetchJson(url) {
@@ -2161,23 +2208,56 @@ async function fetchJson(url) {
 }
 
 async function fetchArxivPapers(keywords = DEFAULT_KEYWORDS, options = {}) {
-  const params = new URLSearchParams({
-    search_query: buildArxivQuery(keywords),
-    start: "0",
-    max_results: String(options.maxResults || 50),
-    sortBy: "submittedDate",
-    sortOrder: "descending"
-  });
-  const xml = await fetchText(`${ARXIV_ENDPOINT}?${params.toString()}`);
-  return parseArxivEntries(xml).map(entry => normalizeArxivEntry(entry, keywords));
+  const fetchImpl = options.fetchImpl || fetch;
+  const pageSize = clampPositiveInteger(options.pageSize || options.maxResults, 50, 1, 2000);
+  const maxPages = clampPositiveInteger(options.maxPages, 5, 1, 100);
+  const firstPage = clampPositiveInteger(options.startPage, 1, 1, 1000000);
+  const entries = [];
+  for (let page = firstPage; page < firstPage + maxPages; page += 1) {
+    const params = new URLSearchParams({
+      search_query: buildArxivQuery(keywords, options.searchLogic),
+      start: String((page - 1) * pageSize),
+      max_results: String(pageSize),
+      sortBy: "submittedDate",
+      sortOrder: "descending"
+    });
+    if (options.arxivId) {
+      params.delete("search_query");
+      params.set("id_list", compactText(options.arxivId));
+    }
+    const response = await fetchImpl(`${ARXIV_ENDPOINT}?${params.toString()}`, {
+      headers: { "User-Agent": "paperHOT/0.1 (local research prototype)" },
+      signal: AbortSignal.timeout(20000)
+    });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText || ""}`.trim());
+    const pageEntries = parseArxivEntries(await response.text());
+    entries.push(...pageEntries);
+    const oldPage = Boolean(options.startDate)
+      && pageEntries.length === pageSize
+      && pageEntries.every(entry => dateString(entry.published || entry.updated) < options.startDate);
+    const complete = pageEntries.length < pageSize || oldPage || Boolean(options.arxivId);
+    await options.onPageComplete?.({ page, nextPage: page + 1, returned: pageEntries.length, complete });
+    if (complete) break;
+  }
+  return entries.map(entry => normalizeArxivEntry(entry, keywords));
 }
 
 async function fetchBioRxivPapers(date, keywords = DEFAULT_KEYWORDS, options = {}) {
   const startDate = options.startDate || date;
   const endDate = options.endDate || date;
-  const data = await fetchJson(`${BIORXIV_ENDPOINT}/${startDate}/${endDate}/0/json`);
+  const fetchImpl = options.fetchImpl || fetch;
+  const response = await fetchImpl(`${BIORXIV_ENDPOINT}/${startDate}/${endDate}/0/json`, {
+    headers: { "User-Agent": "paperHOT/0.1 (local research prototype)" },
+    signal: AbortSignal.timeout(20000)
+  });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText || ""}`.trim());
+  const data = await response.json();
   const items = Array.isArray(data.collection) ? data.collection : [];
-  return filterPapersByKeywords(items.map(item => normalizeBioRxivItem(item, keywords)), keywords);
+  const papers = items.map(item => normalizeBioRxivItem(item, keywords));
+  if (options.searchMode === "exact") return papers;
+  return options.searchLogic
+    ? papers.filter(paper => paperMatchesSearchLogic(paper, options.searchLogic))
+    : filterPapersByKeywords(papers, keywords);
 }
 
 function buildSemanticScholarQuery(keywords = DEFAULT_KEYWORDS) {
@@ -2390,7 +2470,7 @@ function emitSerpApiPageProgress(onProgress, { sourceLabel, pageStart, pageSize,
   });
 }
 
-async function fetchSerpApiPages(url, { request, headers, fetchImpl, sourceLabel, maxPages = 50, start = 0, num = 10, onProgress, skipBlockedPages = false }) {
+async function fetchSerpApiPages(url, { request, headers, fetchImpl, sourceLabel, maxPages = 50, start = 0, num = 10, onProgress, onPageComplete, skipBlockedPages = false }) {
   const pages = [];
   const skippedPages = [];
   const seenUrls = new Set();
@@ -2402,7 +2482,7 @@ async function fetchSerpApiPages(url, { request, headers, fetchImpl, sourceLabel
   let lastStart = serpApiStartValue(start, 0);
   let attemptedPages = 0;
   if (lastStart > 0) currentUrl.searchParams.set("start", String(lastStart));
-  const skipCurrentPage = message => {
+  const skipCurrentPage = async message => {
     if (!skipBlockedPages) return false;
     skippedPages.push({ start: lastStart, num: pageSize, itemStart: lastStart + 1, itemEnd: lastStart + pageSize, message });
     emitSerpApiPageProgress(onProgress, {
@@ -2415,6 +2495,8 @@ async function fetchSerpApiPages(url, { request, headers, fetchImpl, sourceLabel
       message
     });
     currentUrl.searchParams.set("start", String(lastStart + pageSize));
+    const page = Math.floor(lastStart / pageSize) + 1;
+    await onPageComplete?.({ page, nextPage: page + 1, returned: 0, complete: false });
     return true;
   };
   while (currentUrl && attemptedPages < maxPages) {
@@ -2439,7 +2521,7 @@ async function fetchSerpApiPages(url, { request, headers, fetchImpl, sourceLabel
     const text = await response.text();
     if (!response.ok || response.status === 403 || response.status === 429) {
       const message = `${sourceLabel} 信源失败：HTTP ${response.status}`;
-      if ((response.status === 403 || response.status === 429) && skipCurrentPage(message)) continue;
+      if ((response.status === 403 || response.status === 429) && await skipCurrentPage(message)) continue;
       throw new Error(message);
     }
 
@@ -2449,14 +2531,14 @@ async function fetchSerpApiPages(url, { request, headers, fetchImpl, sourceLabel
     } catch {
       if (isRobotChallengeText(text)) {
         const message = `${sourceLabel} 机器人访问/反爬挑战：请使用 SerpApi 等合规 JSON API`;
-        if (skipCurrentPage(message)) continue;
+        if (await skipCurrentPage(message)) continue;
         throw new Error(message);
       }
       throw new Error(`${sourceLabel} 信源返回的不是 JSON；请使用 SerpApi / 合规代理端点`);
     }
     if (isRobotChallengePayload(payload)) {
       const message = `${sourceLabel} 机器人访问/反爬挑战：API 返回了验证或限流提示`;
-      if (skipCurrentPage(message)) continue;
+      if (await skipCurrentPage(message)) continue;
       throw new Error(message);
     }
     pages.push(payload);
@@ -2473,6 +2555,13 @@ async function fetchSerpApiPages(url, { request, headers, fetchImpl, sourceLabel
         currentUrl.searchParams.set("num", resultCountValue);
       }
     }
+    const page = Math.floor(lastStart / pageSize) + 1;
+    const nextStart = nextSerpApiStart(currentUrl, lastStart, pageSize);
+    await onPageComplete?.({
+      page,
+      nextPage: Math.floor(nextStart / pageSize) + 1,
+      complete: !currentUrl
+    });
   }
   return {
     pages,
@@ -3087,8 +3176,14 @@ async function fetchGoogleScholarPapers(keywords = DEFAULT_KEYWORDS, options = {
 
   const request = config.request || {};
   const url = new URL(config.endpoint);
-  url.searchParams.set(request.queryName || "q", buildSemanticScholarQuery(keywords));
+  url.searchParams.set(request.queryName || "q", options.queryExpression || buildSemanticScholarQuery(keywords));
   url.searchParams.set("num", String(config.num || DEFAULT_GOOGLE_SCHOLAR_CONFIG.num));
+  if (options.searchMode !== "exact" && /^\d{4}/.test(options.startDate || "")) {
+    url.searchParams.set("as_ylo", options.startDate.slice(0, 4));
+  }
+  if (options.searchMode !== "exact" && /^\d{4}/.test(options.endDate || "")) {
+    url.searchParams.set("as_yhi", options.endDate.slice(0, 4));
+  }
   if (request.apiKeyQueryName && config.apiKey) {
     url.searchParams.set(request.apiKeyQueryName, config.apiKey);
   }
@@ -3100,14 +3195,12 @@ async function fetchGoogleScholarPapers(keywords = DEFAULT_KEYWORDS, options = {
   const fetchImpl = options.fetchImpl || fetch;
   const num = Number(config.num || DEFAULT_GOOGLE_SCHOLAR_CONFIG.num);
   const maxPages = options.maxPages || config.maxPages || DEFAULT_GOOGLE_SCHOLAR_CONFIG.maxPages;
+  const discoveryCursorMode = options.searchMode === "exact" || typeof options.onPageComplete === "function";
   const cursorKey = googleRollingCursorKey({ sourceLabel: "Google Scholar", keywords, config, num });
-  const rollingStart = await readGoogleRollingStart({
-    dataDir: options.dataDir || DATA_DIR,
-    config,
-    key: cursorKey
-  });
   const manualStart = googleManualStart(options);
-  const start = manualStart === null ? rollingStart : manualStart;
+  const start = discoveryCursorMode
+    ? (clampPositiveInteger(options.startPage, 1, 1, 1000000) - 1) * num
+    : (manualStart === null ? await readGoogleRollingStart({ dataDir: options.dataDir || DATA_DIR, config, key: cursorKey }) : manualStart);
   const result = await fetchSerpApiPages(url, {
     request,
     headers,
@@ -3117,28 +3210,29 @@ async function fetchGoogleScholarPapers(keywords = DEFAULT_KEYWORDS, options = {
     start,
     num,
     onProgress: options.onProgress,
-    skipBlockedPages: config.rollingFetch === true
+    onPageComplete: options.onPageComplete,
+    skipBlockedPages: !discoveryCursorMode && config.rollingFetch === true
   });
-  await writeGoogleRollingStart({
-    dataDir: options.dataDir || DATA_DIR,
-    config,
-    key: cursorKey,
-    nextStart: result.nextStart,
-    sourceLabel: "Google Scholar",
-    keywords,
-    num,
-    maxPages
-  });
+  if (!discoveryCursorMode) {
+    await writeGoogleRollingStart({
+      dataDir: options.dataDir || DATA_DIR,
+      config,
+      key: cursorKey,
+      nextStart: result.nextStart,
+      sourceLabel: "Google Scholar",
+      keywords,
+      num,
+      maxPages
+    });
+  }
   const pages = result.pages;
   const items = pages.flatMap(payload => {
     const pageItems = getNestedValue(payload, config.responseMap.items);
     return Array.isArray(pageItems) ? pageItems : [];
   });
   if (!items.length) return [];
-  return filterPapersByKeywords(
-    items.map(item => normalizeGoogleScholarPaper(item, keywords, config.responseMap)),
-    keywords
-  );
+  const papers = items.map(item => normalizeGoogleScholarPaper(item, keywords, config.responseMap));
+  return options.searchMode === "exact" ? papers : filterPapersByKeywords(papers, keywords);
 }
 
 async function fetchGoogleSearchPapers(keywords = DEFAULT_KEYWORDS, options = {}) {
@@ -3150,8 +3244,13 @@ async function fetchGoogleSearchPapers(keywords = DEFAULT_KEYWORDS, options = {}
   const request = config.request || {};
   const url = new URL(config.endpoint);
   url.searchParams.set("engine", "google");
-  url.searchParams.set(request.queryName || "q", buildSemanticScholarQuery(keywords));
+  url.searchParams.set(request.queryName || "q", options.queryExpression || buildSemanticScholarQuery(keywords));
   url.searchParams.set("num", String(config.num || DEFAULT_GOOGLE_SCHOLAR_CONFIG.num));
+  if (options.searchMode !== "exact" && /^\d{4}-\d{2}-\d{2}$/.test(options.startDate || "") && /^\d{4}-\d{2}-\d{2}$/.test(options.endDate || "")) {
+    const [startYear, startMonth, startDay] = options.startDate.split("-");
+    const [endYear, endMonth, endDay] = options.endDate.split("-");
+    url.searchParams.set("tbs", `cdr:1,cd_min:${startMonth}/${startDay}/${startYear},cd_max:${endMonth}/${endDay}/${endYear}`);
+  }
   if (request.apiKeyQueryName && config.apiKey) {
     url.searchParams.set(request.apiKeyQueryName, config.apiKey);
   }
@@ -3168,14 +3267,12 @@ async function fetchGoogleSearchPapers(keywords = DEFAULT_KEYWORDS, options = {}
   const fetchImpl = options.fetchImpl || fetch;
   const num = Number(config.num || DEFAULT_GOOGLE_SCHOLAR_CONFIG.num);
   const maxPages = options.maxPages || config.maxPages || DEFAULT_GOOGLE_SCHOLAR_CONFIG.maxPages;
+  const discoveryCursorMode = options.searchMode === "exact" || typeof options.onPageComplete === "function";
   const cursorKey = googleRollingCursorKey({ sourceLabel: "Google 搜索", keywords, config, num });
-  const rollingStart = await readGoogleRollingStart({
-    dataDir: options.dataDir || DATA_DIR,
-    config,
-    key: cursorKey
-  });
   const manualStart = googleManualStart(options);
-  const start = manualStart === null ? rollingStart : manualStart;
+  const start = discoveryCursorMode
+    ? (clampPositiveInteger(options.startPage, 1, 1, 1000000) - 1) * num
+    : (manualStart === null ? await readGoogleRollingStart({ dataDir: options.dataDir || DATA_DIR, config, key: cursorKey }) : manualStart);
   const result = await fetchSerpApiPages(url, {
     request,
     headers,
@@ -3185,32 +3282,33 @@ async function fetchGoogleSearchPapers(keywords = DEFAULT_KEYWORDS, options = {}
     start,
     num,
     onProgress: options.onProgress,
-    skipBlockedPages: config.rollingFetch === true
+    onPageComplete: options.onPageComplete,
+    skipBlockedPages: !discoveryCursorMode && config.rollingFetch === true
   });
-  await writeGoogleRollingStart({
-    dataDir: options.dataDir || DATA_DIR,
-    config,
-    key: cursorKey,
-    nextStart: result.nextStart,
-    sourceLabel: "Google 搜索",
-    keywords,
-    num,
-    maxPages
-  });
+  if (!discoveryCursorMode) {
+    await writeGoogleRollingStart({
+      dataDir: options.dataDir || DATA_DIR,
+      config,
+      key: cursorKey,
+      nextStart: result.nextStart,
+      sourceLabel: "Google 搜索",
+      keywords,
+      num,
+      maxPages
+    });
+  }
   const pages = result.pages;
   const items = pages.flatMap(payload => {
     const pageItems = getNestedValue(payload, responseMap.items);
     return Array.isArray(pageItems) ? pageItems : [];
   });
   if (!items.length) return [];
-  return filterPapersByKeywords(
-    items.map(item => normalizeGoogleSearchPaper(item, keywords, responseMap)),
-    keywords
-  );
+  const papers = items.map(item => normalizeGoogleSearchPaper(item, keywords, responseMap));
+  return options.searchMode === "exact" ? papers : filterPapersByKeywords(papers, keywords);
 }
 
-function buildWebOfScienceQuery(keywords = DEFAULT_KEYWORDS, template = DEFAULT_WEB_OF_SCIENCE_CONFIG.queryTemplate) {
-  const query = buildSemanticScholarQuery(keywords).replace(/[()]/g, " ").replace(/\s+/g, " ").trim();
+function buildWebOfScienceQuery(keywords = DEFAULT_KEYWORDS, template = DEFAULT_WEB_OF_SCIENCE_CONFIG.queryTemplate, queryExpression = "") {
+  const query = compactText(queryExpression) || buildSemanticScholarQuery(keywords).replace(/[()]/g, " ").replace(/\s+/g, " ").trim();
   return String(template || "{query}").replace("{query}", query || "computational microscopy reconstruction");
 }
 
@@ -3247,18 +3345,23 @@ async function fetchWebOfSciencePapers(keywords = DEFAULT_KEYWORDS, options = {}
   if (request.useApiKeyHeader !== false && request.apiKeyHeader && config.apiKey) {
     headers[request.apiKeyHeader] = `${request.apiKeyPrefix || ""}${config.apiKey}`;
   }
-  const query = buildWebOfScienceQuery(keywords, config.queryTemplate);
+  const query = compactText(options.rawQuery)
+    || buildWebOfScienceQuery(keywords, config.queryTemplate, options.queryExpression);
   const maxPages = clampPositiveInteger(options.maxPages || config.maxPages, DEFAULT_WEB_OF_SCIENCE_CONFIG.maxPages, 1, WEB_OF_SCIENCE_MAX_PAGES_LIMIT);
   const pageSize = clampPositiveInteger(options.pageSize || config.pageSize, DEFAULT_WEB_OF_SCIENCE_CONFIG.pageSize, 1, WEB_OF_SCIENCE_PAGE_SIZE_LIMIT);
+  const firstPage = clampPositiveInteger(options.startPage, 1, 1, 1000000);
   const dataDir = options.dataDir || DATA_DIR;
   const pages = [];
 
-  for (let page = 1; page <= maxPages; page += 1) {
+  for (let page = firstPage; page < firstPage + maxPages; page += 1) {
     const url = new URL(config.endpoint);
     url.searchParams.set(request.queryName || "q", query);
     url.searchParams.set(request.databaseQueryName || "db", config.databaseId || DEFAULT_WEB_OF_SCIENCE_CONFIG.databaseId);
     url.searchParams.set(request.pageQueryName || "page", String(page));
     url.searchParams.set(request.limitQueryName || "limit", String(pageSize));
+    if (options.searchMode !== "exact" && options.startDate && options.endDate) {
+      url.searchParams.set("publishTimeSpan", `${options.startDate}+${options.endDate}`);
+    }
     if (request.apiKeyQueryName && config.apiKey) url.searchParams.set(request.apiKeyQueryName, config.apiKey);
     emitWebOfSciencePageProgress(options.onProgress, { page, pageSize, maxPages });
     let response;
@@ -3277,7 +3380,10 @@ async function fetchWebOfSciencePapers(keywords = DEFAULT_KEYWORDS, options = {}
     const payload = typeof response.json === "function" ? await response.json() : JSON.parse(await response.text());
     pages.push(payload);
     const items = getNestedValue(payload, config.responseMap.items);
-    if (!Array.isArray(items) || items.length < pageSize) break;
+    const returned = Array.isArray(items) ? items.length : 0;
+    const complete = returned < pageSize;
+    await options.onPageComplete?.({ page, nextPage: page + 1, returned, complete });
+    if (complete) break;
   }
 
   const items = pages.flatMap(payload => {
@@ -3285,10 +3391,8 @@ async function fetchWebOfSciencePapers(keywords = DEFAULT_KEYWORDS, options = {}
     return Array.isArray(pageItems) ? pageItems : [];
   });
   if (!items.length) return [];
-  return filterPapersByKeywords(
-    items.map(item => normalizeWebOfScienceRecord(item, keywords, config.responseMap)),
-    keywords
-  );
+  const papers = items.map(item => normalizeWebOfScienceRecord(item, keywords, config.responseMap));
+  return options.searchMode === "exact" ? papers : filterPapersByKeywords(papers, keywords);
 }
 
 async function fetchSemanticScholarPapers(keywords = DEFAULT_KEYWORDS, options = {}) {
@@ -3314,15 +3418,33 @@ function hasSameStableIdentity(left, right) {
   const leftDoi = normalizeDoi(left?.doi);
   const rightDoi = normalizeDoi(right?.doi);
   if (leftDoi && rightDoi && leftDoi === rightDoi) return true;
+  const leftSource = compactText(left?.retrievalSource).toLowerCase();
+  const rightSource = compactText(right?.retrievalSource).toLowerCase();
   const leftSourceId = compactText(left?.sourceId).toLowerCase();
   const rightSourceId = compactText(right?.sourceId).toLowerCase();
-  return Boolean(leftSourceId && rightSourceId && leftSourceId === rightSourceId);
+  return Boolean(
+    leftSource
+    && leftSource === rightSource
+    && leftSourceId
+    && leftSourceId === rightSourceId
+  );
+}
+
+function normalizedTitleKey(title) {
+  return compactText(title).normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
 function samePaperVersion(left, right) {
   if (hasSameStableIdentity(left, right)) return true;
-  const leftTitle = compactText(left?.title).toLowerCase();
-  return Boolean(leftTitle && leftTitle === compactText(right?.title).toLowerCase());
+  const leftStage = compactText(left?.publicationStage || "formal").toLowerCase();
+  const rightStage = compactText(right?.publicationStage || "formal").toLowerCase();
+  if (leftStage !== rightStage) return false;
+  const leftTitle = normalizedTitleKey(left?.title);
+  return Boolean(
+    leftTitle
+    && leftTitle === normalizedTitleKey(right?.title)
+    && hasMeaningfulAuthorOverlap(left?.authors, right?.authors)
+  );
 }
 
 function isFormalPreprintPair(left, right) {
@@ -4113,14 +4235,14 @@ async function writePaperArchive(payload, dataDir = DATA_DIR) {
 async function mergePapersIntoArchive(papers, options = {}) {
   const dataDir = options.dataDir || DATA_DIR;
   const archive = await readPaperArchive(dataDir);
-  const beforeById = new Set(archive.papers.map(paper => compactText(paper.id)).filter(Boolean));
   const mergedPapers = options.dedupe === true
     ? mergePaperLists(archive.papers, papers)
     : mergePaperListsAppendOnly(archive.papers, papers);
-  const addedPapers = papers.filter(paper => {
-    const id = compactText(paper.id);
-    return !id || !beforeById.has(id);
-  });
+  // ponytail: local batches are small; index version identities if archive merge profiling shows this scan matters.
+  const addedPapers = papers.filter(paper => !archive.papers.some(existing => (
+    compactText(existing?.publicationStage || "formal") === compactText(paper?.publicationStage || "formal")
+    && samePaperVersion(existing, paper)
+  )));
   const modifiedCount = Math.max(0, papers.length - addedPapers.length);
   const nextArchive = {
     ...archive,
@@ -4150,7 +4272,7 @@ async function mergePapersIntoArchive(papers, options = {}) {
       papers: papers.slice(0, 20).map(summarizePaperForOperationLog)
     }, dataDir);
   }
-  return nextArchive;
+  return { ...nextArchive, addedPapers };
 }
 
 async function readArchivePayload(options = {}) {
@@ -4912,9 +5034,40 @@ async function fetchPaperPayload(options = {}) {
   // “最近”模式默认抓取 2026-05-01 至今；“近 7 天”模式抓取今天往前 6 天。
   const startDate = options.startDate || (mode === "recent" ? RECENT_RANGE_START : (mode === "last7" ? shiftDate(date, -6) : date));
   const keywords = cleanKeywords(options.keywords).length ? cleanKeywords(options.keywords) : DEFAULT_KEYWORDS;
+  const searchMode = options.searchMode === "exact" ? "exact" : "direction";
+  const searchLogic = options.searchLogic && typeof options.searchLogic === "object"
+    ? options.searchLogic
+    : { activeKeywords: keywords, andEdges: [] };
+  const queryExpression = compactText(options.queryExpression)
+    || buildSearchExpression(searchLogic)
+    || keywords.join(" OR ");
+  const exactInput = searchMode === "exact"
+    ? detectExactPaperInput(options.exactInput || queryExpression)
+    : null;
   const requestedSources = parseEnabledSources(options.sources || []);
-  const sources = requestedSources.length ? requestedSources : ["arxiv", "biorxiv", "semanticscholar"];
+  let sources = requestedSources.length ? requestedSources : ["arxiv", "biorxiv", "semanticscholar"];
+  if (exactInput) {
+    const allowedSources = {
+      doi: ["webofscience", "googlescholar", "googlesearch"],
+      "wos-ut": ["webofscience"],
+      arxiv: ["arxiv"],
+      url: ["googlescholar", "googlesearch"],
+      title: ["googlescholar", "googlesearch"]
+    }[exactInput.type] || [];
+    sources = sources.filter(source => allowedSources.includes(source));
+  }
   const dataDir = options.dataDir || DATA_DIR;
+  const task = {
+    searchMode,
+    queryExpression,
+    startDate: mode === "today" ? date : startDate,
+    endDate,
+    sources,
+    sourcePages: {}
+  };
+  task.fingerprint = buildDiscoveryTaskFingerprint(task);
+  const savedTask = (await readRecentFetchCursors(dataDir)).tasks[task.fingerprint];
+  task.sourcePages = { ...(savedTask?.sourcePages || {}) };
   if (!options.refresh) {
     try {
       const cachedPayload = await readCachedPapers(mode === "today" ? date : `${date}-${mode}`, dataDir);
@@ -4939,6 +5092,13 @@ async function fetchPaperPayload(options = {}) {
       const nextArchive = await mergePapersIntoArchive(papers, { dataDir, date, mode, keywords: cachedPayload.keywords || [], sources: cachedPayload.sources || [] });
       return {
         ...cachedPayload,
+        task,
+        taskFingerprint: task.fingerprint,
+        sourcePages: task.sourcePages,
+        sourceResults: [],
+        newPapers: [],
+        exactCandidates: [],
+        errors: [],
         papers,
         count: papers.length,
         archivedCount: nextArchive.count,
@@ -4963,9 +5123,20 @@ async function fetchPaperPayload(options = {}) {
   const apiCalls = [];
   const llmLog = [];
   const sourcePages = {};
+  const sourcesWithPageProgress = new Set();
   const progressForSource = source => event => {
     if (event?.stage === "source-page") recordSourcePageProgress(sourcePages, source, event);
     emitFetchProgress(options, event);
+  };
+  const pageCompleteForSource = source => async progress => {
+    const nextPage = Number(progress?.nextPage);
+    if (!Number.isFinite(nextPage) || nextPage < 1) return;
+    sourcesWithPageProgress.add(source);
+    task.sourcePages[source] = {
+      nextPage: Math.floor(nextPage),
+      complete: progress?.complete === true
+    };
+    await writeRecentFetchCursor(task, dataDir);
   };
   emitFetchProgress(options, {
     stage: "sources",
@@ -4975,15 +5146,65 @@ async function fetchPaperPayload(options = {}) {
     sources: []
   });
   const groups = await Promise.all(sources.map(async source => {
+    if (task.sourcePages[source]?.complete === true) {
+      apiCalls.push({ api: source, label: API_LABELS[source] || source, kind: "source", status: "complete", returned: 0 });
+      return [];
+    }
     try {
+      const startPage = Number(task.sourcePages[source]?.nextPage || 1);
+      task.sourcePages[source] = { nextPage: startPage, complete: false };
+      await writeRecentFetchCursor(task, dataDir);
       let result;
-      if (source === "arxiv") result = options.fetchers?.arxiv ? await options.fetchers.arxiv() : await fetchArxivPapers(keywords, { maxResults: mode === "recent" ? 200 : 50 });
-      else if (source === "biorxiv") result = options.fetchers?.biorxiv ? await options.fetchers.biorxiv() : await fetchBioRxivPapers(date, keywords, mode === "today" ? {} : { startDate, endDate });
-      else if (source === "semanticscholar") result = options.fetchers?.semanticscholar ? await options.fetchers.semanticscholar() : await fetchSemanticScholarPapers(keywords, mode === "today" ? {} : { startDate, endDate, limit: 100 });
-      else if (source === "googlescholar") result = options.fetchers?.googlescholar ? await options.fetchers.googlescholar() : await fetchGoogleScholarPapers(keywords, { ...(options.googleScholar || {}), onProgress: progressForSource(source) });
-      else if (source === "googlesearch") result = options.fetchers?.googlesearch ? await options.fetchers.googlesearch() : await fetchGoogleSearchPapers(keywords, { ...(options.googleScholar || {}), onProgress: progressForSource(source) });
-      else if (source === "webofscience") result = options.fetchers?.webofscience ? await options.fetchers.webofscience() : await fetchWebOfSciencePapers(keywords, { ...(options.webOfScience || {}), onProgress: progressForSource(source) });
+      const sourceOptions = {
+        dataDir,
+        queryExpression,
+        searchLogic,
+        searchMode,
+        startPage,
+        onPageComplete: pageCompleteForSource(source),
+        onProgress: progressForSource(source)
+      };
+      if (searchMode === "direction") {
+        sourceOptions.startDate = task.startDate;
+        sourceOptions.endDate = endDate;
+      }
+      if (exactInput?.type === "title" && ["googlescholar", "googlesearch"].includes(source)) {
+        sourceOptions.queryExpression = `"${exactInput.value.replace(/"/g, "")}"`;
+      } else if (exactInput?.type === "url" && ["googlescholar", "googlesearch"].includes(source)) {
+        sourceOptions.queryExpression = `"${exactInput.value}"`;
+      } else if (source === "webofscience" && exactInput?.type === "wos-ut") {
+        sourceOptions.rawQuery = `UT=(${exactInput.value})`;
+      } else if (source === "webofscience" && exactInput?.type === "doi") {
+        sourceOptions.rawQuery = `DO=(${exactInput.value})`;
+      } else if (source === "arxiv" && exactInput?.type === "arxiv") {
+        sourceOptions.arxivId = exactInput.value;
+      }
+      if (source === "arxiv") result = options.fetchers?.arxiv
+        ? await options.fetchers.arxiv(sourceOptions)
+        : await fetchArxivPapers(keywords, { maxResults: mode === "recent" ? 200 : 50, ...sourceOptions });
+      else if (source === "biorxiv") result = options.fetchers?.biorxiv
+        ? await options.fetchers.biorxiv(sourceOptions)
+        : await fetchBioRxivPapers(date, keywords, sourceOptions);
+      else if (source === "semanticscholar") result = options.fetchers?.semanticscholar
+        ? await options.fetchers.semanticscholar(sourceOptions)
+        : await fetchSemanticScholarPapers(keywords, { ...sourceOptions, limit: 100 });
+      else if (source === "googlescholar") result = options.fetchers?.googlescholar
+        ? await options.fetchers.googlescholar(sourceOptions)
+        : await fetchGoogleScholarPapers(keywords, { ...(options.googleScholar || {}), ...sourceOptions });
+      else if (source === "googlesearch") result = options.fetchers?.googlesearch
+        ? await options.fetchers.googlesearch(sourceOptions)
+        : await fetchGoogleSearchPapers(keywords, { ...(options.googleScholar || {}), ...sourceOptions });
+      else if (source === "webofscience") result = options.fetchers?.webofscience
+        ? await options.fetchers.webofscience(sourceOptions)
+        : await fetchWebOfSciencePapers(keywords, { ...(options.webOfScience || {}), ...sourceOptions });
       else result = [];
+      if (!sourcesWithPageProgress.has(source)) {
+        task.sourcePages[source] = {
+          nextPage: Number(task.sourcePages[source]?.nextPage || 1),
+          complete: true
+        };
+        await writeRecentFetchCursor(task, dataDir);
+      }
       apiCalls.push({ api: source, label: API_LABELS[source] || source, kind: "source", status: "ok", returned: result.length });
       emitFetchProgress(options, {
         stage: "sources",
@@ -5007,6 +5228,39 @@ async function fetchPaperPayload(options = {}) {
       return [];
     }
   }));
+  if (exactInput?.type === "doi") {
+    try {
+      const metadata = await fetchCrossrefWorkByDoi(exactInput.value, options.crossref || {});
+      if (metadata?.doi) {
+        const title = compactText(metadata.title) || exactInput.value;
+        const journal = compactText(metadata.journal) || "Crossref";
+        groups.push([completePaperRecord({
+          id: `crossref-${metadata.doi}`,
+          retrievalSource: "crossref",
+          sourceId: metadata.doi,
+          doi: metadata.doi,
+          journal,
+          citation: formatCitation({ authors: metadata.authors, year: paperYear(metadata.published), title, journal, doi: metadata.doi }),
+          source: `Crossref · ${journal}`,
+          sourceType: "论文数据库",
+          title,
+          summary: "",
+          tags: [],
+          score: scorePaper(title, keywords),
+          reason: makeReason(title, keywords),
+          tokenUsage: defaultTokenUsage(),
+          journalMetrics: defaultJournalMetrics(),
+          url: `https://doi.org/${metadata.doi}`,
+          authors: metadata.authors,
+          published: metadata.published
+        })]);
+        apiCalls.push({ api: "crossref", label: API_LABELS.crossref, kind: "source", status: "ok", returned: 1 });
+      }
+    } catch (error) {
+      errors.push({ source: "crossref", message: error.message });
+      apiCalls.push({ api: "crossref", label: API_LABELS.crossref, kind: "source", status: "failed", returned: 0, message: error.message });
+    }
+  }
   const rawPapers = groups.flat();
   emitFetchProgress(options, {
     stage: "dedupe",
@@ -5017,6 +5271,49 @@ async function fetchPaperPayload(options = {}) {
     errors
   });
   const dedupedPapers = dedupePapers(rawPapers);
+  const closeTitleCandidates = exactInput?.type === "title"
+    ? dedupedPapers.filter(paper => titleSimilarity(exactInput.value, paper.title) >= 0.65)
+    : [];
+  const exactCandidates = closeTitleCandidates.length > 1 ? closeTitleCandidates : [];
+  if (exactCandidates.length) {
+    const sourceResults = apiCalls
+      .filter(call => call.kind === "source")
+      .map(call => ({ source: call.api, status: call.status, returned: call.returned, message: call.message || "" }));
+    const payload = {
+      date,
+      startDate: mode === "today" ? date : startDate,
+      endDate,
+      mode,
+      fetchedAt: new Date().toISOString(),
+      keywords,
+      sources,
+      task,
+      taskFingerprint: task.fingerprint,
+      sourcePages: task.sourcePages,
+      sourceResults,
+      newPapers: [],
+      exactCandidates,
+      errors,
+      fetchedCount: 0,
+      count: 0,
+      papers: []
+    };
+    emitFetchProgress(options, {
+      stage: "done",
+      percent: 100,
+      message: `找到 ${exactCandidates.length} 个相近标题，等待确认`,
+      counts: { raw: rawPapers.length, deduped: dedupedPapers.length, fetched: 0 },
+      sources: apiCalls.filter(call => call.kind === "source"),
+      errors
+    });
+    if (sources.every(source => task.sourcePages[source]?.complete === true)) {
+      await clearRecentFetchCursor(task.fingerprint, dataDir);
+    }
+    return payload;
+  }
+  const searchablePapers = exactInput?.type === "title" && closeTitleCandidates.length === 1
+    ? closeTitleCandidates
+    : dedupedPapers;
   emitFetchProgress(options, {
     stage: "keyword",
     percent: 40,
@@ -5025,7 +5322,9 @@ async function fetchPaperPayload(options = {}) {
     sources: apiCalls.filter(call => call.kind === "source"),
     errors
   });
-  const keywordPapers = filterPapersByKeywords(dedupedPapers, keywords);
+  const keywordPapers = searchMode === "exact"
+    ? searchablePapers
+    : searchablePapers.filter(paper => paperMatchesSearchLogic(paper, searchLogic));
   emitFetchProgress(options, {
     stage: "domain",
     percent: 52,
@@ -5034,7 +5333,9 @@ async function fetchPaperPayload(options = {}) {
     sources: apiCalls.filter(call => call.kind === "source"),
     errors
   });
-  const refinedPapers = filterPapersByDomainAnchors(keywordPapers, keywords);
+  const refinedPapers = searchMode === "exact"
+    ? keywordPapers
+    : filterPapersByDomainAnchors(keywordPapers, keywords);
   emitFetchProgress(options, {
     stage: "date",
     percent: 64,
@@ -5043,7 +5344,9 @@ async function fetchPaperPayload(options = {}) {
     sources: apiCalls.filter(call => call.kind === "source"),
     errors
   });
-  const scopedPapers = mode === "today" ? filterPapersByDate(refinedPapers, date) : filterPapersByDateRange(refinedPapers, startDate, endDate);
+  const scopedPapers = searchMode === "exact"
+    ? refinedPapers
+    : (mode === "today" ? filterPapersByDate(refinedPapers, date) : filterPapersByDateRange(refinedPapers, startDate, endDate));
   const rankedPapers = scopedPapers
     .sort((a, b) => b.score - a.score || String(b.published).localeCompare(String(a.published)))
     .slice(0, 80);
@@ -5084,7 +5387,7 @@ async function fetchPaperPayload(options = {}) {
     sources: apiCalls.filter(call => call.kind === "source"),
     errors
   });
-  const llmPapers = await enrichPapersWithLlmInsights(crossrefPapers, {
+  const llmPapers = await enrichMissingLlmInsights(crossrefPapers, {
     ...(options.llm || {}),
     userBackground: options.userBackground,
     fetcher: options.fetchers?.llm,
@@ -5099,16 +5402,20 @@ async function fetchPaperPayload(options = {}) {
     sources: apiCalls.filter(call => call.kind === "source"),
     errors
   });
-  const datedLlmPapers = mode === "today" ? filterPapersByDate(llmPapers, date) : filterPapersByStrictDateRange(llmPapers, startDate, endDate);
+  const datedLlmPapers = searchMode === "exact"
+    ? llmPapers
+    : (mode === "today" ? filterPapersByDate(llmPapers, date) : filterPapersByStrictDateRange(llmPapers, startDate, endDate));
   const fetchedPapers = sortPapersForDisplay((await enrichPapersWithJournalMetrics(datedLlmPapers, {
     dataDir,
     ...(options.journalMetrics || {})
   }))
     .map(paper => rescorePaperAfterEnrichment({ ...paper, fetchedAt: new Date().toISOString() }, keywords)));
   const archive = await mergePapersIntoArchive(fetchedPapers, { dataDir, date, mode, keywords, sources });
-  const archivedPapers = mode === "today"
-    ? filterPapersByDate(archive.papers, date)
-    : filterPapersByStrictDateRange(archive.papers, startDate, endDate);
+  const archivedPapers = searchMode === "exact"
+    ? fetchedPapers
+    : (mode === "today"
+      ? filterPapersByDate(archive.papers, date)
+      : filterPapersByStrictDateRange(archive.papers, startDate, endDate));
   const enrichedArchivePapers = (await enrichMissingLlmInsights(archivedPapers, {
     ...(options.llm || {}),
     userBackground: options.userBackground,
@@ -5147,6 +5454,14 @@ async function fetchPaperPayload(options = {}) {
     fetchedAt: new Date().toISOString(),
     keywords,
     sources,
+    task,
+    taskFingerprint: task.fingerprint,
+    sourcePages: task.sourcePages,
+    sourceResults: apiCalls
+      .filter(call => call.kind === "source")
+      .map(call => ({ source: call.api, status: call.status, returned: call.returned, message: call.message || "" })),
+    newPapers: archive.addedPapers,
+    exactCandidates,
     errors,
     fetchedCount: fetchedPapers.length,
     archivedCount: finalArchive.count,
@@ -5187,6 +5502,9 @@ async function fetchPaperPayload(options = {}) {
   } catch {
     // 日志写入失败不应影响抓取主流程。
   }
+  if (sources.every(source => task.sourcePages[source]?.complete === true)) {
+    await clearRecentFetchCursor(task.fingerprint, dataDir);
+  }
   return payload;
 }
 
@@ -5226,6 +5544,7 @@ module.exports = {
   removeCandidatePaperFromArchive,
   dedupePapers,
   dedupePaperArchive,
+  detectExactPaperInput,
   buildTokenStats,
   buildArxivQuery,
   buildDiscoveryTaskFingerprint,
@@ -5240,6 +5559,7 @@ module.exports = {
   exportLocalData,
   exportLocalDataZip,
   fetchArxivPapers,
+  fetchCrossrefWorkByDoi,
   fetchCrossrefWorkByTitle,
   fetchBioRxivPapers,
   fetchGoogleScholarPapers,

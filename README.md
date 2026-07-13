@@ -29,6 +29,8 @@ Paper Hot 的主要目的只有两个：
 - bioRxiv。
 - Semantic Scholar。
 - Crossref 和出版方页面元数据补全。
+- 方向检索把保存的 Boolean 搜索图传给信源；WoS、bioRxiv、arXiv、Google Scholar 和 Google Search 使用各自支持的冻结日期约束。近期抓取和指定论文检索统一按任务指纹保存逐信源下一页和完成态，Google 不读取或更新旧滚动位置；恢复时跳过已完成信源，只有全部启用信源完成后才清除断点。
+- 指定论文检索可识别 DOI、Web of Science UT、arXiv ID/URL、普通 URL 和标题；信源端不附加方向关键词或日期限制。稳定标识结果可进入现有归档，标题出现多个相近结果时只返回候选供用户确认，不写归档、缓存或抓取日志。
 
 ### 论文处理
 
@@ -268,9 +270,9 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 点击抓取后，前端不会直接访问外部论文网站，而是向本地后端创建抓取任务。后端流程如下：
 
 1. 读取用户配置：关键词、信源、日期范围、LLM、SerpApi、Web of Science、EasyScholar。
-2. 多来源检索：Google Scholar、Google Search、Web of Science、arXiv、bioRxiv、Semantic Scholar。
+2. 多来源检索：Google Scholar、Google Search、Web of Science、arXiv、bioRxiv、Semantic Scholar；方向检索传递 Boolean 条件和信源支持的冻结日期。分页恢复会跳过已完成信源，并从未完成信源保存的下一页继续。
 3. 候选归一化：保留信源原始标题，统一显示标题、摘要、作者、DOI、URL、来源、日期精度和引用数据库；同版本精确重复按信源优先级保留，正式版与预印本分别保留并互相关联。
-4. 关键词和领域过滤：用字符串规则和领域上下文过滤候选。
+4. 关键词和领域过滤：方向检索按保存的 Boolean 搜索图和领域上下文过滤候选；指定论文检索跳过方向、领域和日期过滤，标题多候选不自动入库。
 5. 日期筛选：按前端选择范围筛选；不伪造 `YYYY-01-01` 作为真实日期。
 6. 初步排序：用本地规则控制进入后续富集的候选数量。
 7. 元数据补全：通过 Crossref、DOI 和出版方页面补全期刊、日期、标题。
@@ -349,6 +351,7 @@ flowchart TD
 | `docs/superpowers/plans/2026-07-11-recent-paper-discovery.md` | 近期论文发现功能的分步实现、测试和验证计划 |
 | `.superpowers/sdd/task-2-report.md` | Task 2 多信源元数据与正式版/预印本关联的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-3-report.md` | Task 3 近期抓取游标与 WoS 本地请求用量的实现、TDD 和验证报告 |
+| `.superpowers/sdd/task-4-report.md` | Task 4 日期感知、断点恢复、指定论文检索及独立审查修复的 TDD 和验证报告 |
 
 ### 主要数据文件
 
@@ -360,10 +363,10 @@ flowchart TD
 | `data/papers/favorites.json` | 收藏论文状态 |
 | `data/papers/paper-notes.json` | 短标题、已读、标星等阅读状态 |
 | `data/papers/journal-metrics-cache.json` | EasyScholar 期刊指标缓存 |
-| `data/papers/google-rolling-cursors.json` | Google Scholar 滚动抓取位置 |
-| `data/papers/recent-fetch-cursors.json` | 近期抓取的短期断点；仅相同检索模式、表达式、日期和信源任务可续传，不进入本地数据 ZIP |
+| `data/papers/google-rolling-cursors.json` | 旧版直接 Google adapter 调用的滚动抓取位置；近期抓取和指定论文检索不读取或更新 |
+| `data/papers/recent-fetch-cursors.json` | 近期抓取和指定论文检索的唯一短期断点；Google、WoS、arXiv 等逐信源只保存下一页和完成态，仅相同检索模式、表达式、日期和信源任务可续传，全部信源完成后清除，不进入本地数据 ZIP |
 | `data/papers/web-of-science-usage.json` | PaperHot 本地记录的 WoS 请求日/月/累计次数及最后状态；不保存请求 URL、Header 或 API Key |
-| `data/papers/*.example.json` | 可提交的运行态 JSON 空模板；真实运行文件继续只保留在本机 |
+| `data/papers/*.example.json` | 可提交的运行态 JSON 示例模板；真实运行文件继续只保留在本机 |
 
 ## 维护者统一任务流程
 

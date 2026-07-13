@@ -25,6 +25,8 @@ const {
   enrichTruncatedGoogleTitles,
   filterPapersByDate,
   fetchJournalMetrics,
+  fetchArxivPapers,
+  fetchBioRxivPapers,
   fetchGoogleScholarPapers,
   fetchGoogleSearchPapers,
   fetchCrossrefWorkByTitle,
@@ -75,7 +77,9 @@ const {
   scorePaper,
   rescorePaperAfterEnrichment,
   writeRecentFetchCursor,
-  clearRecentFetchCursor
+  clearRecentFetchCursor,
+  detectExactPaperInput,
+  fetchCrossrefWorkByDoi
 } = require("../paperhot_backend.cjs");
 
 test("short title defaults to year prefix for manual technique editing", () => {
@@ -906,10 +910,10 @@ test("fetch log records Google rolling page ranges and next offset", async () =>
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
-test("fetch log records skipped Google rolling page ranges", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-fetchlog-skipped-pages-"));
+test("recent Google ignores legacy manual offsets and resumes from its canonical next page", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-recent-google-cursor-"));
   const starts = [];
-  await fetchRecentPapers({
+  const options = {
     dataDir: tempDir,
     date: "2026-06-23",
     startDate: "2025-01-01",
@@ -923,7 +927,7 @@ test("fetch log records skipped Google rolling page ranges", async () => {
         enabled: true,
         endpoint: "https://example.test/scholar",
         apiKey: "test-key",
-        maxPages: 2,
+        maxPages: 1,
         num: 20,
         rollingFetch: true,
         request: {
@@ -945,9 +949,6 @@ test("fetch log records skipped Google rolling page ranges", async () => {
       fetchImpl: async url => {
         const start = Number(url.searchParams.get("start") || "0");
         starts.push(start);
-        if (start === 180) {
-          return { ok: false, status: 429, text: async () => "Too many requests" };
-        }
         return {
           ok: true,
           status: 200,
@@ -960,33 +961,34 @@ test("fetch log records skipped Google rolling page ranges", async () => {
                 link: `https://example.test/paper-${start}`
               }
             ],
-            serpapi_pagination: {}
+            serpapi_pagination: start === 0 ? {
+              next: "https://example.test/scholar?q=structured+illumination+microscopy&start=20"
+            } : {}
           })
         };
       }
     },
     fetchers: {
+      crossref: async () => null,
       llm: async () => ({
         abstractZh: "中文摘要",
         reason: "中文推荐理由",
         tokenUsage: { prompt: 100, completion: 50, total: 150, model: "qwen-plus", status: "已调用 AI" }
       })
     }
+  };
+
+  const first = await fetchRecentPapers(options);
+  assert.deepEqual(starts, [0]);
+  assert.deepEqual(first.sourcePages.googlescholar, { nextPage: 2, complete: false });
+  assert.deepEqual((await readRecentFetchCursors(tempDir)).tasks[first.taskFingerprint].sourcePages.googlescholar, {
+    nextPage: 2,
+    complete: false
   });
 
-  const entries = await readFetchLog(tempDir);
-  assert.deepEqual(starts, [180, 200]);
-  assert.equal(entries[0].sourcePages.googlescholar.nextStart, 220);
-  assert.equal(entries[0].sourcePages.googlescholar.pages, 1);
-  assert.deepEqual(entries[0].sourcePages.googlescholar.skippedPages, [
-    {
-      start: 180,
-      num: 20,
-      itemStart: 181,
-      itemEnd: 200,
-      message: "Google Scholar 信源失败：HTTP 429"
-    }
-  ]);
+  await fetchRecentPapers(options);
+  assert.deepEqual(starts, [0, 20]);
+  assert.deepEqual(await readRecentFetchCursors(tempDir), { tasks: {} });
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -2949,6 +2951,1039 @@ test("fetches Web of Science papers through a configured API source with limited
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
+test("WoS request sends publishTimeSpan, resumes, and stops after a short page", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-wos-resume-"));
+  const urls = [];
+  const completedPages = [];
+  try {
+    await fetchWebOfSciencePapers(["SIM"], {
+      dataDir: tempDir,
+      config: {
+        enabled: true,
+        endpoint: "https://api.clarivate.com/apis/wos-starter/v1/documents",
+        apiKey: "test-key",
+        databaseId: "WOS",
+        maxPages: 2,
+        pageSize: 50,
+        queryTemplate: "TS=({query})",
+        request: {
+          method: "GET",
+          queryName: "q",
+          databaseQueryName: "db",
+          pageQueryName: "page",
+          limitQueryName: "limit",
+          apiKeyHeader: "X-ApiKey",
+          useApiKeyHeader: true
+        },
+        responseMap: { items: "hits" }
+      },
+      queryExpression: "SIM OR RIM",
+      startDate: "2026-01-01",
+      endDate: "2026-06-30",
+      startPage: 4,
+      onPageComplete: progress => completedPages.push(progress),
+      fetchImpl: async url => {
+        urls.push(String(url));
+        return { ok: true, status: 200, json: async () => ({ hits: [] }) };
+      }
+    });
+
+    assert.equal(urls.length, 1);
+    const request = new URL(urls[0]);
+    assert.equal(request.origin + request.pathname, "https://api.clarivate.com/apis/wos-starter/v1/documents");
+    assert.equal(request.searchParams.get("page"), "4");
+    assert.equal(request.searchParams.get("publishTimeSpan"), "2026-01-01+2026-06-30");
+    assert.match(request.searchParams.get("q"), /SIM OR RIM/);
+    assert.deepEqual(completedPages, [{ page: 4, nextPage: 5, returned: 0, complete: true }]);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("bioRxiv receives exact dates and filters with the search graph", async () => {
+  const previousFetch = global.fetch;
+  const urls = [];
+  global.fetch = async url => {
+    urls.push(String(url));
+    return {
+      ok: true,
+      json: async () => ({
+        collection: [
+          {
+            doi: "10.1101/2026.01.01.1",
+            title: "SIM reconstruction",
+            abstract: "A microscopy method without the paired term.",
+            date: "2026-01-02"
+          },
+          {
+            doi: "10.1101/2026.01.01.2",
+            title: "SIM and RIM reconstruction",
+            abstract: "A microscopy method with both terms.",
+            date: "2026-01-03"
+          }
+        ]
+      })
+    };
+  };
+  try {
+    const papers = await fetchBioRxivPapers("2026-01-03", ["SIM", "RIM"], {
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      searchLogic: {
+        activeKeywords: ["SIM", "RIM"],
+        andEdges: [["SIM", "RIM"]]
+      },
+      fetchImpl: global.fetch
+    });
+
+    assert.equal(urls[0], "https://api.biorxiv.org/details/biorxiv/2026-01-01/2026-01-31/0/json");
+    assert.deepEqual(papers.map(paper => paper.title), ["SIM and RIM reconstruction"]);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("arXiv pages newest-first until a full page is older than startDate", async () => {
+  const previousFetch = global.fetch;
+  const starts = [];
+  const completedPages = [];
+  const feed = entries => `<feed>${entries.map(entry => `
+    <entry>
+      <id>https://arxiv.org/abs/${entry.id}</id>
+      <title>${entry.title}</title>
+      <summary>structured illumination microscopy reconstruction</summary>
+      <published>${entry.published}T00:00:00Z</published>
+      <author><name>A. Author</name></author>
+      <category term="cs.CV" />
+    </entry>`).join("")}</feed>`;
+  global.fetch = async url => {
+    const start = Number(new URL(url).searchParams.get("start"));
+    starts.push(start);
+    const entries = start === 0
+      ? [
+          { id: "2601.00001", title: "Newest SIM paper", published: "2026-01-20" },
+          { id: "2601.00002", title: "Recent SIM paper", published: "2026-01-10" }
+        ]
+      : [
+          { id: "2512.00001", title: "Old SIM paper one", published: "2025-12-30" },
+          { id: "2512.00002", title: "Old SIM paper two", published: "2025-12-20" }
+        ];
+    return { ok: true, text: async () => feed(entries) };
+  };
+  try {
+    await fetchArxivPapers(["SIM"], {
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      pageSize: 2,
+      maxPages: 5,
+      onPageComplete: progress => completedPages.push(progress),
+      fetchImpl: global.fetch
+    });
+
+    assert.deepEqual(starts, [0, 2]);
+    assert.deepEqual(completedPages, [
+      { page: 1, nextPage: 2, returned: 2, complete: false },
+      { page: 2, nextPage: 3, returned: 2, complete: true }
+    ]);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("arXiv uses its bounded default page budget from a resumed page", async () => {
+  const starts = [];
+  const feed = entries => `<feed>${entries.map(entry => `
+    <entry>
+      <id>https://arxiv.org/abs/${entry.id}</id>
+      <title>${entry.title}</title>
+      <summary>structured illumination microscopy reconstruction</summary>
+      <published>${entry.published}T00:00:00Z</published>
+      <author><name>A. Author</name></author>
+    </entry>`).join("")}</feed>`;
+  await fetchArxivPapers(["SIM"], {
+    startDate: "2026-01-01",
+    pageSize: 2,
+    startPage: 3,
+    fetchImpl: async url => {
+      const start = Number(new URL(url).searchParams.get("start"));
+      starts.push(start);
+      const entries = start === 4
+        ? [
+            { id: "2601.00001", title: "Recent SIM paper one", published: "2026-01-20" },
+            { id: "2601.00002", title: "Recent SIM paper two", published: "2026-01-10" }
+          ]
+        : [
+            { id: "2512.00001", title: "Old SIM paper one", published: "2025-12-30" },
+            { id: "2512.00002", title: "Old SIM paper two", published: "2025-12-20" }
+          ];
+      return { ok: true, text: async () => feed(entries) };
+    }
+  });
+
+  assert.deepEqual(starts, [4, 6]);
+});
+
+test("exact arXiv ID remains a single request with the multi-page default", async () => {
+  const requests = [];
+  await fetchArxivPapers(["SIM"], {
+    arxivId: "2601.01234",
+    pageSize: 1,
+    fetchImpl: async url => {
+      requests.push(new URL(url));
+      return {
+        ok: true,
+        text: async () => `<feed><entry><id>https://arxiv.org/abs/2601.01234</id><title>Exact paper</title><summary>Exact result</summary><published>2020-01-01T00:00:00Z</published></entry></feed>`
+      };
+    }
+  });
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].searchParams.get("id_list"), "2601.01234");
+});
+
+test("Google and Scholar send the requested Boolean expression and supported source dates", async () => {
+  const requests = [];
+  const config = {
+    enabled: true,
+    endpoint: "https://serpapi.test/search.json",
+    apiKey: "test-key",
+    maxPages: 1,
+    num: 10,
+    request: { method: "GET", queryName: "q", apiKeyQueryName: "api_key", useApiKeyHeader: false },
+    responseMap: { items: "organic_results", title: "title", summary: "snippet", journal: "source", year: "date", url: "link" }
+  };
+  const fetchImpl = async url => {
+    requests.push(new URL(url));
+    return { ok: true, status: 200, text: async () => JSON.stringify({ organic_results: [] }) };
+  };
+
+  const sourceOptions = {
+    config,
+    queryExpression: "(SIM AND microscopy) OR RIM",
+    startDate: "2025-12-15",
+    endDate: "2026-03-02",
+    fetchImpl
+  };
+  await fetchGoogleScholarPapers(["SIM", "RIM"], sourceOptions);
+  await fetchGoogleSearchPapers(["SIM", "RIM"], sourceOptions);
+
+  assert.deepEqual(requests.map(url => url.searchParams.get("q")), [
+    "(SIM AND microscopy) OR RIM",
+    "(SIM AND microscopy) OR RIM"
+  ]);
+  assert.equal(requests[0].searchParams.get("as_ylo"), "2025");
+  assert.equal(requests[0].searchParams.get("as_yhi"), "2026");
+  assert.equal(requests[1].searchParams.get("tbs"), "cdr:1,cd_min:12/15/2025,cd_max:03/02/2026");
+});
+
+test("exact-input classification recognizes DOI, WoS, arXiv, URL, and title", () => {
+  assert.deepEqual(detectExactPaperInput("10.1038/s41592-026-00001-1"), {
+    type: "doi",
+    value: "10.1038/s41592-026-00001-1"
+  });
+  assert.deepEqual(detectExactPaperInput("https://doi.org/10.1038/s41592-026-00001-1"), {
+    type: "doi",
+    value: "10.1038/s41592-026-00001-1"
+  });
+  assert.deepEqual(detectExactPaperInput("WOS:000123"), { type: "wos-ut", value: "WOS:000123" });
+  assert.deepEqual(detectExactPaperInput("arXiv:2601.01234"), { type: "arxiv", value: "2601.01234" });
+  assert.deepEqual(detectExactPaperInput("https://arxiv.org/abs/2601.01234v2"), { type: "arxiv", value: "2601.01234v2" });
+  assert.deepEqual(detectExactPaperInput("https://example.test/paper"), { type: "url", value: "https://example.test/paper" });
+  assert.deepEqual(detectExactPaperInput("A full paper title"), { type: "title", value: "A full paper title" });
+});
+
+test("exact DOI lookup reuses the Crossref DOI helper", async () => {
+  const urls = [];
+  const metadata = await fetchCrossrefWorkByDoi("https://doi.org/10.1038/s41592-026-00001-1", {
+    fetchImpl: async url => {
+      urls.push(String(url));
+      return {
+        ok: true,
+        json: async () => ({
+          message: {
+            DOI: "10.1038/s41592-026-00001-1",
+            title: ["A full paper title"],
+            "container-title": ["Nature Methods"],
+            published: { "date-parts": [[2026]] }
+          }
+        })
+      };
+    }
+  });
+
+  assert.equal(urls[0], "https://api.crossref.org/works/10.1038%2Fs41592-026-00001-1");
+  assert.equal(metadata.doi, "10.1038/s41592-026-00001-1");
+  assert.equal(metadata.published, "2026");
+});
+
+test("exact DOI lookup skips sources that cannot query a DOI", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-exact-doi-source-"));
+  let arxivCalls = 0;
+  try {
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      searchMode: "exact",
+      queryExpression: "10.1038/s41592-026-00001-1",
+      sources: ["arXiv"],
+      fetchers: {
+        arxiv: async () => {
+          arxivCalls += 1;
+          return [{ id: "unrelated", title: "Unrelated arXiv paper", published: "2026-01-01" }];
+        },
+        abstract: async () => "",
+        llm: async () => ({
+          abstractZh: "中文摘要。",
+          reason: "精确 DOI 匹配。",
+          tokenUsage: { prompt: 1, completion: 1, total: 2, model: "test", status: "已调用 AI" }
+        })
+      },
+      crossref: {
+        fetchImpl: async () => ({
+          ok: true,
+          json: async () => ({
+            message: {
+              DOI: "10.1038/s41592-026-00001-1",
+              title: ["A full paper title"],
+              "container-title": ["Nature Methods"],
+              published: { "date-parts": [[2026, 1, 15]] }
+            }
+          })
+        })
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    assert.equal(arxivCalls, 0);
+    assert.deepEqual(payload.newPapers.map(paper => paper.doi), ["10.1038/s41592-026-00001-1"]);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("exact stable lookup bypasses direction and date filters without rerunning completed AI", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-exact-stable-"));
+  let llmCalls = 0;
+  let sourceOptions;
+  try {
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      searchMode: "exact",
+      queryExpression: "WOS:000123",
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      keywords: ["SIM", "RIM"],
+      searchLogic: { activeKeywords: ["SIM", "RIM"], andEdges: [["SIM", "RIM"]] },
+      sources: ["Web of Science"],
+      fetchers: {
+        webofscience: async options => {
+          sourceOptions = options;
+          return [{
+            id: "webofscience-wos-000123",
+            retrievalSource: "webofscience",
+            sourceId: "WOS:000123",
+            title: "Unrelated exact result",
+            summary: "No configured direction keywords.",
+            abstractZh: "已有中文摘要。",
+            reason: "已有推荐理由。",
+            journal: "Example Journal",
+            source: "Web of Science · Example Journal",
+            sourceType: "论文数据库",
+            published: "2020-01-01",
+            tags: [],
+            score: 50,
+            shortTitle: "2020@",
+            tokenUsage: { prompt: 1, completion: 1, total: 2, model: "existing", status: "已调用 AI" }
+          }];
+        },
+        crossref: async () => null,
+        llm: async () => {
+          llmCalls += 1;
+          return { abstractZh: "不应调用", reason: "不应调用", tokenUsage: { status: "已调用 AI" } };
+        }
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    assert.equal(sourceOptions.rawQuery, "UT=(WOS:000123)");
+    assert.equal(sourceOptions.startDate, undefined);
+    assert.equal(sourceOptions.endDate, undefined);
+    assert.equal(llmCalls, 0);
+    assert.equal(payload.count, 1);
+    assert.equal(payload.newPapers.length, 1);
+    assert.deepEqual(payload.exactCandidates, []);
+    assert.equal(payload.task.searchMode, "exact");
+    assert.equal(payload.sourceResults[0].source, "webofscience");
+    const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+    assert.equal(archive.papers.length, 1);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("exact WoS UT uses the actual adapter without direction dates or keyword filtering", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-exact-wos-adapter-"));
+  const requests = [];
+  try {
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      date: "2026-01-31",
+      searchMode: "exact",
+      queryExpression: "WOS:000123",
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      keywords: ["SIM"],
+      searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+      sources: ["Web of Science"],
+      webOfScience: {
+        config: {
+          enabled: true,
+          endpoint: "https://api.clarivate.test/apis/wos-starter/v1/documents",
+          apiKey: "test-key",
+          databaseId: "WOS",
+          maxPages: 1,
+          pageSize: 50,
+          request: { method: "GET", queryName: "q", databaseQueryName: "db", pageQueryName: "page", limitQueryName: "limit", useApiKeyHeader: false },
+          responseMap: { items: "hits", title: "title", summary: "abstract", journal: "source.sourceTitle", year: "source.publishYear", authors: "names.authors" }
+        },
+        fetchImpl: async url => {
+          requests.push(new URL(url));
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              hits: [{
+                uid: "WOS:000123",
+                title: "Historical optical calibration outside the configured direction",
+                abstract: "No configured direction keyword is present.",
+                source: { sourceTitle: "Optics Letters", publishYear: 2020 },
+                names: { authors: [{ displayName: "A. Author" }] }
+              }]
+            })
+          };
+        }
+      },
+      fetchers: {
+        crossref: async () => null,
+        llm: async () => ({ abstractZh: "中文摘要。", reason: "精确匹配。", tokenUsage: { status: "已调用 AI" } })
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].searchParams.get("q"), "UT=(WOS:000123)");
+    assert.equal(requests[0].searchParams.has("publishTimeSpan"), false);
+    assert.deepEqual(payload.papers.map(paper => paper.sourceId), ["WOS:000123"]);
+    assert.equal(payload.papers[0].published, "2020");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("exact title uses actual Google adapters without direction dates or keyword filtering", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-exact-google-adapters-"));
+  const requests = [];
+  const title = "Historical optical calibration study";
+  try {
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      date: "2026-01-31",
+      searchMode: "exact",
+      queryExpression: title,
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      keywords: ["SIM"],
+      searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+      sources: ["Google Scholar", "Google Search"],
+      googleScholar: {
+        dataDir: tempDir,
+        config: {
+          enabled: true,
+          endpoint: "https://serpapi.test/search.json",
+          apiKey: "test-key",
+          maxPages: 1,
+          num: 10,
+          request: { method: "GET", queryName: "q", apiKeyQueryName: "api_key", useApiKeyHeader: false },
+          responseMap: { items: "organic_results", title: "title", summary: "snippet", journal: "publication_info.summary", year: "publication_info.summary", url: "link" }
+        },
+        fetchImpl: async url => {
+          const request = new URL(url);
+          requests.push(request);
+          const googleSearch = request.searchParams.get("engine") === "google";
+          return {
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({
+              organic_results: [{
+                title,
+                snippet: "No configured direction keyword is present.",
+                publication_info: { summary: "A. Author - Optics Letters, 2020 - example.test" },
+                source: "Optics Letters",
+                date: googleSearch ? "Jan 5, 2020" : undefined,
+                link: `https://example.test/${googleSearch ? "search" : "scholar"}`
+              }]
+            })
+          };
+        }
+      },
+      fetchers: {
+        crossref: async () => null,
+        llm: async () => ({ abstractZh: "中文摘要。", reason: "精确匹配。", tokenUsage: { status: "已调用 AI" } })
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests.map(request => request.searchParams.get("q")), [`"${title}"`, `"${title}"`]);
+    assert.equal(requests.some(request => request.searchParams.has("as_ylo") || request.searchParams.has("as_yhi") || request.searchParams.has("tbs")), false);
+    assert.deepEqual(payload.papers, []);
+    assert.deepEqual(payload.exactCandidates.map(paper => paper.title), [title, title]);
+    assert.ok(payload.exactCandidates.every(paper => paper.published.startsWith("2020")));
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("Task 4 Google adapters ignore legacy rolling offsets and persist canonical next pages", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-google-canonical-cursor-"));
+  const requests = [];
+  const title = "Exact optical calibration study";
+  const config = {
+    enabled: true,
+    endpoint: "https://serpapi.test/search.json",
+    apiKey: "test-key",
+    rollingFetch: true,
+    maxPages: 1,
+    num: 10,
+    request: { method: "GET", queryName: "q", apiKeyQueryName: "api_key", useApiKeyHeader: false },
+    responseMap: { items: "organic_results", title: "title", summary: "snippet", journal: "source", year: "date", url: "link" }
+  };
+  const fetchImpl = async url => {
+    const request = new URL(url);
+    requests.push(request);
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        organic_results: [{
+          title,
+          snippet: "Exact result without direction keywords.",
+          source: "Optics Letters",
+          date: "Jan 5, 2020",
+          link: `https://example.test/${request.searchParams.get("engine") === "google" ? "search" : "scholar"}`
+        }],
+        serpapi_pagination: { next: "https://serpapi.test/search.json?start=10" }
+      })
+    };
+  };
+  try {
+    await fetchGoogleScholarPapers(["SIM"], { dataDir: tempDir, config, fetchImpl });
+    await fetchGoogleSearchPapers(["SIM"], { dataDir: tempDir, config, fetchImpl });
+    const legacyBefore = await readGoogleRollingCursorStatus({
+      dataDir: tempDir,
+      config,
+      keywords: ["SIM"],
+      sources: ["Google Scholar", "Google Search"]
+    });
+    assert.deepEqual(legacyBefore.items.map(item => item.nextStart), [10, 10]);
+
+    requests.length = 0;
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      date: "2026-01-31",
+      searchMode: "exact",
+      queryExpression: title,
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      keywords: ["SIM"],
+      searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+      sources: ["Google Scholar", "Google Search"],
+      googleScholar: { dataDir: tempDir, config, fetchImpl },
+      fetchers: {
+        crossref: async () => null,
+        llm: async () => ({ abstractZh: "中文摘要。", reason: "精确匹配。", tokenUsage: { status: "已调用 AI" } })
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    assert.deepEqual(requests.map(request => Number(request.searchParams.get("start") || 0)), [0, 0]);
+    assert.deepEqual(payload.sourcePages, {
+      googlescholar: { nextPage: 2, complete: false },
+      googlesearch: { nextPage: 2, complete: false }
+    });
+    assert.deepEqual((await readRecentFetchCursors(tempDir)).tasks[payload.taskFingerprint].sourcePages, payload.sourcePages);
+    const legacyAfter = await readGoogleRollingCursorStatus({
+      dataDir: tempDir,
+      config,
+      keywords: ["SIM"],
+      sources: ["Google Scholar", "Google Search"]
+    });
+    assert.deepEqual(legacyAfter.items.map(item => item.nextStart), [10, 10]);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("actual Google first-page failure preserves the canonical start page", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-google-first-page-failure-"));
+  try {
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      date: "2026-01-31",
+      searchMode: "direction",
+      queryExpression: "SIM",
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      keywords: ["SIM"],
+      searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+      sources: ["Google Scholar"],
+      googleScholar: {
+        config: {
+          enabled: true,
+          endpoint: "https://serpapi.test/search.json",
+          apiKey: "test-key",
+          rollingFetch: true,
+          maxPages: 1,
+          num: 10,
+          request: { method: "GET", queryName: "q", apiKeyQueryName: "api_key", useApiKeyHeader: false },
+          responseMap: { items: "organic_results", title: "title", summary: "snippet", journal: "source", year: "date", url: "link" }
+        },
+        fetchImpl: async () => { throw new Error("first page unavailable"); }
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    assert.match(payload.errors[0].message, /first page unavailable/);
+    assert.deepEqual(payload.sourcePages.googlescholar, { nextPage: 1, complete: false });
+    assert.deepEqual((await readRecentFetchCursors(tempDir)).tasks[payload.taskFingerprint].sourcePages, {
+      googlescholar: { nextPage: 1, complete: false }
+    });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("exact title lookup returns close candidates without archiving or calling AI", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-exact-title-"));
+  let llmCalls = 0;
+  let crossrefCalls = 0;
+  let sourceOptions;
+  try {
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      date: "2026-01-31",
+      searchMode: "exact",
+      queryExpression: "Structured illumination microscopy reconstruction",
+      keywords: ["SIM"],
+      sources: ["Google Scholar"],
+      fetchers: {
+        googlescholar: async options => {
+          sourceOptions = options;
+          return [
+            {
+              id: "scholar-candidate-1",
+              title: "Structured illumination microscopy reconstruction",
+              summary: "First candidate.",
+              source: "Google Scholar · Optica",
+              sourceType: "论文搜索",
+              published: "2021",
+              tags: [],
+              score: 80
+            },
+            {
+              id: "scholar-candidate-2",
+              title: "Structured illumination microscopy reconstruction methods",
+              summary: "Second candidate.",
+              source: "Google Scholar · Nature Methods",
+              sourceType: "论文搜索",
+              published: "2026-01-01",
+              tags: [],
+              score: 79
+            }
+          ];
+        },
+        crossref: async () => {
+          crossrefCalls += 1;
+          return null;
+        },
+        llm: async () => {
+          llmCalls += 1;
+          return { tokenUsage: { status: "已调用 AI" } };
+        }
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    assert.equal(sourceOptions.queryExpression, '"Structured illumination microscopy reconstruction"');
+    assert.equal(crossrefCalls, 0);
+    assert.equal(llmCalls, 0);
+    assert.equal(payload.count, 0);
+    assert.equal(payload.newPapers.length, 0);
+    assert.equal(payload.exactCandidates.length, 2);
+    await assert.rejects(fs.access(path.join(tempDir, "archive.json")), { code: "ENOENT" });
+    await assert.rejects(fs.access(path.join(tempDir, "2026-01-31-recent.json")), { code: "ENOENT" });
+    await assert.rejects(fs.access(path.join(tempDir, "fetch-log.json")), { code: "ENOENT" });
+    await assert.rejects(fs.access(path.join(tempDir, "operation-log.jsonl")), { code: "ENOENT" });
+    await assert.rejects(fs.access(path.join(tempDir, "journal-metrics-cache.json")), { code: "ENOENT" });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("direction fetch pipeline uses the Boolean search graph instead of naive OR", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-direction-graph-"));
+  try {
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      searchMode: "direction",
+      queryExpression: "(SIM AND RIM)",
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      keywords: ["SIM", "RIM"],
+      searchLogic: { activeKeywords: ["SIM", "RIM"], andEdges: [["SIM", "RIM"]] },
+      sources: ["arXiv"],
+      fetchers: {
+        arxiv: async () => [
+          { id: "sim-only", title: "SIM microscopy reconstruction", summary: "Only one term.", source: "arXiv", sourceType: "预印本", published: "2026-01-02", tags: [], score: 90 },
+          { id: "sim-rim", title: "SIM and RIM microscopy reconstruction", summary: "Both terms.", source: "arXiv", sourceType: "预印本", published: "2026-01-03", tags: [], score: 80 }
+        ],
+        crossref: async () => null,
+        llm: async ({ paper }) => ({
+          abstractZh: paper.summary,
+          reason: "匹配搜索图。",
+          tokenUsage: { prompt: 1, completion: 1, total: 2, model: "test", status: "已调用 AI" }
+        })
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    assert.deepEqual(payload.newPapers.map(paper => paper.id), ["sim-rim"]);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("newPapers excludes stable identities that were already archived before this run", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-new-papers-"));
+  const complete = paper => ({
+    ...paper,
+    summary: "structured illumination microscopy",
+    abstractZh: "已有中文摘要。",
+    reason: "已有推荐理由。",
+    shortTitle: "2026@",
+    source: "arXiv",
+    sourceType: "预印本",
+    published: "2026-01-10",
+    tags: [],
+    score: 80,
+    tokenUsage: { status: "已调用 AI" }
+  });
+  const run = papers => fetchPaperPayload({
+    dataDir: tempDir,
+    refresh: true,
+    mode: "recent",
+    date: "2026-01-31",
+    searchMode: "direction",
+    queryExpression: "SIM",
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    keywords: ["SIM"],
+    searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+    sources: ["arXiv"],
+    fetchers: { arxiv: async () => papers, crossref: async () => null },
+    journalMetrics: { config: { enabled: false } }
+  });
+  try {
+    await run([complete({ id: "existing-paper", doi: "10.1000/existing", title: "Existing SIM paper" })]);
+    const payload = await run([
+      complete({ id: "same-paper-new-source-id", doi: "10.1000/existing", title: "Existing SIM paper" }),
+      complete({ id: "new-paper", doi: "10.1000/new", title: "New SIM paper" })
+    ]);
+
+    assert.deepEqual(payload.newPapers.map(paper => paper.doi), ["10.1000/new"]);
+    const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+    assert.ok(archive.papers.some(paper => paper.doi === "10.1000/existing"));
+    assert.ok(archive.papers.some(paper => paper.doi === "10.1000/new"));
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("newPapers uses conservative same-version identity boundaries", async t => {
+  const paper = overrides => ({
+    title: "Cross-source SIM identity study",
+    summary: "structured illumination microscopy",
+    abstractZh: "已有中文摘要。",
+    reason: "已有推荐理由。",
+    shortTitle: "2026@",
+    sourceType: "论文数据库",
+    published: "2026-01-10",
+    tags: [],
+    score: 80,
+    tokenUsage: { status: "已调用 AI" },
+    ...overrides
+  });
+  const runScenario = async (existing, incoming) => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-new-papers-identity-"));
+    const run = result => fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      date: "2026-01-31",
+      searchMode: "direction",
+      queryExpression: "SIM",
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      keywords: ["SIM"],
+      searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+      sources: [result.retrievalSource],
+      fetchers: {
+        [result.retrievalSource]: async () => [paper(result)],
+        crossref: async () => null
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+    try {
+      await run(existing);
+      return await run(incoming);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  };
+
+  await t.test("keeps cross-source sourceId collisions new", async () => {
+    const payload = await runScenario(
+      { id: "scholar-first", retrievalSource: "googlescholar", sourceId: "shared-local-id", publicationStage: "formal", title: "First SIM paper", authors: ["Alice Smith"] },
+      { id: "wos-second", retrievalSource: "webofscience", sourceId: "shared-local-id", publicationStage: "formal", title: "Different SIM paper", authors: ["Bob Jones"] }
+    );
+    assert.deepEqual(payload.newPapers.map(item => item.id), ["wos-second"]);
+  });
+
+  await t.test("keeps same-title papers with different authors new", async () => {
+    const payload = await runScenario(
+      { id: "scholar-alice", retrievalSource: "googlescholar", sourceId: "scholar-alice", publicationStage: "formal", authors: ["Alice Smith"] },
+      { id: "wos-bob", retrievalSource: "webofscience", sourceId: "wos-bob", publicationStage: "formal", authors: ["Bob Jones"] }
+    );
+    assert.deepEqual(payload.newPapers.map(item => item.id), ["wos-bob"]);
+  });
+
+  await t.test("keeps same-title papers without author evidence new", async () => {
+    const payload = await runScenario(
+      { id: "scholar-no-author", retrievalSource: "googlescholar", sourceId: "scholar-no-author", publicationStage: "formal", authors: [] },
+      { id: "wos-no-author", retrievalSource: "webofscience", sourceId: "wos-no-author", publicationStage: "formal", authors: [] }
+    );
+    assert.deepEqual(payload.newPapers.map(item => item.id), ["wos-no-author"]);
+  });
+
+  await t.test("recognizes normalized titles with overlapping authors in the same stage", async () => {
+    const payload = await runScenario(
+      { id: "scholar-same-paper", retrievalSource: "googlescholar", sourceId: "scholar-same-paper", publicationStage: "formal", title: "Cross-source: SIM identity study", authors: ["A. Smith"] },
+      { id: "wos-same-paper", retrievalSource: "webofscience", sourceId: "wos-same-paper", publicationStage: "formal", title: "ＣＲＯＳＳ－ＳＯＵＲＣＥ SIM IDENTITY STUDY", authors: ["Alice Smith"] }
+    );
+    assert.deepEqual(payload.newPapers, []);
+  });
+
+  await t.test("recognizes equal DOI as the same version", async () => {
+    const payload = await runScenario(
+      { id: "scholar-doi", retrievalSource: "googlescholar", sourceId: "scholar-doi", publicationStage: "formal", doi: "10.1000/shared", title: "First SIM title", authors: [] },
+      { id: "wos-doi", retrievalSource: "webofscience", sourceId: "wos-doi", publicationStage: "formal", doi: "https://doi.org/10.1000/SHARED", title: "Second SIM title", authors: [] }
+    );
+    assert.deepEqual(payload.newPapers, []);
+  });
+
+  await t.test("keeps formal and preprint versions separately new", async () => {
+    const payload = await runScenario(
+      { id: "formal-paper", retrievalSource: "webofscience", sourceId: "formal-paper", publicationStage: "formal", authors: ["Alice Smith"] },
+      { id: "preprint-paper", retrievalSource: "arxiv", sourceId: "preprint-paper", publicationStage: "preprint", sourceType: "预印本", authors: ["Alice Smith"] }
+    );
+    assert.deepEqual(payload.newPapers.map(item => item.id), ["preprint-paper"]);
+  });
+});
+
+test("discovery payload exposes one canonical Task 5 top-level contract", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-task5-contract-"));
+  try {
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      date: "2026-01-31",
+      searchMode: "direction",
+      queryExpression: "SIM",
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      keywords: ["SIM"],
+      searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+      sources: ["arXiv"],
+      fetchers: { arxiv: async () => [], crossref: async () => null },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    assert.equal(payload.taskFingerprint, payload.task.fingerprint);
+    assert.strictEqual(payload.sourcePages, payload.task.sourcePages);
+    assert.ok(Array.isArray(payload.sourceResults));
+    assert.ok(Array.isArray(payload.newPapers));
+    assert.ok(Array.isArray(payload.errors));
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("interrupted source page callback preserves the next resumable cursor", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-interrupted-cursor-"));
+  try {
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      searchMode: "direction",
+      queryExpression: "SIM OR RIM",
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      keywords: ["SIM", "RIM"],
+      searchLogic: { activeKeywords: ["SIM", "RIM"], andEdges: [] },
+      sources: ["Web of Science"],
+      fetchers: {
+        webofscience: async options => {
+          assert.equal(options.startPage, 1);
+          await options.onPageComplete({ page: 4, nextPage: 5, returned: 50, complete: false });
+          throw new Error("page 5 interrupted");
+        }
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    const cursors = await readRecentFetchCursors(tempDir);
+    assert.match(payload.errors[0].message, /interrupted/);
+    assert.equal(payload.task.sourcePages.webofscience.nextPage, 5);
+    assert.deepEqual(cursors.tasks[payload.task.fingerprint].sourcePages, {
+      webofscience: { nextPage: 5, complete: false }
+    });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("full WoS page budget keeps its cursor and the next run resumes at the next page", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-full-page-cursor-"));
+  const requestedPages = [];
+  const webOfScience = {
+    config: {
+      enabled: true,
+      endpoint: "https://api.clarivate.test/apis/wos-starter/v1/documents",
+      apiKey: "test-key",
+      databaseId: "WOS",
+      maxPages: 1,
+      pageSize: 1,
+      request: { method: "GET", queryName: "q", databaseQueryName: "db", pageQueryName: "page", limitQueryName: "limit", useApiKeyHeader: false },
+      responseMap: { items: "hits", title: "title", summary: "abstract", year: "source.publishYear" }
+    },
+    fetchImpl: async url => {
+      const page = Number(new URL(url).searchParams.get("page"));
+      requestedPages.push(page);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ hits: page === 1 ? [{ uid: "WOS:1", title: "SIM full page", abstract: "SIM microscopy", source: { publishYear: 2026 } }] : [] })
+      };
+    }
+  };
+  const options = {
+    dataDir: tempDir,
+    refresh: true,
+    mode: "recent",
+    date: "2026-01-31",
+    searchMode: "direction",
+    queryExpression: "SIM",
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    keywords: ["SIM"],
+    searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+    sources: ["Web of Science"],
+    webOfScience,
+    fetchers: {
+      crossref: async () => null,
+      llm: async () => ({ abstractZh: "中文摘要。", reason: "匹配。", tokenUsage: { status: "已调用 AI" } })
+    },
+    journalMetrics: { config: { enabled: false } }
+  };
+  try {
+    const first = await fetchPaperPayload(options);
+    const cursors = await readRecentFetchCursors(tempDir);
+    assert.deepEqual(cursors.tasks[first.task.fingerprint].sourcePages.webofscience, { nextPage: 2, complete: false });
+
+    await fetchPaperPayload(options);
+    assert.deepEqual(requestedPages, [1, 2]);
+    assert.deepEqual(await readRecentFetchCursors(tempDir), { tasks: {} });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resume skips complete sources and continues each incomplete source at nextPage", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-source-completion-cursor-"));
+  const task = {
+    searchMode: "direction",
+    queryExpression: "SIM",
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    sources: ["arxiv", "webofscience"],
+    sourcePages: {
+      arxiv: { nextPage: 2, complete: true },
+      webofscience: { nextPage: 3, complete: false }
+    }
+  };
+  let arxivCalls = 0;
+  let webOfScienceStartPage;
+  try {
+    await writeRecentFetchCursor(task, tempDir);
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      date: "2026-01-31",
+      searchMode: task.searchMode,
+      queryExpression: task.queryExpression,
+      startDate: task.startDate,
+      endDate: task.endDate,
+      keywords: ["SIM"],
+      searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+      sources: ["arXiv", "Web of Science"],
+      fetchers: {
+        arxiv: async () => { arxivCalls += 1; return []; },
+        webofscience: async options => {
+          webOfScienceStartPage = options.startPage;
+          await options.onPageComplete({ page: 3, nextPage: 4, returned: 0, complete: true });
+          return [];
+        }
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    assert.equal(arxivCalls, 0);
+    assert.equal(webOfScienceStartPage, 3);
+    assert.deepEqual(payload.sourceResults.map(result => result.source), ["arxiv", "webofscience"]);
+    assert.deepEqual(await readRecentFetchCursors(tempDir), { tasks: {} });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("recent fetch cursor fingerprint is stable only for an identical frozen task", () => {
   const task = {
     searchMode: "direction",
@@ -2995,8 +4030,8 @@ test("recent fetch cursor writes, resumes and clears only the identical task", a
     assert.equal(cursors.tasks[fingerprint].query, "SIM OR RIM");
     assert.deepEqual(cursors.tasks[fingerprint].sources, ["arxiv", "webofscience"]);
     assert.deepEqual(cursors.tasks[fingerprint].sourcePages, {
-      arxiv: { nextPage: 3 },
-      webofscience: { nextPage: 4 }
+      arxiv: { nextPage: 3, complete: false },
+      webofscience: { nextPage: 4, complete: false }
     });
     assert.ok(cursors.tasks[fingerprint].updatedAt);
 
@@ -3033,7 +4068,113 @@ test("recent fetch cursor keeps pages only for enabled sources", async () => {
     };
 
     const cursor = await writeRecentFetchCursor(task, tempDir);
-    assert.deepEqual(cursor.sourcePages, { arxiv: { nextPage: 3 } });
+    assert.deepEqual(cursor.sourcePages, { arxiv: { nextPage: 3, complete: false } });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("concurrent cursor writes keep sibling source progress for one task", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-cursor-concurrent-"));
+  const task = {
+    searchMode: "direction",
+    queryExpression: "SIM OR RIM",
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    sources: ["arxiv", "webofscience"]
+  };
+  try {
+    await Promise.all([
+      writeRecentFetchCursor({ ...task, sourcePages: { arxiv: { nextPage: 2, complete: true } } }, tempDir),
+      writeRecentFetchCursor({ ...task, sourcePages: { webofscience: { nextPage: 5, complete: false } } }, tempDir)
+    ]);
+
+    const fingerprint = buildDiscoveryTaskFingerprint(task);
+    assert.deepEqual((await readRecentFetchCursors(tempDir)).tasks[fingerprint].sourcePages, {
+      arxiv: { nextPage: 2, complete: true },
+      webofscience: { nextPage: 5, complete: false }
+    });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("concurrent cursor writes keep different fingerprints in the shared file", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-cursor-cross-task-"));
+  const task = queryExpression => ({
+    searchMode: "direction",
+    queryExpression,
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    sources: ["arxiv"],
+    sourcePages: { arxiv: { nextPage: 2, complete: false } }
+  });
+  const left = task("SIM");
+  const right = task("RIM");
+  try {
+    await Promise.all([
+      writeRecentFetchCursor(left, tempDir),
+      writeRecentFetchCursor(right, tempDir)
+    ]);
+
+    const tasks = (await readRecentFetchCursors(tempDir)).tasks;
+    assert.ok(tasks[buildDiscoveryTaskFingerprint(left)]);
+    assert.ok(tasks[buildDiscoveryTaskFingerprint(right)]);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("concurrent cursor clear and write preserve unrelated fingerprints", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-cursor-clear-write-"));
+  const task = queryExpression => ({
+    searchMode: "direction",
+    queryExpression,
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    sources: ["arxiv"],
+    sourcePages: { arxiv: { nextPage: 2, complete: false } }
+  });
+  const removed = task("SIM");
+  const kept = task("RIM");
+  const added = task("MP-SIM");
+  try {
+    await writeRecentFetchCursor(removed, tempDir);
+    await writeRecentFetchCursor(kept, tempDir);
+    await Promise.all([
+      clearRecentFetchCursor(buildDiscoveryTaskFingerprint(removed), tempDir),
+      writeRecentFetchCursor(added, tempDir)
+    ]);
+
+    const tasks = (await readRecentFetchCursors(tempDir)).tasks;
+    assert.equal(tasks[buildDiscoveryTaskFingerprint(removed)], undefined);
+    assert.ok(tasks[buildDiscoveryTaskFingerprint(kept)]);
+    assert.ok(tasks[buildDiscoveryTaskFingerprint(added)]);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("a failed cursor write does not block the next write for the same task", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-cursor-recovery-"));
+  const cursorPath = path.join(tempDir, "recent-fetch-cursors.json");
+  const task = {
+    searchMode: "direction",
+    queryExpression: "SIM",
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    sources: ["arxiv"],
+    sourcePages: { arxiv: { nextPage: 2, complete: false } }
+  };
+  try {
+    await fs.mkdir(cursorPath);
+    await assert.rejects(writeRecentFetchCursor(task, tempDir));
+    await fs.rm(cursorPath, { recursive: true, force: true });
+    await writeRecentFetchCursor(task, tempDir);
+    const fingerprint = buildDiscoveryTaskFingerprint(task);
+    assert.deepEqual((await readRecentFetchCursors(tempDir)).tasks[fingerprint].sourcePages, {
+      arxiv: { nextPage: 2, complete: false }
+    });
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
@@ -3560,6 +4701,27 @@ test("boolean search logic joins a connected AND component and an independent ke
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
+});
+
+test("boolean search logic matches acronym expansions without changing AND OR semantics", () => {
+  assert.equal(paperMatchesSearchLogic({
+    title: "Structured illumination microscopy reconstruction"
+  }, {
+    activeKeywords: ["SIM"],
+    andEdges: []
+  }), true);
+  assert.equal(paperMatchesSearchLogic({
+    title: "Structured illumination microscopy reconstruction"
+  }, {
+    activeKeywords: ["SIM", "microscopy"],
+    andEdges: [["SIM", "microscopy"]]
+  }), true);
+  assert.equal(paperMatchesSearchLogic({
+    title: "Structured illumination reconstruction"
+  }, {
+    activeKeywords: ["SIM", "microscopy"],
+    andEdges: [["SIM", "microscopy"]]
+  }), false);
 });
 
 test("explicitly clear search logic survives user config round trip", async () => {
