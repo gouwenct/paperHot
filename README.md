@@ -348,6 +348,7 @@ flowchart TD
 | `docs/superpowers/specs/2026-07-11-recent-paper-discovery-design.md` | 已确认的近期论文发现、多信源检索、断点恢复和今日论文页面设计 |
 | `docs/superpowers/plans/2026-07-11-recent-paper-discovery.md` | 近期论文发现功能的分步实现、测试和验证计划 |
 | `.superpowers/sdd/task-2-report.md` | Task 2 多信源元数据与正式版/预印本关联的实现、TDD 和验证报告 |
+| `.superpowers/sdd/task-3-report.md` | Task 3 近期抓取游标与 WoS 本地请求用量的实现、TDD 和验证报告 |
 
 ### 主要数据文件
 
@@ -360,6 +361,9 @@ flowchart TD
 | `data/papers/paper-notes.json` | 短标题、已读、标星等阅读状态 |
 | `data/papers/journal-metrics-cache.json` | EasyScholar 期刊指标缓存 |
 | `data/papers/google-rolling-cursors.json` | Google Scholar 滚动抓取位置 |
+| `data/papers/recent-fetch-cursors.json` | 近期抓取的短期断点；仅相同检索模式、表达式、日期和信源任务可续传，不进入本地数据 ZIP |
+| `data/papers/web-of-science-usage.json` | PaperHot 本地记录的 WoS 请求日/月/累计次数及最后状态；不保存请求 URL、Header 或 API Key |
+| `data/papers/*.example.json` | 可提交的运行态 JSON 空模板；真实运行文件继续只保留在本机 |
 
 ## 维护者统一任务流程
 

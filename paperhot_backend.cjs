@@ -11,6 +11,8 @@ const FETCH_LOG_NAME = "fetch-log.json";
 const OPERATION_LOG_NAME = "operation-log.jsonl";
 const JOURNAL_METRICS_CACHE_NAME = "journal-metrics-cache.json";
 const GOOGLE_ROLLING_CURSOR_NAME = "google-rolling-cursors.json";
+const RECENT_FETCH_CURSORS_NAME = "recent-fetch-cursors.json";
+const WEB_OF_SCIENCE_USAGE_NAME = "web-of-science-usage.json";
 const LOCAL_DATA_FORMAT = "paperhot-local-data";
 const LOCAL_DATA_VERSION = 1;
 const FETCH_LOG_LIMIT = 30;
@@ -1567,6 +1569,118 @@ async function writeJsonFile(file, payload) {
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
   return file;
+}
+
+function discoveryTaskIdentity(input = {}) {
+  const sources = [...new Set((Array.isArray(input.sources) ? input.sources : [])
+    .map(source => compactText(source).toLowerCase())
+    .filter(Boolean))].sort();
+  return {
+    searchMode: input.searchMode === "exact" ? "exact" : "direction",
+    queryExpression: compactText(input.queryExpression).toLowerCase(),
+    startDate: compactText(input.startDate),
+    endDate: compactText(input.endDate),
+    sources
+  };
+}
+
+function buildDiscoveryTaskFingerprint(input = {}) {
+  return crypto.createHash("sha256")
+    .update(JSON.stringify(discoveryTaskIdentity(input)))
+    .digest("hex")
+    .slice(0, 24);
+}
+
+async function readRecentFetchCursors(dataDir = DATA_DIR) {
+  const data = await readJsonFile(path.join(dataDir, RECENT_FETCH_CURSORS_NAME), { tasks: {} });
+  return data && data.tasks && typeof data.tasks === "object" ? data : { tasks: {} };
+}
+
+async function writeRecentFetchCursor(task = {}, dataDir = DATA_DIR) {
+  const identity = discoveryTaskIdentity(task);
+  const fingerprint = buildDiscoveryTaskFingerprint(task);
+  const sourcePages = {};
+  Object.entries(task.sourcePages || {}).sort(([left], [right]) => left.localeCompare(right)).forEach(([source, progress]) => {
+    const normalizedSource = compactText(source).toLowerCase();
+    if (!identity.sources.includes(normalizedSource)) return;
+    const nextPage = Number(progress?.nextPage ?? progress);
+    if (Number.isFinite(nextPage) && nextPage > 0) sourcePages[normalizedSource] = { nextPage: Math.floor(nextPage) };
+  });
+  const data = await readRecentFetchCursors(dataDir);
+  data.tasks[fingerprint] = {
+    query: compactText(task.queryExpression),
+    startDate: identity.startDate,
+    endDate: identity.endDate,
+    sources: identity.sources,
+    sourcePages,
+    updatedAt: new Date().toISOString()
+  };
+  await writeJsonFile(path.join(dataDir, RECENT_FETCH_CURSORS_NAME), data);
+  return { fingerprint, ...data.tasks[fingerprint] };
+}
+
+async function clearRecentFetchCursor(fingerprint, dataDir = DATA_DIR) {
+  const data = await readRecentFetchCursors(dataDir);
+  delete data.tasks[compactText(fingerprint)];
+  await writeJsonFile(path.join(dataDir, RECENT_FETCH_CURSORS_NAME), data);
+  return data;
+}
+
+async function readWebOfScienceUsage(dataDir = DATA_DIR, now = new Date()) {
+  const usage = await readJsonFile(path.join(dataDir, WEB_OF_SCIENCE_USAGE_NAME), {
+    trackingStartedAt: "",
+    totalCount: 0,
+    months: {},
+    days: {},
+    lastRequestAt: "",
+    lastStatus: ""
+  });
+  const current = now instanceof Date ? now : new Date(now);
+  const today = current.toISOString().slice(0, 10);
+  const month = today.slice(0, 7);
+  const months = usage.months && typeof usage.months === "object" ? usage.months : {};
+  const days = usage.days && typeof usage.days === "object" ? usage.days : {};
+  return {
+    trackingStartedAt: compactText(usage.trackingStartedAt),
+    todayCount: Number(days[today] || 0),
+    monthCount: Number(months[month] || 0),
+    totalCount: Number(usage.totalCount || 0),
+    months,
+    lastRequestAt: compactText(usage.lastRequestAt),
+    lastStatus: compactText(usage.lastStatus)
+  };
+}
+
+// ponytail: serialized only within this process; use an atomic datastore if multi-process fetches are introduced.
+let webOfScienceUsageWriteQueue = Promise.resolve();
+
+async function recordWebOfScienceRequest({ status, at = new Date().toISOString() } = {}, dataDir = DATA_DIR) {
+  const update = webOfScienceUsageWriteQueue.then(async () => {
+    const requestAt = new Date(at).toISOString();
+    const file = path.join(dataDir, WEB_OF_SCIENCE_USAGE_NAME);
+    const usage = await readJsonFile(file, {
+      trackingStartedAt: requestAt,
+      totalCount: 0,
+      months: {},
+      days: {},
+      lastRequestAt: "",
+      lastStatus: ""
+    });
+    const month = requestAt.slice(0, 7);
+    const day = requestAt.slice(0, 10);
+    usage.months = usage.months && typeof usage.months === "object" ? usage.months : {};
+    usage.days = usage.days && typeof usage.days === "object" ? usage.days : {};
+    usage.totalCount = Number(usage.totalCount || 0) + 1;
+    usage.months[month] = Number(usage.months[month] || 0) + 1;
+    usage.days[day] = Number(usage.days[day] || 0) + 1;
+    usage.trackingStartedAt ||= requestAt;
+    usage.lastRequestAt = requestAt;
+    usage.lastStatus = compactText(status);
+    await writeJsonFile(file, usage);
+    return usage;
+  });
+  webOfScienceUsageWriteQueue = update.catch(() => {});
+  return update;
 }
 
 async function readGoogleRollingCursors(dataDir = DATA_DIR) {
@@ -3136,6 +3250,7 @@ async function fetchWebOfSciencePapers(keywords = DEFAULT_KEYWORDS, options = {}
   const query = buildWebOfScienceQuery(keywords, config.queryTemplate);
   const maxPages = clampPositiveInteger(options.maxPages || config.maxPages, DEFAULT_WEB_OF_SCIENCE_CONFIG.maxPages, 1, WEB_OF_SCIENCE_MAX_PAGES_LIMIT);
   const pageSize = clampPositiveInteger(options.pageSize || config.pageSize, DEFAULT_WEB_OF_SCIENCE_CONFIG.pageSize, 1, WEB_OF_SCIENCE_PAGE_SIZE_LIMIT);
+  const dataDir = options.dataDir || DATA_DIR;
   const pages = [];
 
   for (let page = 1; page <= maxPages; page += 1) {
@@ -3146,12 +3261,19 @@ async function fetchWebOfSciencePapers(keywords = DEFAULT_KEYWORDS, options = {}
     url.searchParams.set(request.limitQueryName || "limit", String(pageSize));
     if (request.apiKeyQueryName && config.apiKey) url.searchParams.set(request.apiKeyQueryName, config.apiKey);
     emitWebOfSciencePageProgress(options.onProgress, { page, pageSize, maxPages });
-    const response = await fetchImpl(url, {
-      method: request.method || "GET",
-      headers,
-      signal: AbortSignal.timeout(20000)
-    });
-    if (!response.ok) throw new Error(`Web of Science 信源失败：HTTP ${response.status}`);
+    let response;
+    try {
+      response = await fetchImpl(url, {
+        method: request.method || "GET",
+        headers,
+        signal: AbortSignal.timeout(20000)
+      });
+      if (!response.ok) throw new Error(`Web of Science 信源失败：HTTP ${response.status}`);
+    } catch (error) {
+      await recordWebOfScienceRequest({ status: "failed" }, dataDir);
+      throw error;
+    }
+    await recordWebOfScienceRequest({ status: "ok" }, dataDir);
     const payload = typeof response.json === "function" ? await response.json() : JSON.parse(await response.text());
     pages.push(payload);
     const items = getNestedValue(payload, config.responseMap.items);
@@ -5106,6 +5228,7 @@ module.exports = {
   dedupePaperArchive,
   buildTokenStats,
   buildArxivQuery,
+  buildDiscoveryTaskFingerprint,
   buildSearchExpression,
   classifyPaper,
   cleanSearchLogic,
@@ -5147,6 +5270,8 @@ module.exports = {
   readFetchLog,
   readFavoritesPayload,
   readGoogleRollingCursorStatus,
+  readRecentFetchCursors,
+  readWebOfScienceUsage,
   readPaperNotesPayload,
   readOperationLog,
   readArchivePayload,
@@ -5166,13 +5291,16 @@ module.exports = {
   refreshArchivePaperLlmInsight,
   retryFailedFetchLogEnrichment,
   resetGoogleRollingCursors,
+  recordWebOfScienceRequest,
   scorePaper,
   todayString,
   updateFavoritePaper,
   updatePaperNote,
   writeIntegrationConfigs,
+  writeRecentFetchCursor,
   writeUserConfig,
   writeUserProfile,
+  clearRecentFetchCursor,
   webOfScienceCitationCount
 };
 

@@ -16,6 +16,7 @@ const {
   paperMatchesSearchLogic,
   refinePaperPool,
   buildArxivQuery,
+  buildDiscoveryTaskFingerprint,
   buildSearchExpression,
   buildTokenStats,
   enrichPapersWithCrossref,
@@ -31,6 +32,9 @@ const {
   fetchWebOfSciencePapers,
   googleScholarCitationCount,
   readGoogleRollingCursorStatus,
+  readRecentFetchCursors,
+  readWebOfScienceUsage,
+  recordWebOfScienceRequest,
   resetGoogleRollingCursors,
   fetchLast7DaysPapers,
   fetchRecentPapers,
@@ -69,7 +73,9 @@ const {
   importLocalData,
   parseZipEntries,
   scorePaper,
-  rescorePaperAfterEnrichment
+  rescorePaperAfterEnrichment,
+  writeRecentFetchCursor,
+  clearRecentFetchCursor
 } = require("../paperhot_backend.cjs");
 
 test("short title defaults to year prefix for manual technique editing", () => {
@@ -2853,8 +2859,10 @@ test("fetches Google Scholar papers through a configured API source", async () =
 });
 
 test("fetches Web of Science papers through a configured API source with limited pages", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-wos-fetch-"));
   const seen = [];
   const papers = await fetchWebOfSciencePapers(["structured illumination microscopy"], {
+    dataDir: tempDir,
     config: {
       provider: "web-of-science",
       enabled: true,
@@ -2938,6 +2946,201 @@ test("fetches Web of Science papers through a configured API source with limited
   assert.equal(papers.length, 3);
   assert.equal(papers[0].source, "Web of Science · Nature Methods");
   assert.equal(papers[2].source, "Web of Science · Optica");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("recent fetch cursor fingerprint is stable only for an identical frozen task", () => {
+  const task = {
+    searchMode: "direction",
+    queryExpression: "SIM OR RIM",
+    startDate: "2026-04-01",
+    endDate: "2026-07-01",
+    sources: ["webofscience", "arxiv"]
+  };
+  const fingerprint = buildDiscoveryTaskFingerprint(task);
+
+  assert.equal(fingerprint, buildDiscoveryTaskFingerprint({
+    ...task,
+    queryExpression: " sim   or RIM ",
+    sources: ["arxiv", "webofscience", "arxiv"]
+  }));
+  assert.notEqual(fingerprint, buildDiscoveryTaskFingerprint({ ...task, searchMode: "exact" }));
+  assert.notEqual(fingerprint, buildDiscoveryTaskFingerprint({ ...task, queryExpression: "SIM AND RIM" }));
+  assert.notEqual(fingerprint, buildDiscoveryTaskFingerprint({ ...task, startDate: "2026-04-02" }));
+  assert.notEqual(fingerprint, buildDiscoveryTaskFingerprint({ ...task, endDate: "2026-07-02" }));
+  assert.notEqual(fingerprint, buildDiscoveryTaskFingerprint({ ...task, sources: ["webofscience"] }));
+});
+
+test("recent fetch cursor writes, resumes and clears only the identical task", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-recent-cursor-"));
+  try {
+    const task = {
+      searchMode: "direction",
+      queryExpression: "SIM OR RIM",
+      startDate: "2026-04-01",
+      endDate: "2026-07-01",
+      sources: ["webofscience", "arxiv"],
+      sourcePages: {
+        webofscience: { nextPage: 4, returned: 50, complete: false },
+        arxiv: 3
+      },
+      apiKey: "must-not-be-persisted",
+      headers: { "X-ApiKey": "must-not-be-persisted" }
+    };
+    const fingerprint = buildDiscoveryTaskFingerprint(task);
+
+    await writeRecentFetchCursor(task, tempDir);
+    const cursors = await readRecentFetchCursors(tempDir);
+    assert.deepEqual(Object.keys(cursors.tasks), [fingerprint]);
+    assert.equal(cursors.tasks[fingerprint].query, "SIM OR RIM");
+    assert.deepEqual(cursors.tasks[fingerprint].sources, ["arxiv", "webofscience"]);
+    assert.deepEqual(cursors.tasks[fingerprint].sourcePages, {
+      arxiv: { nextPage: 3 },
+      webofscience: { nextPage: 4 }
+    });
+    assert.ok(cursors.tasks[fingerprint].updatedAt);
+
+    const sameFingerprint = buildDiscoveryTaskFingerprint({
+      ...task,
+      queryExpression: " sim  or rim ",
+      sources: ["arxiv", "webofscience"]
+    });
+    const changedFingerprint = buildDiscoveryTaskFingerprint({ ...task, endDate: "2026-07-02" });
+    assert.ok(cursors.tasks[sameFingerprint]);
+    assert.equal(cursors.tasks[changedFingerprint], undefined);
+    assert.doesNotMatch(await fs.readFile(path.join(tempDir, "recent-fetch-cursors.json"), "utf8"), /must-not-be-persisted/);
+
+    await clearRecentFetchCursor(fingerprint, tempDir);
+    assert.deepEqual(await readRecentFetchCursors(tempDir), { tasks: {} });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("recent fetch cursor keeps pages only for enabled sources", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-recent-cursor-sources-"));
+  try {
+    const task = {
+      searchMode: "direction",
+      queryExpression: "SIM",
+      startDate: "2026-04-01",
+      endDate: "2026-07-01",
+      sources: ["arxiv"],
+      sourcePages: {
+        arxiv: { nextPage: 3 },
+        webofscience: { nextPage: 4 }
+      }
+    };
+
+    const cursor = await writeRecentFetchCursor(task, tempDir);
+    assert.deepEqual(cursor.sourcePages, { arxiv: { nextPage: 3 } });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("WoS usage counts today, month, total and concurrent attempts", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-wos-usage-"));
+  try {
+    await recordWebOfScienceRequest({ status: "ok", at: "2026-07-01T01:00:00.000Z" }, tempDir);
+    await recordWebOfScienceRequest({ status: "failed", at: "2026-07-02T01:00:00.000Z" }, tempDir);
+    await recordWebOfScienceRequest({ status: "ok", at: "2026-08-01T01:00:00.000Z" }, tempDir);
+    await Promise.all([
+      recordWebOfScienceRequest({ status: "ok", at: "2026-08-02T01:00:00.000Z" }, tempDir),
+      recordWebOfScienceRequest({ status: "failed", at: "2026-08-02T02:00:00.000Z" }, tempDir)
+    ]);
+
+    const usage = await readWebOfScienceUsage(tempDir, new Date("2026-08-02T12:00:00.000Z"));
+    assert.equal(usage.todayCount, 2);
+    assert.equal(usage.monthCount, 3);
+    assert.equal(usage.totalCount, 5);
+    assert.deepEqual(usage.months, { "2026-07": 2, "2026-08": 3 });
+    assert.equal(usage.lastRequestAt, "2026-08-02T02:00:00.000Z");
+    assert.equal(usage.lastStatus, "failed");
+    assert.equal(usage.trackingStartedAt, "2026-07-01T01:00:00.000Z");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("WoS usage recovers after a rejected write across data directories and upgrades the no-days shape", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-wos-usage-recovery-"));
+  const recoveredDir = path.join(tempRoot, "recovered");
+  const legacyDir = path.join(tempRoot, "legacy");
+  try {
+    await fs.writeFile(recoveredDir, "not a directory", "utf8");
+    await assert.rejects(
+      recordWebOfScienceRequest({ status: "failed", at: "2026-07-01T01:00:00.000Z" }, recoveredDir)
+    );
+
+    await fs.rm(recoveredDir);
+    await recordWebOfScienceRequest({ status: "ok", at: "2026-07-02T01:00:00.000Z" }, recoveredDir);
+    assert.equal((await readWebOfScienceUsage(recoveredDir)).totalCount, 1);
+
+    await fs.mkdir(legacyDir);
+    const shippedShape = await fs.readFile(
+      path.join(__dirname, "..", "data", "papers", "web-of-science-usage.example.json"),
+      "utf8"
+    );
+    await fs.writeFile(path.join(legacyDir, "web-of-science-usage.json"), shippedShape, "utf8");
+    assert.equal((await readWebOfScienceUsage(legacyDir, new Date("2026-07-03T12:00:00.000Z"))).todayCount, 0);
+
+    await recordWebOfScienceRequest({ status: "ok", at: "2026-07-03T01:00:00.000Z" }, legacyDir);
+    const usage = await readWebOfScienceUsage(legacyDir, new Date("2026-07-03T12:00:00.000Z"));
+    assert.equal(usage.todayCount, 1);
+    assert.equal(usage.totalCount, 1);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("WoS usage records each successful and failed HTTP attempt without request details", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-wos-http-usage-"));
+  const config = {
+    enabled: true,
+    endpoint: "https://api.clarivate.test/apis/wos-starter/v1/documents",
+    apiKey: "wos-secret-key",
+    databaseId: "WOS",
+    maxPages: 1,
+    pageSize: 50,
+    queryTemplate: "TS=({query})",
+    request: {
+      method: "GET",
+      queryName: "q",
+      databaseQueryName: "db",
+      pageQueryName: "page",
+      limitQueryName: "limit",
+      apiKeyHeader: "X-ApiKey",
+      useApiKeyHeader: true
+    },
+    responseMap: { items: "hits" }
+  };
+
+  try {
+    await fetchWebOfSciencePapers(["structured illumination microscopy"], {
+      config,
+      dataDir: tempDir,
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ hits: [] }) })
+    });
+    await assert.rejects(fetchWebOfSciencePapers(["structured illumination microscopy"], {
+      config,
+      dataDir: tempDir,
+      fetchImpl: async () => ({ ok: false, status: 429 })
+    }), /HTTP 429/);
+    await assert.rejects(fetchWebOfSciencePapers(["structured illumination microscopy"], {
+      config,
+      dataDir: tempDir,
+      fetchImpl: async () => { throw new Error("network unavailable"); }
+    }), /network unavailable/);
+
+    const usage = await readWebOfScienceUsage(tempDir);
+    assert.equal(usage.totalCount, 3);
+    assert.equal(usage.lastStatus, "failed");
+    const persisted = await fs.readFile(path.join(tempDir, "web-of-science-usage.json"), "utf8");
+    assert.doesNotMatch(persisted, /wos-secret-key|structured illumination microscopy|X-ApiKey/);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("continues Google Scholar rolling fetch from the next saved offset", async () => {
