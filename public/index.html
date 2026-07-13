@@ -233,7 +233,7 @@
     }
     .fetch-range-row {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr)) auto auto;
+      grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
       gap: 10px;
       align-items: end;
     }
@@ -253,11 +253,6 @@
       color: #203049;
       font-size: 12px;
       font-weight: 760;
-    }
-    .google-rolling-status {
-      color: #60738b;
-      font-size: 12px;
-      line-height: 1.5;
     }
     .fetch-session-bar {
       display: flex;
@@ -1738,7 +1733,6 @@
     const fetchRangeStorageKey = "paperhot.fetchRange.v1";
     const fetchSessionsStorageKey = "paperhot.todayFetchSessions.v1";
     const defaultFetchStartDate = "2026-05-01";
-    let googleRollingStatusText = "自动：正在读取抓取起点...";
     let todayPaperSearchQuery = "";
     let allPaperSearchQuery = "";
     let allPaperSearchTimer = null;
@@ -1772,11 +1766,10 @@
         const savedRange = JSON.parse(localStorage.getItem(fetchRangeStorageKey) || "{}");
         return {
           startDate: savedRange.startDate || defaultFetchStartDate,
-          endDate: savedRange.endDate || todayDateInputValue(),
-          googleStartItem: savedRange.googleStartItem || ""
+          endDate: savedRange.endDate || todayDateInputValue()
         };
       } catch {
-        return { startDate: defaultFetchStartDate, endDate: todayDateInputValue(), googleStartItem: "" };
+        return { startDate: defaultFetchStartDate, endDate: todayDateInputValue() };
       }
     }
 
@@ -3165,65 +3158,6 @@
       return sourceState.filter(source => source.enabled).map(source => source.title);
     }
 
-    function googleRollingRequestBody() {
-      return {
-        keywords: getAllEnabledKeywords(),
-        sources: getEnabledSourceNames()
-      };
-    }
-
-    function googleRollingStatusLine(items) {
-      const enabledItems = (Array.isArray(items) ? items : []).filter(item => item && item.label);
-      if (!enabledItems.length) return "自动：当前未启用 Google 抓取渠道";
-      return `自动：${enabledItems.map(item => `${item.label} 从第 ${escapeHTML(item.nextItem)} 篇开始`).join("；")}`;
-    }
-
-    async function loadGoogleRollingStatus() {
-      if (location.protocol === "file:") {
-        googleRollingStatusText = "自动：直接打开 HTML 时无法读取后端抓取起点";
-        return;
-      }
-      try {
-        const response = await fetch("/api/google-rolling/status", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(googleRollingRequestBody())
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const payload = await response.json();
-        googleRollingStatusText = googleRollingStatusLine(payload.items);
-      } catch (error) {
-        googleRollingStatusText = `自动：读取抓取起点失败：${error.message}`;
-      }
-      if ((location.hash.replace("#", "") || "today") === "today") renderToday();
-    }
-
-    async function resetGoogleRollingStart() {
-      if (location.protocol === "file:") {
-        showToast("直接打开 HTML 时无法重置抓取起点");
-        return;
-      }
-      googleRollingStatusText = "自动：正在重置为从第一页抓取...";
-      fetchRange.googleStartItem = "";
-      saveFetchRange();
-      renderToday();
-      try {
-        const response = await fetch("/api/google-rolling/reset", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(googleRollingRequestBody())
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const payload = await response.json();
-        googleRollingStatusText = googleRollingStatusLine(payload.items);
-        showToast("自动抓取起点已重置为第一页");
-      } catch (error) {
-        googleRollingStatusText = `自动：重置抓取起点失败：${error.message}`;
-        showToast(`重置失败：${error.message}`);
-      }
-      renderToday();
-    }
-
     function fetchRangePanel() {
       const sessionButtons = todayFetchSessions.map(session => `
         <span class="fetch-session-chip ${session.id === activeTodayFetchSessionId ? "active" : ""}">
@@ -3246,14 +3180,8 @@
             <label>结束日期
               <input type="date" data-fetch-range="endDate" value="${escapeHTML(fetchRange.endDate)}">
             </label>
-            <label>从第几篇开始
-              <input type="number" min="1" step="20" data-fetch-range="googleStartItem" value="${escapeHTML(fetchRange.googleStartItem || "")}" placeholder="自动">
-            </label>
-            <button class="ghost-btn" data-reset-google-start>重置</button>
             <button class="primary-btn" data-refresh-papers="range">抓取论文</button>
           </div>
-          <div class="google-rolling-status">${googleRollingStatusText}</div>
-          <div class="keyword-section-note">留空时按本地滚动游标继续；填 41 表示从第 41 篇开始抓取。</div>
           <div class="fetch-session-bar">
             ${sessionButtons || `<span class="small-text">还没有临时抓取时间段。</span>`}
             ${todayFetchSessions.length ? `<button class="ghost-btn" data-clear-fetch-sessions>清除</button>` : ""}
@@ -3398,7 +3326,6 @@
         applyPaperPayload(payload, { requestMode, isRangeFetch, refresh, rangeText });
         if (refresh) {
           loadArchiveData();
-          loadGoogleRollingStatus();
           loadFetchLogData().then(() => {
             if ((location.hash.replace("#", "") || "today") === "today") renderToday();
           });
@@ -3437,11 +3364,16 @@
     }
 
     function paperRefreshBody(requestMode, isRangeFetch) {
+      const activeKeywords = getAllEnabledKeywords();
       return {
         mode: requestMode,
-        keywords: getAllEnabledKeywords(),
+        searchMode: "direction",
+        queryExpression: activeKeywords.join(" OR "),
+        searchLogic: { activeKeywords, andEdges: [] },
         sources: getEnabledSourceNames(),
-        ...(isRangeFetch ? { startDate: fetchRange.startDate, endDate: fetchRange.endDate, googleStartItem: fetchRange.googleStartItem } : {})
+        startDate: isRangeFetch ? fetchRange.startDate : "",
+        endDate: isRangeFetch ? fetchRange.endDate : "",
+        resumeMode: "new"
       };
     }
 
@@ -3678,9 +3610,6 @@
           resetPaperVisibleLimit("today");
           renderToday();
         });
-      });
-      document.querySelectorAll("[data-reset-google-start]").forEach(button => {
-        button.addEventListener("click", resetGoogleRollingStart);
       });
       document.querySelectorAll("[data-refresh-papers]").forEach(button => {
         button.addEventListener("click", () => {
@@ -4869,7 +4798,6 @@
         apiKey: "",
         maxPages: 3,
         num: 20,
-        rollingFetch: false,
         hasApiKey: false
       },
       journalMetrics: {
@@ -5030,8 +4958,6 @@
                 <input type="number" min="1" max="20" step="1" data-source-integration-field="num" value="${escapeHTML(google.num || 20)}">
               </label>
             </div>
-            <label><span><input type="checkbox" data-source-integration-field="rollingFetch" ${google.rollingFetch ? "checked" : ""}> 启动滚动抓取</span></label>
-            <div class="small-text">开启后，同一信源、关键词和 num 会从本地保存的 SerpApi start 继续抓取；例如本次抓 1-3 页，下次自动接着抓 4-6 页。</div>
             <div class="small-text">建议 1-3 页，每页 20 条；页数越高越容易触发 Google Scholar / SerpApi 限流。</div>
           </div>
         `;
@@ -5817,7 +5743,6 @@
       await loadFavoritesData();
       await loadPaperNotesData();
       renderPage(location.hash.replace("#", "") || "today");
-      loadGoogleRollingStatus();
       loadFetchLogData().then(() => {
         if ((location.hash.replace("#", "") || "today") === "today") renderToday();
       });

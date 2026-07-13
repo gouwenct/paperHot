@@ -29,7 +29,7 @@ Paper Hot 的主要目的只有两个：
 - bioRxiv。
 - Semantic Scholar。
 - Crossref 和出版方页面元数据补全。
-- 方向检索把保存的 Boolean 搜索图传给信源；WoS、bioRxiv、arXiv、Google Scholar 和 Google Search 使用各自支持的冻结日期约束。近期抓取和指定论文检索统一按任务指纹保存逐信源下一页和完成态，Google 不读取或更新旧滚动位置；恢复时跳过已完成信源，只有全部启用信源完成后才清除断点。
+- 方向检索把保存的 Boolean 搜索图传给信源；WoS、bioRxiv、arXiv、Google Scholar 和 Google Search 使用各自支持的冻结日期约束。近期抓取和指定论文检索统一按任务指纹保存逐信源下一页和完成态，Google 不读取或更新旧滚动位置；`resumeMode=resume` 恢复同指纹断点，`restart` 或 `new` 从第一页开始。现有 refresh start/status 任务接口直接返回后端的任务指纹、可恢复状态、逐信源页码、逐信源结果和错误，只有全部启用信源完成后才清除断点。
 - 指定论文检索可识别 DOI、Web of Science UT、arXiv ID/URL、普通 URL 和标题；信源端不附加方向关键词或日期限制。稳定标识结果可进入现有归档，标题出现多个相近结果时只返回候选供用户确认，不写归档、缓存或抓取日志。
 
 ### 论文处理
@@ -129,7 +129,6 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 - 选择日期范围。
 - 选择或确认启用的信源。
-- 如启用 Google Scholar 滚动抓取，可查看当前从第几篇开始抓取。
 - 点击抓取后，前端创建本地后端任务。
 - 后端从多个信源抓取候选论文，完成过滤、补全、LLM 处理、期刊指标查询和排序。
 - 抓取结果显示在当前页面，同时写入全部论文归档。
@@ -138,7 +137,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 页面重点：
 
-- “重置”用于把 Google Scholar 滚动抓取位置恢复到第一页。
+- 旧的 Google 手动起点、重置按钮和滚动开关已从页面移除，避免显示与当前任务指纹分页不一致的控制；当前页面创建新抓取任务，统一的恢复/重抓控制由后续近期论文工作台提供。
 - 如果某些页触发反爬或失败，抓取日志会记录跳过范围，后续可以继续从后面抓。
 - 最近一次抓取时间和距离当前的时间会显示在页面顶部。
 
@@ -352,6 +351,7 @@ flowchart TD
 | `.superpowers/sdd/task-2-report.md` | Task 2 多信源元数据与正式版/预印本关联的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-3-report.md` | Task 3 近期抓取游标与 WoS 本地请求用量的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-4-report.md` | Task 4 日期感知、断点恢复、指定论文检索及独立审查修复的 TDD 和验证报告 |
+| `.superpowers/sdd/task-5-report.md` | Task 5 现有 refresh job 请求、恢复与轮询状态契约的 TDD 和验证报告 |
 
 ### 主要数据文件
 

@@ -3,6 +3,8 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const {
   addCandidatePaperToArchive,
+  buildDiscoveryTaskContext,
+  buildDiscoveryTaskDescriptor,
   buildTokenStats,
   dedupePaperArchive,
   exportLocalDataZip,
@@ -10,6 +12,7 @@ const {
   fetchRecentPapers,
   fetchTodayPapers,
   readArchivePayload,
+  readDiscoveryTaskState,
   readFavoritesPayload,
   readPaperNotesPayload,
   readFetchLog,
@@ -54,22 +57,226 @@ function cleanupFetchJobs() {
 }
 
 function buildRefreshOptions(body, progressHandler) {
+  const isPlainRecord = value => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  };
+  const record = isPlainRecord(body) ? body : {};
+  const own = (value, key) => Object.hasOwn(value, key) ? value[key] : undefined;
+  const cleanStringList = (value, caseInsensitive = false) => {
+    const seen = new Set();
+    return (Array.isArray(value) ? value : []).flatMap(item => {
+      if (typeof item !== "string") return [];
+      const clean = item.trim();
+      const key = caseInsensitive ? clean.toLowerCase() : clean;
+      if (!clean || seen.has(key)) return [];
+      seen.add(key);
+      return [clean];
+    });
+  };
+  const cleanDate = value => {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+      ? value
+      : undefined;
+  };
+  const rawLogic = isPlainRecord(own(record, "searchLogic")) ? own(record, "searchLogic") : {};
+  const activeKeywords = cleanStringList(own(rawLogic, "activeKeywords"));
+  const seenEdges = new Set();
+  const andEdges = (Array.isArray(own(rawLogic, "andEdges")) ? own(rawLogic, "andEdges") : []).flatMap(pair => {
+    if (!Array.isArray(pair) || pair.length !== 2 || pair.some(item => typeof item !== "string")) return [];
+    const cleanPair = pair.map(item => item.trim());
+    if (cleanPair.some(item => !item)) return [];
+    const key = cleanPair.map(item => item.toLowerCase()).sort().join("::");
+    if (seenEdges.has(key)) return [];
+    seenEdges.add(key);
+    return [cleanPair];
+  });
+  const searchMode = own(record, "searchMode");
+  const resumeMode = own(record, "resumeMode");
+  const queryExpression = own(record, "queryExpression");
   return {
     refresh: true,
-    keywords: Array.isArray(body.keywords) ? body.keywords : [],
-    sources: Array.isArray(body.sources) ? body.sources : [],
-    startDate: body.startDate,
-    endDate: body.endDate,
-    googleScholar: {
-      googleStartItem: body.googleStartItem
-    },
-    onProgress: progressHandler
+    searchMode: ["direction", "exact"].includes(searchMode) ? searchMode : "direction",
+    queryExpression: typeof queryExpression === "string" ? queryExpression.trim() : "",
+    searchLogic: { activeKeywords, andEdges },
+    sources: cleanStringList(own(record, "sources"), true),
+    startDate: cleanDate(own(record, "startDate")),
+    endDate: cleanDate(own(record, "endDate")),
+    resumeMode: ["resume", "restart", "new"].includes(resumeMode) ? resumeMode : "new",
+    onProgress: typeof progressHandler === "function" ? progressHandler : undefined
   };
 }
 
-function runRefreshPayload(body, progressHandler) {
-  const mode = body.mode === "recent" ? "recent" : (body.mode === "last7" ? "last7" : "today");
-  const options = buildRefreshOptions(body, progressHandler);
+function refreshRequestMode(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body) || !Object.hasOwn(body, "mode")) return "today";
+  return body.mode === "recent" ? "recent" : (body.mode === "last7" ? "last7" : "today");
+}
+
+function buildFrozenRefreshOptions(body, progressHandler, effectiveDate) {
+  const options = {
+    ...buildRefreshOptions(body, progressHandler),
+    mode: refreshRequestMode(body),
+    ...(effectiveDate ? { date: effectiveDate } : {})
+  };
+  const context = buildDiscoveryTaskContext(options);
+  return {
+    ...options,
+    date: context.date,
+    startDate: context.task.startDate,
+    endDate: context.task.endDate
+  };
+}
+
+function createFetchJob(id, state = {}, startedAt = new Date().toISOString(), updatedAt = Date.now()) {
+  const sourcePages = { ...(state.sourcePages || {}) };
+  const errors = Array.isArray(state.errors) ? [...state.errors] : [];
+  return {
+    id,
+    status: "running",
+    startedAt,
+    updatedAt,
+    progress: {
+      stage: "queued",
+      percent: 2,
+      message: "抓取任务已创建",
+      counts: {},
+      sources: [],
+      sourcePages,
+      errors
+    },
+    taskFingerprint: typeof state.taskFingerprint === "string" ? state.taskFingerprint : "",
+    resumable: state.resumable === true,
+    sourcePages,
+    sourceResults: Array.isArray(state.sourceResults) ? [...state.sourceResults] : [],
+    errors,
+    result: null,
+    error: ""
+  };
+}
+
+function mergeJobList(current, incoming, keyFor) {
+  const merged = new Map();
+  [...(Array.isArray(current) ? current : []), ...(Array.isArray(incoming) ? incoming : [])].forEach((item, index) => {
+    merged.set(keyFor(item, index), item);
+  });
+  return [...merged.values()];
+}
+
+function replaceFetchJobCanonicalState(job, state = {}) {
+  if (
+    typeof state.taskFingerprint !== "string"
+    || typeof state.resumable !== "boolean"
+    || !state.sourcePages
+    || typeof state.sourcePages !== "object"
+    || Array.isArray(state.sourcePages)
+    || !Array.isArray(state.sourceResults)
+    || !Array.isArray(state.errors)
+  ) return false;
+  job.taskFingerprint = state.taskFingerprint;
+  job.resumable = state.resumable;
+  job.sourcePages = { ...state.sourcePages };
+  job.sourceResults = [...state.sourceResults];
+  job.errors = [...state.errors];
+  return true;
+}
+
+function mergeFetchJobProgress(job, progress = {}, updatedAt = Date.now()) {
+  if (job.status !== "running") return job;
+  const event = progress && typeof progress === "object" ? progress : {};
+  const current = job.progress || {};
+  const currentPercent = Number.isFinite(Number(current.percent)) ? Number(current.percent) : 0;
+  const hasIncomingPercent = event.percent !== undefined && event.percent !== null && Number.isFinite(Number(event.percent));
+  const incomingPercent = hasIncomingPercent ? Number(event.percent) : currentPercent;
+  const movesForward = hasIncomingPercent && incomingPercent >= currentPercent;
+  replaceFetchJobCanonicalState(job, event);
+  const counts = { ...(current.counts || {}) };
+  Object.entries(event.counts && typeof event.counts === "object" ? event.counts : {}).forEach(([key, value]) => {
+    const number = Number(value);
+    if (Number.isFinite(number)) counts[key] = Math.max(Number(counts[key]) || 0, number);
+  });
+  const sources = mergeJobList(current.sources, event.sources, item => item?.api || item?.source || item?.label || JSON.stringify(item));
+  job.progress = {
+    ...current,
+    ...(movesForward && typeof event.stage === "string" ? { stage: event.stage } : {}),
+    percent: Math.max(currentPercent, incomingPercent),
+    ...(movesForward && typeof event.message === "string" ? { message: event.message } : {}),
+    counts,
+    sources,
+    sourcePages: job.sourcePages,
+    errors: job.errors,
+    ...(event.sourcePage ? { sourcePage: event.sourcePage } : {}),
+    ...(typeof event.at === "string" && (!current.at || event.at > current.at) ? { at: event.at } : {})
+  };
+  job.updatedAt = updatedAt;
+  return job;
+}
+
+function completeFetchJob(job, payload, updatedAt = Date.now()) {
+  job.result = payload;
+  replaceFetchJobCanonicalState(job, payload);
+  mergeFetchJobProgress(job, {
+    stage: "done",
+    percent: 100,
+    message: `完成：最终入库/展示 ${payload.count || 0} 篇`,
+    sourcePages: job.sourcePages,
+    sourceResults: job.sourceResults,
+    errors: job.errors,
+    taskFingerprint: job.taskFingerprint,
+    resumable: job.resumable
+  }, updatedAt);
+  job.status = "done";
+  return job;
+}
+
+function failFetchJob(job, error, state = {}, updatedAt = Date.now()) {
+  job.error = error.message;
+  replaceFetchJobCanonicalState(job, {
+    ...state,
+    sourceResults: mergeJobList(job.sourceResults, state.sourceResults, item => item?.source || JSON.stringify(item)),
+    errors: mergeJobList(job.errors, state.errors, item => `${item?.source || ""}\n${item?.message || ""}`)
+  });
+  job.errors = mergeJobList(job.errors, [
+    { source: "server", message: error.message }
+  ], item => `${item?.source || ""}\n${item?.message || ""}`);
+  mergeFetchJobProgress(job, {
+    stage: "error",
+    percent: 100,
+    message: `抓取失败：${error.message}`,
+    sourcePages: job.sourcePages,
+    sourceResults: job.sourceResults,
+    errors: job.errors,
+    taskFingerprint: job.taskFingerprint,
+    resumable: job.resumable
+  }, updatedAt);
+  job.status = "error";
+  return job;
+}
+
+function fetchJobResponse(job) {
+  return {
+    ok: true,
+    id: job.id,
+    status: job.status,
+    startedAt: job.startedAt,
+    progress: job.progress,
+    taskFingerprint: job.taskFingerprint,
+    resumable: job.resumable,
+    sourcePages: job.sourcePages,
+    sourceResults: job.sourceResults,
+    errors: job.errors,
+    result: job.result,
+    error: job.error
+  };
+}
+
+function runRefreshPayload(body, progressHandler, frozenOptions) {
+  const options = frozenOptions
+    ? { ...frozenOptions, onProgress: typeof progressHandler === "function" ? progressHandler : undefined }
+    : buildFrozenRefreshOptions(body, progressHandler);
+  const mode = options.mode;
   if (mode === "recent") return fetchRecentPapers(options);
   if (mode === "last7") return fetchLast7DaysPapers(options);
   return fetchTodayPapers(options);
@@ -322,54 +529,30 @@ async function handleApi(req, res, url) {
     cleanupFetchJobs();
     const body = await collectRequestBody(req);
     const id = makeFetchJobId();
-    const job = {
-      id,
-      status: "running",
-      startedAt: new Date().toISOString(),
-      updatedAt: Date.now(),
-      progress: {
-        stage: "queued",
-        percent: 2,
-        message: "抓取任务已创建",
-        counts: {},
-        sources: [],
-        errors: []
-      },
-      result: null,
-      error: ""
-    };
+    const taskOptions = buildFrozenRefreshOptions(body);
+    const initialState = buildDiscoveryTaskDescriptor(taskOptions);
+    const job = createFetchJob(id, initialState);
     fetchJobs.set(id, job);
     runRefreshPayload(body, progress => {
       const current = fetchJobs.get(id);
       if (!current) return;
-      current.progress = progress;
-      current.updatedAt = Date.now();
-    }).then(payload => {
+      mergeFetchJobProgress(current, progress);
+    }, taskOptions).then(payload => {
       const current = fetchJobs.get(id);
       if (!current) return;
-      current.status = "done";
-      current.result = payload;
-      current.progress = {
-        ...(current.progress || {}),
-        stage: "done",
-        percent: 100,
-        message: `完成：最终入库/展示 ${payload.count || 0} 篇`
-      };
-      current.updatedAt = Date.now();
-    }).catch(error => {
+      completeFetchJob(current, payload);
+    }).catch(async error => {
       const current = fetchJobs.get(id);
       if (!current) return;
-      current.status = "error";
-      current.error = error.message;
-      current.progress = {
-        ...(current.progress || {}),
-        stage: "error",
-        percent: 100,
-        message: `抓取失败：${error.message}`
-      };
-      current.updatedAt = Date.now();
+      let durableState = {};
+      try {
+        durableState = await readDiscoveryTaskState(taskOptions);
+      } catch {
+        // Preserve the live canonical state if the cursor itself cannot be read.
+      }
+      failFetchJob(current, error, durableState);
     });
-    sendJson(res, 202, { ok: true, id, status: job.status, progress: job.progress });
+    sendJson(res, 202, fetchJobResponse(job));
     return true;
   }
 
@@ -381,15 +564,7 @@ async function handleApi(req, res, url) {
       sendJson(res, 404, { ok: false, error: "抓取任务不存在或已过期" });
       return true;
     }
-    sendJson(res, 200, {
-      ok: true,
-      id: job.id,
-      status: job.status,
-      startedAt: job.startedAt,
-      progress: job.progress,
-      result: job.result,
-      error: job.error
-    });
+    sendJson(res, 200, fetchJobResponse(job));
     return true;
   }
 

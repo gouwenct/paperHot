@@ -123,11 +123,13 @@
 
 ### 功能优化
 
+- 扩展现有论文刷新任务契约：请求深度清洗并转发检索模式、表达式、Boolean 搜索图、信源、合法日期和 `resumeMode`；请求入队前一次性冻结生效日期范围和任务指纹，同一任务指纹的整次抓取在本地进程内串行，`restart`/`new` 先清除旧断点再从第一页开始，`resume` 在自己的执行轮次读取断点。start/status 轮询持续保留任务指纹、可恢复状态、逐信源页码、逐信源结果和错误，不新增接口、任务表或依赖。
 - WoS 请求现在发送精确起止日期并从保存页继续，arXiv 用有限默认页预算按最新顺序分页且遇到整页旧结果停止，bioRxiv 使用精确日期 endpoint 后按搜索图过滤；Google Scholar 使用年份范围，Google Search 使用自定义日期范围。指定论文检索不再附加方向日期或关键词过滤。
 - 多信源候选现在保留原始标题并单独生成显示标题；同版本精确重复优先保留 Web of Science、其次 Google Scholar，正式版与预印本不再互相覆盖并会建立双向版本关联。
 
 ### 修复问题
 
+- 修复畸形 refresh 请求可让 Boolean 边集合在后端 `.flat()` 崩溃、同指纹并发 resume/restart 混写断点，以及运行中/失败 job 返回空占位或旧 cursor 状态的问题；server 不再在 backend 队列外预读或解释 cursor，完整 canonical snapshot 会直接替换分页、结果和错误，普通进度只保持百分比、阶段、消息和计数单调；pipeline 失败后读取的 durable cursor 只替换指纹、页码和可恢复态，不再清空 live job 已记录的失败信源结果和原始错误。
 - 修复分页抓满预算后误清断点、恢复时重复请求已完成信源、首页失败不保存起始页，以及同一游标文件的跨任务并发写入/清除互相覆盖问题；现在逐信源持久化 `nextPage`/`complete`，同一文件的更新在进程内串行且失败后队列可继续，只有全部信源完成才清除。
 - 修复标题多候选仍创建空归档、缓存和抓取日志的问题；候选现在会在 Crossref、LLM 和任何归档副作用前直接返回。
 - 修复重复抓取把归档中已有 DOI、信源身份或同阶段规范标题计入 `newPapers`、Boolean 本地过滤不识别 `SIM` 等缩写展开的问题；正式版与预印本仍分别保留，并统一返回 Task 5 使用的顶层任务指纹、信源页、信源结果、新论文和错误字段。
@@ -147,6 +149,7 @@
 
 ### 文档
 
+- 更新 README 并新增 Task 5 报告，说明 refresh job 的七字段 discovery 请求、显式恢复语义、同指纹串行边界和轮询返回字段；旧 Google 手动起点、重置与滚动开关因已断开当前 discovery 流程而从页面移除，本次不改变持久化数据或 ZIP 备份格式。
 - 更新 README 与 BACKUP_FORMAT，说明近期抓取断点、WoS 本地用量文件、敏感信息边界和当前 v1 备份排除范围。
 - 更新 README 和 BACKUP_FORMAT，说明多信源元数据、正式版/预印本关联字段及备份 v1 的向后兼容规则。
 - 更新 README 和 BACKUP_FORMAT，说明 Web of Science 信源、示例配置文件、入库流程、架构图和 ZIP 备份文件清单。
@@ -155,6 +158,7 @@
 
 ### 测试与验证
 
+- 增加 refresh 请求与 job/status 契约回归，实际执行 `buildRefreshOptions()` 覆盖继承属性、对象查询、畸形搜索图、非法日期、信源去重和 enum allowlist；纯冻结 helper 覆盖跨日期等待时范围/指纹不漂移，job transition 覆盖 canonical cursor 回退直接替换、cursor-only 失败回读保留 live 信源结果/错误并去重追加 server 错误、普通/late progress、running/done/error，fake source 覆盖多信源 partial、同指纹 concurrent resume/restart 及 progress callback 导致队列 reject 后的恢复和清理，并保留 Task 4 canonical/cursor 并发与完整前端回归；本轮 Task 5 聚焦 `4/4`、前端完整 `38/38`、Task 4/5 canonical/cursor/concurrency 聚焦 `16/16` 及两项 Node 语法检查均通过。
 - 增加 Task 4 fake-fetch 聚焦测试，关键 exact/recent 回归直接经过实际 WoS、Google Scholar 和 Google Search adapter，覆盖 legacy offset 隔离、Google 满页续传与首页失败、分页满预算恢复与完成信源跳过、标题候选零副作用、arXiv 默认多页、多键新增身份与正式版/预印本边界、缩写搜索图、Google 源端日期、跨任务 cursor 写入/清除并发恢复和 Task 5 顶层契约；测试不读取真实 API Key 或调用真实论文信源。
 - 增加 `newPapers` 保守身份边界回归，覆盖跨信源相同 ID、同标题异作者、同标题无作者、规范标题同作者、相同 DOI，以及同标题同作者的正式版/预印本分离。
 - 增加任务指纹稳定性与差异、断点写读清理、同任务恢复和禁用信源页码过滤测试；增加 WoS 成功、HTTP/网络失败、日/月/累计聚合、进程内并发连续写、失败后队列恢复、跨数据目录及旧文件兼容测试。

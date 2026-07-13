@@ -5,6 +5,18 @@ const path = require("node:path");
 
 const htmlFile = path.join(__dirname, "..", "public", "index.html");
 const logoFile = path.join(__dirname, "..", "public", "paperhot-logo.png");
+const serverFile = path.join(__dirname, "..", "server.cjs");
+const {
+  buildDiscoveryTaskContext,
+  buildDiscoveryTaskDescriptor
+} = require("../paperhot_backend.cjs");
+
+function readNamedFunction(source, name, nextName) {
+  const pattern = new RegExp(`function ${name}\\([\\s\\S]*?(?=\\n\\s*(?:async\\s+)?function ${nextName}\\()`);
+  const match = source.match(pattern);
+  assert.ok(match, `expected ${name}()`);
+  return match[0].trim();
+}
 
 test("app exposes Paper Hot logo and favicon", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
@@ -154,11 +166,11 @@ test("candidate detail view exposes archive action and sortable columns", async 
   assert.match(html, /sortCandidatePapers/);
 });
 
-test("source config exposes Google rolling fetch option", async () => {
+test("source config hides the disconnected Google rolling fetch option", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
-  assert.match(html, /rollingFetch: false/);
-  assert.match(html, /data-source-integration-field="rollingFetch"/);
-  assert.match(html, /启动滚动抓取/);
+  assert.doesNotMatch(html, /data-source-integration-field="rollingFetch"/);
+  assert.doesNotMatch(html, /启动滚动抓取/);
+  assert.doesNotMatch(html, /下次自动接着抓/);
 });
 
 test("source config exposes Web of Science API settings", async () => {
@@ -177,6 +189,265 @@ test("fetch progress panel exposes source page detail", async () => {
   assert.match(html, /sourcePage/);
   assert.match(html, /fetch-progress-page-detail/);
   assert.match(html, /正在抓第/);
+});
+
+test("refresh request contract forwards cleaned discovery options and keeps existing endpoints", async () => {
+  const [html, serverSource] = await Promise.all([
+    fs.readFile(htmlFile, "utf8"),
+    fs.readFile(serverFile, "utf8")
+  ]);
+  const buildSource = readNamedFunction(serverSource, "buildRefreshOptions", "runRefreshPayload");
+  const buildRefreshOptions = new Function(`${buildSource}; return buildRefreshOptions;`)();
+  const progressHandler = () => {};
+  const searchLogic = { activeKeywords: ["SIM", "RIM"], andEdges: [["SIM", "RIM"]] };
+
+  assert.deepEqual(buildRefreshOptions(null, progressHandler), {
+    refresh: true,
+    searchMode: "direction",
+    queryExpression: "",
+    searchLogic: { activeKeywords: [], andEdges: [] },
+    sources: [],
+    startDate: undefined,
+    endDate: undefined,
+    resumeMode: "new",
+    onProgress: progressHandler
+  });
+  assert.deepEqual(buildRefreshOptions({
+    searchMode: "exact",
+    queryExpression: "  10.1000/example  ",
+    searchLogic,
+    sources: ["arxiv", "webofscience"],
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    resumeMode: "resume",
+    keywords: ["must-not-forward"]
+  }, progressHandler), {
+    refresh: true,
+    searchMode: "exact",
+    queryExpression: "10.1000/example",
+    searchLogic,
+    sources: ["arxiv", "webofscience"],
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    resumeMode: "resume",
+    onProgress: progressHandler
+  });
+  assert.equal(buildRefreshOptions({ resumeMode: "restart" }, progressHandler).resumeMode, "restart");
+  assert.equal(buildRefreshOptions({ resumeMode: "invalid" }, progressHandler).resumeMode, "new");
+
+  const inheritedBody = Object.create({
+    searchMode: "exact",
+    queryExpression: "inherited",
+    searchLogic,
+    sources: ["arxiv"],
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    resumeMode: "resume"
+  });
+  assert.deepEqual(buildRefreshOptions(inheritedBody, progressHandler), {
+    refresh: true,
+    searchMode: "direction",
+    queryExpression: "",
+    searchLogic: { activeKeywords: [], andEdges: [] },
+    sources: [],
+    startDate: undefined,
+    endDate: undefined,
+    resumeMode: "new",
+    onProgress: progressHandler
+  });
+  assert.deepEqual(buildRefreshOptions({
+    queryExpression: { toString: () => "must-not-coerce" },
+    searchLogic: {
+      activeKeywords: [" SIM ", 42, "", "SIM"],
+      andEdges: [[" SIM ", " RIM "], ["SIM"], ["SIM", {}], "bad-pair"]
+    },
+    sources: [" arxiv ", {}, "ARXIV", "", "webofscience"],
+    startDate: "2026-02-30",
+    endDate: "2026-02-28"
+  }, progressHandler), {
+    refresh: true,
+    searchMode: "direction",
+    queryExpression: "",
+    searchLogic: { activeKeywords: ["SIM"], andEdges: [["SIM", "RIM"]] },
+    sources: ["arxiv", "webofscience"],
+    startDate: undefined,
+    endDate: "2026-02-28",
+    resumeMode: "new",
+    onProgress: progressHandler
+  });
+  const inheritedLogic = Object.create({ activeKeywords: ["bad"], andEdges: [["bad", "worse"]] });
+  assert.deepEqual(buildRefreshOptions({ searchLogic: inheritedLogic }, progressHandler).searchLogic, {
+    activeKeywords: [],
+    andEdges: []
+  });
+
+  assert.match(serverSource, /pathname === "\/api\/papers\/refresh\/start"/);
+  assert.match(serverSource, /pathname === "\/api\/papers\/refresh\/status"/);
+  assert.match(html, /fetch\("\/api\/papers\/refresh\/start"/);
+  assert.match(html, /fetch\(`\/api\/papers\/refresh\/status\?id=/);
+  const requestBodySource = readNamedFunction(html, "paperRefreshBody", "runPaperRefreshJob");
+  for (const field of ["searchMode", "queryExpression", "searchLogic", "sources", "startDate", "endDate", "resumeMode"]) {
+    assert.match(requestBodySource, new RegExp(`\\b${field}\\b`));
+  }
+
+  const modeSource = readNamedFunction(serverSource, "refreshRequestMode", "buildFrozenRefreshOptions");
+  const frozenSource = readNamedFunction(serverSource, "buildFrozenRefreshOptions", "createFetchJob");
+  const buildFrozenRefreshOptions = new Function(
+    "buildDiscoveryTaskContext",
+    `${buildSource}; ${modeSource}; ${frozenSource}; return buildFrozenRefreshOptions;`
+  )(buildDiscoveryTaskContext);
+  const frozen = buildFrozenRefreshOptions({ mode: "last7" }, undefined, "2026-07-13");
+  const fingerprint = buildDiscoveryTaskDescriptor(frozen).taskFingerprint;
+  buildFrozenRefreshOptions({ mode: "last7" }, undefined, "2026-07-14");
+  assert.deepEqual({ date: frozen.date, startDate: frozen.startDate, endDate: frozen.endDate }, {
+    date: "2026-07-13",
+    startDate: "2026-07-07",
+    endDate: "2026-07-13"
+  });
+  assert.equal(buildDiscoveryTaskDescriptor(frozen).taskFingerprint, fingerprint);
+
+  const startRoute = serverSource.match(/if \(req\.method === "POST" && pathname === "\/api\/papers\/refresh\/start"\)[\s\S]*?(?=\n\s*if \(req\.method === "GET" && pathname === "\/api\/papers\/refresh\/status"\))/)?.[0];
+  assert.ok(startRoute, "expected refresh start route");
+  assert.match(startRoute, /const taskOptions = buildFrozenRefreshOptions\(body\)/);
+  assert.doesNotMatch(startRoute, /Object\.assign\(initialState, await readDiscoveryTaskState/);
+  assert.equal(startRoute.match(/readDiscoveryTaskState/g)?.length, 1, "durable cursor is read only after backend rejection");
+});
+
+test("refresh job transitions preserve canonical state and monotonic progress", async () => {
+  const serverSource = await fs.readFile(serverFile, "utf8");
+  const helpersSource = serverSource.match(/function createFetchJob\([\s\S]*?(?=\nfunction runRefreshPayload\()/);
+  assert.ok(helpersSource, "expected executable refresh job helpers");
+  const {
+    createFetchJob,
+    mergeFetchJobProgress,
+    completeFetchJob,
+    failFetchJob,
+    fetchJobResponse
+  } = new Function(`${helpersSource[0]}; return { createFetchJob, mergeFetchJobProgress, completeFetchJob, failFetchJob, fetchJobResponse };`)();
+
+  const first = createFetchJob("job-a", {
+    taskFingerprint: "fp-a",
+    resumable: true,
+    sourcePages: { webofscience: { nextPage: 4, complete: false } },
+    sourceResults: [],
+    errors: []
+  }, "2026-07-13T00:00:00.000Z", 1);
+  const second = createFetchJob("job-b", {
+    taskFingerprint: "fp-b",
+    resumable: false,
+    sourcePages: { arxiv: { nextPage: 8, complete: true } },
+    sourceResults: [],
+    errors: []
+  }, "2026-07-13T00:00:01.000Z", 2);
+  mergeFetchJobProgress(first, {
+    stage: "enrich",
+    percent: 74,
+    message: "newer",
+    counts: { raw: 10, deduped: 8 },
+    sources: [{ api: "webofscience", status: "ok" }],
+    taskFingerprint: "fp-a",
+    resumable: true,
+    sourcePages: { webofscience: { nextPage: 5, complete: false } },
+    sourceResults: [{ source: "webofscience", status: "ok", returned: 3 }],
+    errors: []
+  }, 3);
+  mergeFetchJobProgress(first, {
+    stage: "sources",
+    percent: 18,
+    message: "late",
+    counts: { raw: 2 },
+    sources: [{ api: "arxiv", status: "failed" }],
+    sourcePages: { arxiv: { nextPage: 1, complete: false } },
+    errors: [{ source: "arxiv", message: "offline" }]
+  }, 4);
+  mergeFetchJobProgress(first, {
+    stage: "source-page",
+    message: "late page without global percent",
+    sourcePage: { page: 1 },
+    sourcePages: { semanticscholar: { nextPage: 2, complete: false } }
+  }, 4);
+  assert.equal(first.progress.stage, "enrich");
+  assert.equal(first.progress.percent, 74);
+  assert.equal(first.progress.message, "newer");
+  assert.deepEqual(first.progress.counts, { raw: 10, deduped: 8 });
+  assert.deepEqual(first.sourcePages, {
+    webofscience: { nextPage: 5, complete: false }
+  });
+  assert.deepEqual(first.progress.sources.map(source => source.api).sort(), ["arxiv", "webofscience"]);
+  assert.deepEqual(second.sourcePages, { arxiv: { nextPage: 8, complete: true } });
+
+  mergeFetchJobProgress(first, {
+    taskFingerprint: "fp-a",
+    resumable: true,
+    sourcePages: { webofscience: { nextPage: 2, complete: false } },
+    sourceResults: [],
+    errors: []
+  }, 4);
+  assert.deepEqual(first.sourcePages, { webofscience: { nextPage: 2, complete: false } });
+  assert.deepEqual(first.sourceResults, []);
+
+  completeFetchJob(first, {
+    taskFingerprint: "fp-a",
+    resumable: false,
+    sourcePages: { webofscience: { nextPage: 6, complete: true }, arxiv: { nextPage: 1, complete: true } },
+    sourceResults: [{ source: "webofscience", status: "ok", returned: 3 }],
+    errors: [],
+    count: 3
+  }, 5);
+  assert.equal(first.status, "done");
+  assert.equal(first.progress.percent, 100);
+  assert.equal(first.resumable, false);
+  mergeFetchJobProgress(first, {
+    stage: "sources",
+    percent: 18,
+    resumable: true,
+    sourcePages: { webofscience: { nextPage: 99, complete: false } },
+    errors: [{ source: "late", message: "must not mutate terminal state" }]
+  }, 6);
+  assert.equal(first.resumable, false);
+  assert.deepEqual(first.sourcePages.webofscience, { nextPage: 6, complete: true });
+  assert.deepEqual(first.errors, []);
+
+  mergeFetchJobProgress(second, {
+    stage: "sources",
+    percent: 60,
+    message: "arxiv failed",
+    taskFingerprint: "fp-live",
+    resumable: false,
+    sourcePages: { arxiv: { nextPage: 2, complete: true } },
+    sourceResults: [{ source: "arxiv", status: "failed", returned: 0, message: "offline" }],
+    errors: [{ source: "arxiv", message: "offline" }]
+  }, 5);
+  failFetchJob(second, new Error("pipeline failed"), {
+    taskFingerprint: "fp-b",
+    resumable: true,
+    sourcePages: { arxiv: { nextPage: 3, complete: false } },
+    sourceResults: [],
+    errors: []
+  }, 6);
+  const failed = fetchJobResponse(second);
+  assert.equal(failed.status, "error");
+  assert.equal(failed.taskFingerprint, "fp-b");
+  assert.equal(failed.resumable, true);
+  assert.deepEqual(failed.sourcePages, { arxiv: { nextPage: 3, complete: false } });
+  assert.deepEqual(failed.sourceResults, [{ source: "arxiv", status: "failed", returned: 0, message: "offline" }]);
+  assert.deepEqual(failed.errors.map(error => error.source), ["arxiv", "server"]);
+  mergeFetchJobProgress(second, {
+    stage: "sources",
+    percent: 75,
+    taskFingerprint: "fp-late",
+    resumable: false,
+    sourcePages: { arxiv: { nextPage: 99, complete: true } },
+    sourceResults: [],
+    errors: [{ source: "late", message: "must not mutate terminal state" }]
+  }, 7);
+  assert.equal(second.taskFingerprint, "fp-b");
+  assert.equal(second.resumable, true);
+  assert.deepEqual(second.sourcePages, { arxiv: { nextPage: 3, complete: false } });
+  assert.deepEqual(second.sourceResults, [{ source: "arxiv", status: "failed", returned: 0, message: "offline" }]);
+  assert.deepEqual(second.errors.map(error => error.source), ["arxiv", "server"]);
+  assert.equal(fetchJobResponse(first).status, "done");
+  assert.doesNotMatch(serverSource, /function mergeSourcePages\(/);
 });
 
 test("fetch log panel exposes Google rolling page ranges", async () => {
@@ -347,23 +618,15 @@ test("API config fields expose help links for obtaining keys", async () => {
   assert.match(html, /openApiHelp/);
 });
 
-test("today fetch panel exposes manual Google start item control", async () => {
+test("today fetch panel removes disconnected Google manual and rolling controls", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
-  assert.match(html, /googleStartItem/);
-  assert.match(html, /data-fetch-range="googleStartItem"/);
-  assert.match(html, /从第几篇开始/);
-  assert.match(html, /googleStartItem: fetchRange.googleStartItem/);
-});
-
-test("today fetch panel exposes Google rolling start status and reset action", async () => {
-  const html = await fs.readFile(htmlFile, "utf8");
-  assert.match(html, /googleRollingStatusText/);
-  assert.match(html, /loadGoogleRollingStatus/);
-  assert.match(html, /\/api\/google-rolling\/status/);
-  assert.match(html, /\/api\/google-rolling\/reset/);
-  assert.match(html, /data-reset-google-start/);
-  assert.match(html, /自动：/);
-  assert.match(html, /从第 \$\{escapeHTML\(item\.nextItem\)\} 篇开始/);
+  assert.doesNotMatch(html, /googleStartItem/);
+  assert.doesNotMatch(html, /data-reset-google-start/);
+  assert.doesNotMatch(html, /googleRollingStatusText/);
+  assert.doesNotMatch(html, /loadGoogleRollingStatus/);
+  assert.doesNotMatch(html, /resetGoogleRollingStart/);
+  assert.doesNotMatch(html, /留空时按本地滚动游标继续/);
+  assert.doesNotMatch(html, /从第几篇开始/);
 });
 
 test("today fetch sessions keep duplicate ranges with compact timestamp labels", async () => {

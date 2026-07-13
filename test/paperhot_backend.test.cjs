@@ -986,7 +986,7 @@ test("recent Google ignores legacy manual offsets and resumes from its canonical
     complete: false
   });
 
-  await fetchRecentPapers(options);
+  await fetchRecentPapers({ ...options, resumeMode: "resume" });
   assert.deepEqual(starts, [0, 20]);
   assert.deepEqual(await readRecentFetchCursors(tempDir), { tasks: {} });
   await fs.rm(tempDir, { recursive: true, force: true });
@@ -3927,9 +3927,216 @@ test("full WoS page budget keeps its cursor and the next run resumes at the next
     const cursors = await readRecentFetchCursors(tempDir);
     assert.deepEqual(cursors.tasks[first.task.fingerprint].sourcePages.webofscience, { nextPage: 2, complete: false });
 
-    await fetchPaperPayload(options);
+    await fetchPaperPayload({ ...options, resumeMode: "resume" });
     assert.deepEqual(requestedPages, [1, 2]);
     assert.deepEqual(await readRecentFetchCursors(tempDir), { tasks: {} });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("discovery request resume modes consume the canonical fingerprint cursor", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-resume-mode-"));
+  const task = {
+    searchMode: "direction",
+    queryExpression: "SIM",
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    sources: ["webofscience"],
+    sourcePages: { webofscience: { nextPage: 4, complete: false } }
+  };
+  const starts = [];
+  const run = resumeMode => fetchPaperPayload({
+    dataDir: tempDir,
+    refresh: true,
+    mode: "recent",
+    date: "2026-01-31",
+    searchMode: task.searchMode,
+    queryExpression: task.queryExpression,
+    startDate: task.startDate,
+    endDate: task.endDate,
+    resumeMode,
+    keywords: ["SIM"],
+    searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+    sources: ["Web of Science"],
+    fetchers: {
+      webofscience: async options => {
+        starts.push(options.startPage);
+        await options.onPageComplete({ nextPage: options.startPage + 1, complete: false });
+        throw new Error("interrupted");
+      }
+    },
+    journalMetrics: { config: { enabled: false } }
+  });
+
+  try {
+    await writeRecentFetchCursor(task, tempDir);
+    const fresh = await run("new");
+    assert.equal(starts.at(-1), 1);
+    assert.equal(fresh.resumable, true);
+    assert.equal(fresh.taskFingerprint, buildDiscoveryTaskFingerprint(task));
+    assert.deepEqual(fresh.sourcePages.webofscience, { nextPage: 2, complete: false });
+    assert.equal(fresh.sourceResults[0].status, "failed");
+    assert.match(fresh.errors[0].message, /interrupted/);
+
+    const resumed = await run("resume");
+    assert.equal(starts.at(-1), 2);
+    assert.deepEqual(resumed.sourcePages.webofscience, { nextPage: 3, complete: false });
+
+    const restarted = await run("restart");
+    assert.equal(starts.at(-1), 1);
+    assert.deepEqual(restarted.sourcePages.webofscience, { nextPage: 2, complete: false });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("same-fingerprint restart and resume jobs serialize around a clean multi-source cursor", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-task-queue-"));
+  const task = {
+    searchMode: "direction",
+    queryExpression: "SIM",
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    sources: ["arxiv", "webofscience"],
+    sourcePages: {
+      arxiv: { nextPage: 9, complete: true },
+      webofscience: { nextPage: 5, complete: false }
+    }
+  };
+  const starts = [];
+  const activeJobs = new Set();
+  let overlapped = false;
+  let releaseRestart;
+  let markRestartStarted;
+  const restartGate = new Promise(resolve => { releaseRestart = resolve; });
+  const restartStarted = new Promise(resolve => { markRestartStarted = resolve; });
+  const run = (resumeMode, label) => fetchPaperPayload({
+    dataDir: tempDir,
+    refresh: true,
+    mode: "recent",
+    date: "2026-01-31",
+    searchMode: task.searchMode,
+    queryExpression: task.queryExpression,
+    startDate: task.startDate,
+    endDate: task.endDate,
+    resumeMode,
+    keywords: ["SIM"],
+    searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+    sources: ["arXiv", "Web of Science"],
+    fetchers: {
+      arxiv: async options => {
+        if ([...activeJobs].some(active => active !== label)) overlapped = true;
+        activeJobs.add(label);
+        starts.push(`${label}:arxiv:${options.startPage}`);
+        try {
+          if (label === "restart") throw new Error("arxiv first request failed");
+          await options.onPageComplete({ nextPage: options.startPage + 1, complete: true });
+          return [];
+        } finally {
+          activeJobs.delete(label);
+        }
+      },
+      webofscience: async options => {
+        if ([...activeJobs].some(active => active !== label)) overlapped = true;
+        activeJobs.add(label);
+        starts.push(`${label}:webofscience:${options.startPage}`);
+        try {
+          if (label === "restart") {
+            markRestartStarted();
+            await restartGate;
+            await options.onPageComplete({ nextPage: 2, complete: false });
+            throw new Error("webofscience interrupted");
+          }
+          await options.onPageComplete({ nextPage: options.startPage + 1, complete: true });
+          return [];
+        } finally {
+          activeJobs.delete(label);
+        }
+      },
+      crossref: async () => null
+    },
+    journalMetrics: { config: { enabled: false } }
+  });
+
+  try {
+    await writeRecentFetchCursor(task, tempDir);
+    const restartPromise = run("restart", "restart");
+    await restartStarted;
+    const resumePromise = run("resume", "resume");
+    await new Promise(resolve => setImmediate(resolve));
+    const overlappedBeforeRelease = overlapped;
+    releaseRestart();
+    const [restarted, resumed] = await Promise.all([restartPromise, resumePromise]);
+
+    assert.equal(overlappedBeforeRelease, false);
+    assert.deepEqual(restarted.sourcePages, {
+      arxiv: { nextPage: 1, complete: false },
+      webofscience: { nextPage: 2, complete: false }
+    });
+    assert.deepEqual(starts, [
+      "restart:arxiv:1",
+      "restart:webofscience:1",
+      "resume:arxiv:1",
+      "resume:webofscience:2"
+    ]);
+    assert.equal(resumed.resumable, false);
+    assert.deepEqual(await readRecentFetchCursors(tempDir), { tasks: {} });
+  } finally {
+    releaseRestart();
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("same-fingerprint queue recovers after a queued progress callback rejects", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-task-queue-reject-"));
+  let sourceCalls = 0;
+  const options = {
+    dataDir: tempDir,
+    refresh: true,
+    mode: "recent",
+    date: "2026-01-31",
+    searchMode: "direction",
+    queryExpression: "SIM",
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    keywords: ["SIM"],
+    searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+    sources: ["arXiv"],
+    fetchers: {
+      arxiv: async () => {
+        sourceCalls += 1;
+        return [];
+      },
+      crossref: async () => null
+    },
+    journalMetrics: { config: { enabled: false } }
+  };
+
+  try {
+    await assert.rejects(fetchPaperPayload({
+      ...options,
+      onProgress: () => { throw new Error("progress observer failed"); }
+    }), /progress observer failed/);
+
+    const payload = await fetchPaperPayload(options);
+    assert.equal(sourceCalls, 1);
+    assert.equal(payload.taskFingerprint, buildDiscoveryTaskFingerprint(payload.task));
+
+    const backendSource = await fs.readFile(path.join(__dirname, "..", "paperhot_backend.cjs"), "utf8");
+    const queueSource = backendSource.match(/function queueDiscoveryFetch\([\s\S]*?(?=\nfunction discoveryTaskProgressState\()/)?.[0];
+    assert.ok(queueSource, "expected executable discovery queue helper");
+    const queueHarness = new Function("path", "RECENT_FETCH_CURSORS_NAME", `
+      const discoveryFetchQueues = new Map();
+      ${queueSource}
+      return { queueDiscoveryFetch, discoveryFetchQueues };
+    `)(path, "recent-fetch-cursors.json");
+    await assert.rejects(queueHarness.queueDiscoveryFetch({
+      dataDir: tempDir,
+      task: { fingerprint: payload.taskFingerprint }
+    }, async () => { throw new Error("queued operation failed"); }), /queued operation failed/);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(queueHarness.discoveryFetchQueues.size, 0);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
@@ -3961,6 +4168,7 @@ test("resume skips complete sources and continues each incomplete source at next
       queryExpression: task.queryExpression,
       startDate: task.startDate,
       endDate: task.endDate,
+      resumeMode: "resume",
       keywords: ["SIM"],
       searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
       sources: ["arXiv", "Web of Science"],

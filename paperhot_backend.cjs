@@ -5027,13 +5027,16 @@ function recordSourcePageProgress(sourcePages, api, event = {}) {
   sourcePages[api] = current;
 }
 
-async function fetchPaperPayload(options = {}) {
+function buildDiscoveryTaskContext(options = {}) {
   const date = options.date || todayString();
   const mode = options.mode || "today";
   const endDate = options.endDate || date;
   // “最近”模式默认抓取 2026-05-01 至今；“近 7 天”模式抓取今天往前 6 天。
   const startDate = options.startDate || (mode === "recent" ? RECENT_RANGE_START : (mode === "last7" ? shiftDate(date, -6) : date));
-  const keywords = cleanKeywords(options.keywords).length ? cleanKeywords(options.keywords) : DEFAULT_KEYWORDS;
+  const searchLogicKeywords = cleanKeywords(options.searchLogic?.activeKeywords);
+  const keywords = cleanKeywords(options.keywords).length
+    ? cleanKeywords(options.keywords)
+    : (searchLogicKeywords.length ? searchLogicKeywords : DEFAULT_KEYWORDS);
   const searchMode = options.searchMode === "exact" ? "exact" : "direction";
   const searchLogic = options.searchLogic && typeof options.searchLogic === "object"
     ? options.searchLogic
@@ -5066,8 +5069,109 @@ async function fetchPaperPayload(options = {}) {
     sourcePages: {}
   };
   task.fingerprint = buildDiscoveryTaskFingerprint(task);
-  const savedTask = (await readRecentFetchCursors(dataDir)).tasks[task.fingerprint];
+  const resumeMode = ["resume", "restart", "new"].includes(options.resumeMode) ? options.resumeMode : "new";
+  return {
+    date,
+    mode,
+    endDate,
+    startDate,
+    keywords,
+    searchMode,
+    searchLogic,
+    queryExpression,
+    exactInput,
+    sources,
+    dataDir,
+    task,
+    resumeMode
+  };
+}
+
+function buildDiscoveryTaskDescriptor(options = {}) {
+  const { task } = buildDiscoveryTaskContext(options);
+  return {
+    taskFingerprint: task.fingerprint,
+    resumable: false,
+    sourcePages: {},
+    sourceResults: [],
+    errors: []
+  };
+}
+
+async function readDiscoveryTaskState(options = {}) {
+  const { task, dataDir } = buildDiscoveryTaskContext(options);
+  const data = await queueRecentFetchCursorUpdate(dataDir, () => readRecentFetchCursors(dataDir));
+  const sourcePages = { ...(data.tasks[task.fingerprint]?.sourcePages || {}) };
+  return {
+    taskFingerprint: task.fingerprint,
+    resumable: Object.values(sourcePages).some(page => page?.complete !== true),
+    sourcePages,
+    sourceResults: [],
+    errors: []
+  };
+}
+
+// ponytail: serialized only within this process; use a distributed lock if refresh workers become multi-process.
+const discoveryFetchQueues = new Map();
+
+function queueDiscoveryFetch(context, operation) {
+  const key = `${path.resolve(context.dataDir, RECENT_FETCH_CURSORS_NAME)}::${context.task.fingerprint}`;
+  const run = (discoveryFetchQueues.get(key) || Promise.resolve())
+    .catch(() => {})
+    .then(operation);
+  discoveryFetchQueues.set(key, run);
+  run.then(() => {
+    if (discoveryFetchQueues.get(key) === run) discoveryFetchQueues.delete(key);
+  }, () => {
+    if (discoveryFetchQueues.get(key) === run) discoveryFetchQueues.delete(key);
+  });
+  return run;
+}
+
+function discoveryTaskProgressState(task, apiCalls = [], errors = []) {
+  return {
+    taskFingerprint: task.fingerprint,
+    resumable: Object.values(task.sourcePages).some(page => page?.complete !== true),
+    sourcePages: { ...task.sourcePages },
+    sourceResults: apiCalls
+      .filter(call => call.kind === "source")
+      .map(call => ({ source: call.api, status: call.status, returned: call.returned, message: call.message || "" })),
+    errors: [...errors]
+  };
+}
+
+async function fetchPaperPayload(options = {}) {
+  const context = buildDiscoveryTaskContext(options);
+  return queueDiscoveryFetch(context, () => fetchPaperPayloadQueued(options, context));
+}
+
+async function fetchPaperPayloadQueued(options, context) {
+  const {
+    date,
+    mode,
+    endDate,
+    startDate,
+    keywords,
+    searchMode,
+    searchLogic,
+    queryExpression,
+    exactInput,
+    sources,
+    dataDir,
+    resumeMode
+  } = context;
+  const task = { ...context.task, sourcePages: {} };
+  const savedTask = resumeMode === "resume"
+    ? (await queueRecentFetchCursorUpdate(dataDir, () => readRecentFetchCursors(dataDir))).tasks[task.fingerprint]
+    : null;
+  if (options.refresh && resumeMode !== "resume") await clearRecentFetchCursor(task.fingerprint, dataDir);
   task.sourcePages = { ...(savedTask?.sourcePages || {}) };
+  emitFetchProgress(options, {
+    stage: "queued",
+    percent: 4,
+    message: resumeMode === "resume" ? "已读取同一任务断点" : "已准备从第一页抓取",
+    ...discoveryTaskProgressState(task)
+  });
   if (!options.refresh) {
     try {
       const cachedPayload = await readCachedPapers(mode === "today" ? date : `${date}-${mode}`, dataDir);
@@ -5094,6 +5198,7 @@ async function fetchPaperPayload(options = {}) {
         ...cachedPayload,
         task,
         taskFingerprint: task.fingerprint,
+        resumable: Object.values(task.sourcePages).some(page => page?.complete !== true),
         sourcePages: task.sourcePages,
         sourceResults: [],
         newPapers: [],
@@ -5137,6 +5242,7 @@ async function fetchPaperPayload(options = {}) {
       complete: progress?.complete === true
     };
     await writeRecentFetchCursor(task, dataDir);
+    emitFetchProgress(options, discoveryTaskProgressState(task, apiCalls, errors));
   };
   emitFetchProgress(options, {
     stage: "sources",
@@ -5154,6 +5260,7 @@ async function fetchPaperPayload(options = {}) {
       const startPage = Number(task.sourcePages[source]?.nextPage || 1);
       task.sourcePages[source] = { nextPage: startPage, complete: false };
       await writeRecentFetchCursor(task, dataDir);
+      emitFetchProgress(options, discoveryTaskProgressState(task, apiCalls, errors));
       let result;
       const sourceOptions = {
         dataDir,
@@ -5211,7 +5318,8 @@ async function fetchPaperPayload(options = {}) {
         percent: 18,
         message: `${API_LABELS[source] || source} 返回 ${result.length} 篇`,
         counts: { raw: apiCalls.reduce((sum, call) => sum + Number(call.returned || 0), 0) },
-        sources: apiCalls.filter(call => call.kind === "source")
+        sources: apiCalls.filter(call => call.kind === "source"),
+        ...discoveryTaskProgressState(task, apiCalls, errors)
       });
       return result;
     } catch (error) {
@@ -5223,7 +5331,7 @@ async function fetchPaperPayload(options = {}) {
         message: `${API_LABELS[source] || source} 抓取失败`,
         counts: { raw: apiCalls.reduce((sum, call) => sum + Number(call.returned || 0), 0) },
         sources: apiCalls.filter(call => call.kind === "source"),
-        errors
+        ...discoveryTaskProgressState(task, apiCalls, errors)
       });
       return [];
     }
@@ -5289,6 +5397,7 @@ async function fetchPaperPayload(options = {}) {
       sources,
       task,
       taskFingerprint: task.fingerprint,
+      resumable: Object.values(task.sourcePages).some(page => page?.complete !== true),
       sourcePages: task.sourcePages,
       sourceResults,
       newPapers: [],
@@ -5304,7 +5413,7 @@ async function fetchPaperPayload(options = {}) {
       message: `找到 ${exactCandidates.length} 个相近标题，等待确认`,
       counts: { raw: rawPapers.length, deduped: dedupedPapers.length, fetched: 0 },
       sources: apiCalls.filter(call => call.kind === "source"),
-      errors
+      ...discoveryTaskProgressState(task, apiCalls, errors)
     });
     if (sources.every(source => task.sourcePages[source]?.complete === true)) {
       await clearRecentFetchCursor(task.fingerprint, dataDir);
@@ -5456,6 +5565,7 @@ async function fetchPaperPayload(options = {}) {
     sources,
     task,
     taskFingerprint: task.fingerprint,
+    resumable: Object.values(task.sourcePages).some(page => page?.complete !== true),
     sourcePages: task.sourcePages,
     sourceResults: apiCalls
       .filter(call => call.kind === "source")
@@ -5476,7 +5586,7 @@ async function fetchPaperPayload(options = {}) {
     message: `完成：最终入库/展示 ${papers.length} 篇`,
     counts: { ...pipelineCounts, fetched: papers.length },
     sources: apiCalls.filter(call => call.kind === "source"),
-    errors
+    ...discoveryTaskProgressState(task, apiCalls, errors)
   });
   payload.cacheFile = await writeCachedPapers(mode === "today" ? date : `${date}-${mode}`, payload, dataDir);
   // 每次刷新都写抓取日志。即使最终 0 篇，也要保留逐源返回数、失败原因和筛选漏斗，便于排查。
@@ -5548,6 +5658,8 @@ module.exports = {
   buildTokenStats,
   buildArxivQuery,
   buildDiscoveryTaskFingerprint,
+  buildDiscoveryTaskDescriptor,
+  buildDiscoveryTaskContext,
   buildSearchExpression,
   classifyPaper,
   cleanSearchLogic,
@@ -5590,6 +5702,7 @@ module.exports = {
   readFetchLog,
   readFavoritesPayload,
   readGoogleRollingCursorStatus,
+  readDiscoveryTaskState,
   readRecentFetchCursors,
   readWebOfScienceUsage,
   readPaperNotesPayload,
