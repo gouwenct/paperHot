@@ -1223,7 +1223,10 @@ async function readIntegrationConfigs(options = {}) {
     llm: maskSecretConfig(llm),
     googleScholar: maskSecretConfig(googleScholar),
     journalMetrics: maskSecretConfig(journalMetrics),
-    webOfScience: maskSecretConfig(webOfScience)
+    webOfScience: {
+      ...maskSecretConfig(webOfScience),
+      usage: await readWebOfScienceUsage(options.dataDir || DATA_DIR)
+    }
   };
 }
 
@@ -1313,7 +1316,10 @@ async function writeIntegrationConfigs(payload = {}, options = {}) {
     llm: maskSecretConfig(llm),
     googleScholar: maskSecretConfig(googleScholar),
     journalMetrics: maskSecretConfig(journalMetrics),
-    webOfScience: maskSecretConfig(webOfScience)
+    webOfScience: {
+      ...maskSecretConfig(webOfScience),
+      usage: await readWebOfScienceUsage(options.dataDir || DATA_DIR)
+    }
   };
 }
 
@@ -1669,17 +1675,35 @@ async function clearRecentFetchCursor(fingerprint, dataDir = DATA_DIR) {
   });
 }
 
-async function readWebOfScienceUsage(dataDir = DATA_DIR, now = new Date()) {
-  const usage = await readJsonFile(path.join(dataDir, WEB_OF_SCIENCE_USAGE_NAME), {
+function cleanWebOfScienceUsage(usage = {}) {
+  const cleanCounts = value => Object.fromEntries(Object.entries(value && typeof value === "object" ? value : {})
+    .map(([key, count]) => [compactText(key), Math.max(0, Number(count || 0))])
+    .filter(([key]) => key));
+  return {
+    trackingStartedAt: compactText(usage.trackingStartedAt),
+    totalCount: Math.max(0, Number(usage.totalCount || 0)),
+    months: cleanCounts(usage.months),
+    days: cleanCounts(usage.days),
+    lastRequestAt: compactText(usage.lastRequestAt),
+    lastStatus: compactText(usage.lastStatus)
+  };
+}
+
+async function readWebOfScienceUsageFile(dataDir = DATA_DIR) {
+  return cleanWebOfScienceUsage(await readJsonFile(path.join(dataDir, WEB_OF_SCIENCE_USAGE_NAME), {
     trackingStartedAt: "",
     totalCount: 0,
     months: {},
     days: {},
     lastRequestAt: "",
     lastStatus: ""
-  });
+  }));
+}
+
+async function readWebOfScienceUsage(dataDir = DATA_DIR, now = new Date()) {
+  const usage = await readWebOfScienceUsageFile(dataDir);
   const current = now instanceof Date ? now : new Date(now);
-  const today = current.toISOString().slice(0, 10);
+  const today = todayString(current);
   const month = today.slice(0, 7);
   const months = usage.months && typeof usage.months === "object" ? usage.months : {};
   const days = usage.days && typeof usage.days === "object" ? usage.days : {};
@@ -1699,7 +1723,8 @@ let webOfScienceUsageWriteQueue = Promise.resolve();
 
 async function recordWebOfScienceRequest({ status, at = new Date().toISOString() } = {}, dataDir = DATA_DIR) {
   const update = webOfScienceUsageWriteQueue.then(async () => {
-    const requestAt = new Date(at).toISOString();
+    const requestDate = new Date(at);
+    const requestAt = requestDate.toISOString();
     const file = path.join(dataDir, WEB_OF_SCIENCE_USAGE_NAME);
     const usage = await readJsonFile(file, {
       trackingStartedAt: requestAt,
@@ -1709,8 +1734,8 @@ async function recordWebOfScienceRequest({ status, at = new Date().toISOString()
       lastRequestAt: "",
       lastStatus: ""
     });
-    const month = requestAt.slice(0, 7);
-    const day = requestAt.slice(0, 10);
+    const day = todayString(requestDate);
+    const month = day.slice(0, 7);
     usage.months = usage.months && typeof usage.months === "object" ? usage.months : {};
     usage.days = usage.days && typeof usage.days === "object" ? usage.days : {};
     usage.totalCount = Number(usage.totalCount || 0) + 1;
@@ -1825,6 +1850,7 @@ async function exportLocalData(options = {}) {
         ...(includeStats ? {
           journalMetricsCache: await readJournalMetricsCache(dataDir),
           googleRollingCursors: await readGoogleRollingCursorsPayload(dataDir),
+          webOfScienceUsage: await readWebOfScienceUsageFile(dataDir),
           paperCacheFiles
         } : {})
       }
@@ -1882,7 +1908,8 @@ async function buildLocalDataExportFiles(options = {}) {
   if (includeStats) {
     files.push(
       { path: "data/papers/journal-metrics-cache.json", content: jsonText(data.papers?.journalMetricsCache || { updatedAt: "", journals: {} }) },
-      { path: "data/papers/google-rolling-cursors.json", content: jsonText(data.papers?.googleRollingCursors || { cursors: {} }) }
+      { path: "data/papers/google-rolling-cursors.json", content: jsonText(data.papers?.googleRollingCursors || { cursors: {} }) },
+      { path: "data/papers/web-of-science-usage.json", content: jsonText(cleanWebOfScienceUsage(data.papers?.webOfScienceUsage)) }
     );
     Object.entries(data.papers?.paperCacheFiles || {}).forEach(([fileName, content]) => {
       if (dateKeyFromCacheFile(fileName)) files.push({ path: `data/papers/${fileName}`, content: jsonText(content) });
@@ -1977,6 +2004,10 @@ async function importLocalData(payload = {}, options = {}) {
     await writeGoogleRollingCursors(input.papers.googleRollingCursors, dataDir);
     imported.push("googleRollingCursors");
   }
+  if (input?.papers?.webOfScienceUsage) {
+    await writeJsonFile(path.join(dataDir, WEB_OF_SCIENCE_USAGE_NAME), cleanWebOfScienceUsage(input.papers.webOfScienceUsage));
+    imported.push("webOfScienceUsage");
+  }
   if (input?.papers?.paperCacheFiles && typeof input.papers.paperCacheFiles === "object") {
     const cacheEntries = Object.entries(input.papers.paperCacheFiles)
       .filter(([fileName, payload]) => dateKeyFromCacheFile(fileName) && payload && typeof payload === "object");
@@ -2009,12 +2040,9 @@ async function importLocalData(payload = {}, options = {}) {
 async function importLocalDataZip(input, options = {}) {
   const entries = parseZipEntries(input);
   if (entries["paperhot-local-data.json"]) {
-    try {
-      const packagePayload = parseZipJsonEntry(entries, "paperhot-local-data.json");
-      if (packagePayload?.data) return importLocalData(packagePayload, options);
-    } catch {
-      // New ZIP exports use this as a manifest only; malformed metadata should not block valid whitelisted files.
-    }
+    const packagePayload = parseZipJsonEntry(entries, "paperhot-local-data.json");
+    migrateLocalDataBackup(packagePayload);
+    if (packagePayload?.data) return importLocalData(packagePayload, options);
   }
   const payload = {
     user: {},
@@ -2029,6 +2057,7 @@ async function importLocalDataZip(input, options = {}) {
   const operationLog = parseZipJsonlEntry(entries, "data/papers/operation-log.jsonl");
   const journalMetricsCache = parseZipJsonEntry(entries, "data/papers/journal-metrics-cache.json");
   const googleRollingCursors = parseZipJsonEntry(entries, "data/papers/google-rolling-cursors.json");
+  const webOfScienceUsage = parseZipJsonEntry(entries, "data/papers/web-of-science-usage.json");
   const llm = parseZipJsonEntry(entries, "config/llm.json");
   const googleScholar = parseZipJsonEntry(entries, "config/google-scholar.json");
   const journalMetrics = parseZipJsonEntry(entries, "config/journal-metrics.json");
@@ -2049,6 +2078,7 @@ async function importLocalDataZip(input, options = {}) {
   if (operationLog) payload.papers.operationLog = operationLog;
   if (journalMetricsCache) payload.papers.journalMetricsCache = journalMetricsCache;
   if (googleRollingCursors) payload.papers.googleRollingCursors = googleRollingCursors;
+  if (webOfScienceUsage) payload.papers.webOfScienceUsage = webOfScienceUsage;
   if (Object.keys(paperCacheFiles).length) payload.papers.paperCacheFiles = paperCacheFiles;
   if (llm || googleScholar || journalMetrics || webOfScience) {
     payload.integrations = {};
@@ -4450,10 +4480,27 @@ function paperHasLlmInsight(paper) {
 }
 
 function archivePaperMatchesTarget(paper, target = {}) {
-  const targetKeys = new Set(paperFlexibleLookupKeys(target));
-  if (!targetKeys.size && target.id) targetKeys.add(compactText(target.id).toLowerCase());
-  if (!targetKeys.size) return false;
-  return paperFlexibleLookupKeys(paper).some(key => targetKeys.has(key));
+  const paperDoi = normalizeDoi(paper?.doi);
+  const targetDoi = normalizeDoi(target?.doi);
+  if (paperDoi && targetDoi) return paperDoi === targetDoi;
+
+  const paperId = compactText(paper?.id).toLowerCase();
+  const targetId = compactText(target?.id).toLowerCase();
+  if (paperId && targetId && paperId === targetId) return true;
+
+  const paperSource = compactText(paper?.retrievalSource).toLowerCase();
+  const targetSource = compactText(target?.retrievalSource).toLowerCase();
+  const paperSourceId = compactText(paper?.sourceId).toLowerCase();
+  const targetSourceId = compactText(target?.sourceId).toLowerCase();
+  if (paperSource && paperSource === targetSource && paperSourceId && paperSourceId === targetSourceId) return true;
+  if (paperId || targetId || paperSourceId || targetSourceId) return false;
+
+  const paperStage = compactText(paper?.publicationStage || "formal").toLowerCase();
+  const targetStage = compactText(target?.publicationStage || "formal").toLowerCase();
+  return paperStage === targetStage
+    && Boolean(normalizedTitleKey(paper?.title))
+    && normalizedTitleKey(paper?.title) === normalizedTitleKey(target?.title)
+    && hasMeaningfulAuthorOverlap(paper?.authors, target?.authors);
 }
 
 async function enrichArchivePapersWithLlm(papers, options = {}) {

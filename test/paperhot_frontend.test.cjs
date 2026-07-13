@@ -57,9 +57,104 @@ test("today and favorites pages expose paper search controls", async () => {
 
 test("paper card orders date journal metrics short title and citation controls", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
-  assert.match(html, /paper-source-row[\s\S]*publishedDoiControl[\s\S]*paperSourceLabel\(paper\)[\s\S]*journalMetricTags\(journalMetrics\)/);
-  assert.match(html, /paper-title-row[\s\S]*paperTitleLink\(paper\)[\s\S]*<\/div>\s*<div class="paper-title-tools">[\s\S]*paperShortTitleEditor\(paper\)/);
+  assert.match(html, /paper-source-row[\s\S]*publishedDoiControl[\s\S]*sourceLabel[\s\S]*journalMetricTags\(journalMetrics\)/);
+  assert.match(html, /paper-title-row[\s\S]*paperTitleLink\(paper\)[\s\S]*citationMetric[\s\S]*<\/div>[\s\S]*paper-title-tools[\s\S]*paperShortTitleEditor\(paper\)/);
   assert.match(html, /paper-signal-row[\s\S]*paperBibliography\(paper\)/);
+});
+
+test("paper cards show authors and source-specific title metrics with starred backgrounds", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /function paperCitationMetric\(/);
+  assert.match(html, /function paperAuthorsLabel\(/);
+  assert.match(html, /class="paper-title-metric"/);
+  assert.match(html, /class="paper-authors"/);
+  assert.match(html, /paper-card \$\{isStarred \? "starred" : ""\}/);
+  assert.match(html, /\.paper-card\.starred\s*\{[\s\S]*background-image:/);
+
+  const metricSource = readNamedFunction(html, "paperCitationMetric", "paperAuthorsLabel");
+  const authorsSource = readNamedFunction(html, "paperAuthorsLabel", "paperVisibleSourceLabel");
+  const sourceSource = readNamedFunction(html, "paperVisibleSourceLabel", "paperBibliography");
+  const api = new Function(`${metricSource}; ${authorsSource}; ${sourceSource}; return { paperCitationMetric, paperAuthorsLabel, paperVisibleSourceLabel };`)();
+
+  assert.deepEqual(api.paperCitationMetric({ retrievalSource: "webofscience", citationCount: 15 }), { value: "15", label: "WoS 引用" });
+  assert.deepEqual(api.paperCitationMetric({ retrievalSource: "googlescholar", citationCount: 8 }), { value: "8", label: "Scholar 引用" });
+  assert.deepEqual(api.paperCitationMetric({ retrievalSource: "arxiv" }), { value: "arXiv", label: "预印本" });
+  assert.deepEqual(api.paperCitationMetric({ retrievalSource: "biorxiv" }), { value: "bioRxiv", label: "预印本" });
+  assert.equal(api.paperCitationMetric({ retrievalSource: "webofscience", citationCount: null }), null);
+  assert.equal(api.paperAuthorsLabel({ authors: ["A", "B", "C", "D"] }), "A、B、C 等 4 位作者");
+  assert.equal(api.paperVisibleSourceLabel({ retrievalSource: "webofscience", source: "Web of Science" }), "");
+  assert.equal(api.paperVisibleSourceLabel({ retrievalSource: "webofscience", journal: "Web of Science", source: "Web of Science" }), "");
+  assert.equal(api.paperVisibleSourceLabel({ retrievalSource: "googlescholar", journal: "Google Scholar", source: "Google Scholar" }), "");
+  assert.equal(api.paperVisibleSourceLabel({ retrievalSource: "webofscience", journal: "Nature Methods" }), "期刊：Nature Methods");
+});
+
+test("today page exposes resumable source failures and per-paper AI retry", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /data-fetch-failure-details/);
+  assert.match(html, /data-retry-source-page/);
+  assert.match(html, /loadPaperData\("range", true, "resume"\)/);
+  assert.match(html, /function paperLlmFailureControl\(/);
+  assert.match(html, /data-refresh-paper-llm/);
+  assert.match(html, /function removePaperLlmFailure\(/);
+  assert.match(html, /clearPaperLlmFailure\(payload\.paper \|\| paper\)/);
+  assert.match(html, /error\.taskState = status/);
+
+  const failureSource = readNamedFunction(html, "todayFailureRows", "todayDiscoveryWorkbench");
+  const todayFailureRows = new Function("escapeHTML", `${failureSource}; return todayFailureRows;`)(value => String(value));
+  const rendered = todayFailureRows([
+    { source: "webofscience", label: "Web of Science", message: "HTTP 429" },
+    { source: "llm", label: "LLM", message: "timeout" }
+  ], { webofscience: { nextPage: 3 } }, true);
+  assert.match(rendered, /Web of Science/);
+  assert.match(rendered, /HTTP 429/);
+  assert.match(rendered, /下页 3/);
+  assert.match(rendered, /data-retry-source-page="webofscience"/);
+  assert.doesNotMatch(rendered, /timeout/);
+
+  const identitySource = readNamedFunction(html, "paperRetryIdentityMatches", "paperLooksLikeGeneratedSummary");
+  const removeSource = readNamedFunction(html, "removePaperLlmFailure", "paperLlmFailureForPaper");
+  const removePaperLlmFailure = new Function(`${identitySource}; ${removeSource}; return removePaperLlmFailure;`)();
+  const remaining = removePaperLlmFailure([
+    { source: "llm", message: "target", paper: { doi: "10.1/target" } },
+    { source: "llm", message: "other", paper: { doi: "10.1/other" } },
+    { source: "webofscience", message: "HTTP 429", paper: { doi: "10.1/target" } }
+  ], { doi: "10.1/target" });
+  assert.deepEqual(remaining.map(error => error.message), ["other", "HTTP 429"]);
+});
+
+test("per-paper AI failures use conservative paper identity instead of title alone", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const identitySource = readNamedFunction(html, "paperRetryIdentityMatches", "paperLooksLikeGeneratedSummary");
+  const paperRetryIdentityMatches = new Function(`${identitySource}; return paperRetryIdentityMatches;`)();
+
+  assert.equal(paperRetryIdentityMatches(
+    { doi: "https://doi.org/10.1000/SAME" },
+    { doi: "10.1000/same" }
+  ), true);
+  assert.equal(paperRetryIdentityMatches(
+    { doi: "10.1000/first", title: "Shared title" },
+    { doi: "10.1000/second", title: "Shared title" }
+  ), false);
+  assert.equal(paperRetryIdentityMatches(
+    { doi: "10.1000/enriched", id: "paper-a" },
+    { id: "paper-a" }
+  ), true);
+  assert.equal(paperRetryIdentityMatches(
+    { doi: "10.1000/enriched", retrievalSource: "arxiv", sourceId: "2607.12345" },
+    { retrievalSource: "arxiv", sourceId: "2607.12345" }
+  ), true);
+  assert.equal(paperRetryIdentityMatches(
+    { id: "paper-a", title: "Shared title" },
+    { id: "paper-b", title: "Shared title" }
+  ), false);
+  assert.equal(paperRetryIdentityMatches(
+    { retrievalSource: "arxiv", sourceId: "2607.12345" },
+    { retrievalSource: "arxiv", sourceId: "2607.12345" }
+  ), true);
+  assert.equal(paperRetryIdentityMatches(
+    { title: "Shared title", publicationStage: "formal", authors: ["Alice Smith"] },
+    { title: "shared title", publicationStage: "formal", authors: ["A. Smith"] }
+  ), true);
 });
 
 test("all papers page supports combined filters and OR search", async () => {
@@ -182,6 +277,20 @@ test("source config exposes Web of Science API settings", async () => {
   assert.match(html, /Web of Science API Key/);
   assert.match(html, /每次仅抓取少量页面/);
   assert.match(html, /webOfScience:\s*integrationState\.webOfScience/);
+});
+
+test("Web of Science config shows local usage and backup boundaries", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /function webOfScienceUsagePanel\(/);
+  assert.match(html, /PaperHot 本地统计/);
+  assert.match(html, /今日请求/);
+  assert.match(html, /本月请求/);
+  assert.match(html, /累计请求/);
+  assert.match(html, /月度历史/);
+  assert.match(html, /最后请求/);
+  assert.match(html, /预计最多/);
+  assert.match(html, /WoS 请求用量/);
+  assert.match(html, /近期抓取断点不会导出/);
 });
 
 test("fetch progress panel exposes source page detail", async () => {
@@ -545,6 +654,17 @@ test("saved papers are visually muted outside the favorites page", async () => {
   assert.match(html, /\.paper-card\.saved-muted/);
   assert.match(html, /const isSavedMuted = isSaved && scope !== "favorites"/);
   assert.match(html, /isSavedMuted \? "saved-muted" : ""/);
+  const savedRuleIndex = html.indexOf(".paper-card.saved-muted {");
+  const starredSavedRuleIndex = html.indexOf(".paper-card.starred.saved-muted {");
+  assert.ok(starredSavedRuleIndex > savedRuleIndex, "starred+saved rule must override the saved background shorthand");
+  assert.match(html.slice(starredSavedRuleIndex, html.indexOf("}", starredSavedRuleIndex) + 1), /background-image:/);
+});
+
+test("mobile paper timeline stacks its timestamp above the card", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const mobileCss = html.slice(html.indexOf("@media (max-width: 420px)"), html.indexOf("</style>"));
+  assert.match(mobileCss, /\.timeline-item\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(mobileCss, /\.timeline-sort-button\s*\{[^}]*grid-template-columns:/);
 });
 
 test("today papers move to the end after being favorited", async () => {
@@ -572,8 +692,8 @@ test("favorites page exposes mark-read and remove actions for reading workflow",
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /favoritePaperWorkflowButton/);
   assert.match(html, /paperLlmRefreshButton\(paper, scope\)/);
-  assert.match(html, /scope === "favorites" \? favoritePaperWorkflowButton\(paper, scope\) : paperLlmRefreshButton\(paper, scope\)/);
-  assert.match(html, /scope === "favorites" \? paperLlmRefreshButton\(paper, scope\) : favoritePaperWorkflowButton\(paper, scope\)/);
+  assert.match(html, /scope === "favorites" \? favoritePaperWorkflowButton\(paper, scope\) : ""/);
+  assert.match(html, /const llmButton = llmFailureControl \? "" : paperLlmRefreshButton\(paper, scope\)/);
   assert.match(html, /data-favorite-mark-read/);
   assert.match(html, /data-favorite-undo-read/);
   assert.match(html, /data-favorite-mark-unread/);
@@ -1179,9 +1299,10 @@ test("today polling errors retain existing cards and reset the running state", a
   const html = await fs.readFile(htmlFile, "utf8");
   const source = readNamedFunction(html, "loadPaperData", "fetchPaperPayloadOnce");
   let applyCalls = 0;
-  const harness = new Function("location", "renderPage", "runPaperRefreshJob", "applyPaperPayload", "loadArchiveData", "loadFetchLogData", "freezeTodayDiscoveryRequest", "todayDiscoveryRequestBody", "scheduleTodayTaskPreflight", `
+  const harness = new Function("location", "renderPage", "runPaperRefreshJob", "applyPaperPayload", "loadArchiveData", "loadFetchLogData", "freezeTodayDiscoveryRequest", "todayDiscoveryRequestBody", "scheduleTodayTaskPreflight", "persistTodayTaskFailureState", "persistTodayFetchSessionTaskMeta", `
     let todayPapers = [{ id: "kept" }];
     let paperDataStatus = "existing results";
+    let paperDataMeta = { taskFingerprint: "old-task", errors: [] };
     let recentDataStatus = "existing results";
     let todayRunningTask = null;
     let todayTaskPreflightRevision = 0;
@@ -1192,17 +1313,28 @@ test("today polling errors retain existing cards and reset the running state", a
     async ${source}
     return {
       loadPaperData,
-      state: () => ({ todayPapers, paperDataStatus, todayRunningTask, fetchProgress })
+      state: () => ({ todayPapers, paperDataStatus, paperDataMeta, todayRunningTask, fetchProgress })
     };
   `)(
     { protocol: "http:", hash: "#today" },
     () => {},
-    async () => { throw new Error("poll offline"); },
+    async () => {
+      const error = new Error("poll offline");
+      error.taskState = {
+        taskFingerprint: "failed-task",
+        sourcePages: { webofscience: { nextPage: 3, complete: false } },
+        sourceResults: [{ source: "webofscience", status: "failed", returned: 0, message: "HTTP 429" }],
+        errors: [{ source: "webofscience", message: "HTTP 429" }]
+      };
+      throw error;
+    },
     () => { applyCalls += 1; },
     () => {},
     async () => {},
     request => JSON.parse(JSON.stringify(request)),
     resumeMode => ({ searchMode: "direction", queryExpression: "SIM", searchLogic: {}, sources: ["arxiv"], startDate: "2026-07-01", endDate: "2026-07-13", resumeMode }),
+    () => {},
+    () => {},
     () => {}
   );
 
@@ -1212,6 +1344,69 @@ test("today polling errors retain existing cards and reset the running state", a
   assert.match(harness.state().paperDataStatus, /poll offline/);
   assert.equal(harness.state().todayRunningTask, null);
   assert.equal(harness.state().fetchProgress, null);
+  assert.equal(harness.state().paperDataMeta.taskFingerprint, "failed-task");
+  assert.equal(harness.state().paperDataMeta.sourcePages.webofscience.nextPage, 3);
+  assert.equal(harness.state().paperDataMeta.errors[0].message, "HTTP 429");
+});
+
+test("today task failures and LLM retries persist updated session metadata by fingerprint", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const mergeSource = readNamedFunction(html, "mergeTodayFetchSessionTaskMeta", "persistTodayFetchSessionTaskMeta");
+  const mergeTodayFetchSessionTaskMeta = new Function(`${mergeSource}; return mergeTodayFetchSessionTaskMeta;`)();
+  const sessions = [
+    { id: "a", meta: { taskFingerprint: "task-a", errors: [] } },
+    { id: "b", meta: { taskFingerprint: "task-b", errors: [{ message: "keep" }] } }
+  ];
+  const merged = mergeTodayFetchSessionTaskMeta(sessions, {
+    taskFingerprint: "task-a",
+    sourcePages: { webofscience: { nextPage: 3 } },
+    errors: [{ source: "webofscience", message: "HTTP 429" }]
+  });
+
+  assert.equal(merged[0].meta.errors[0].message, "HTTP 429");
+  assert.equal(merged[0].meta.sourcePages.webofscience.nextPage, 3);
+  assert.equal(merged[1], sessions[1]);
+  assert.match(html, /persistTodayFetchSessionTaskMeta\(paperDataMeta\)/);
+  assert.match(html, /function clearPaperLlmFailure[\s\S]*todayFetchSessions[\s\S]*saveTodayFetchSessions\(\)/);
+});
+
+test("a first failed today task persists independently of result sessions", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const loadSource = readNamedFunction(html, "loadTodayTaskFailureStates", "saveTodayTaskFailureStates");
+  const saveSource = readNamedFunction(html, "saveTodayTaskFailureStates", "persistTodayTaskFailureState");
+  const persistSource = readNamedFunction(html, "persistTodayTaskFailureState", "todayTaskFailureState");
+  const lookupSource = readNamedFunction(html, "todayTaskFailureState", "loadTodayFetchSessions");
+  const memory = new Map();
+  const localStorage = {
+    getItem: key => memory.get(key) || null,
+    setItem: (key, value) => memory.set(key, value)
+  };
+  const harness = new Function("localStorage", `
+    const taskFailureStorageKey = "paperhot.todayTaskFailures.v1";
+    let todayTaskFailureStates = {};
+    ${loadSource}
+    ${saveSource}
+    ${persistSource}
+    ${lookupSource}
+    return {
+      persistTodayTaskFailureState,
+      reload: () => loadTodayTaskFailureStates(),
+      lookup: fingerprint => todayTaskFailureState(fingerprint)
+    };
+  `)(localStorage);
+
+  harness.persistTodayTaskFailureState({
+    taskFingerprint: "first-failed-task",
+    sourcePages: { webofscience: { nextPage: 3, complete: false } },
+    errors: [{ source: "webofscience", message: "HTTP 429" }]
+  });
+  const reloaded = harness.reload();
+  assert.equal(reloaded["first-failed-task"].sourcePages.webofscience.nextPage, 3);
+  assert.equal(reloaded["first-failed-task"].errors[0].message, "HTTP 429");
+  assert.equal(harness.lookup("first-failed-task").taskFingerprint, "first-failed-task");
+  assert.match(html, /persistTodayTaskFailureState\(paperDataMeta\)/);
+  assert.match(html, /todayTaskFailureState\(currentCanonical\.taskFingerprint\)/);
+  assert.match(html, /function clearPaperLlmFailure[\s\S]*todayTaskFailureStates[\s\S]*saveTodayTaskFailureStates\(\)/);
 });
 
 test("today fetch sessions keep duplicate ranges with compact timestamp labels", async () => {

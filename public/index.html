@@ -222,6 +222,44 @@
       justify-content: flex-end;
       gap: 8px;
     }
+    .wos-usage-panel {
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid #dbe7e8;
+      border-radius: 8px;
+      background: #f7fbfa;
+    }
+    .wos-usage-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: baseline;
+    }
+    .wos-usage-head strong { color: #2c4c4c; font-size: 12px; }
+    .wos-usage-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .wos-usage-stat {
+      min-width: 0;
+      padding: 7px;
+      border: 1px solid #e1ebeb;
+      border-radius: 6px;
+      background: #fff;
+    }
+    .wos-usage-stat b { display: block; color: #244b4c; font-size: 16px; }
+    .wos-usage-stat span { color: #718195; font-size: 10px; font-weight: 750; }
+    .wos-usage-history { display: flex; flex-wrap: wrap; gap: 5px; }
+    .wos-usage-history span {
+      padding: 3px 6px;
+      border-radius: 5px;
+      background: #eaf3f2;
+      color: #4f6d6d;
+      font-size: 10px;
+      font-weight: 780;
+    }
     .fetch-session-bar {
       display: flex;
       flex-wrap: wrap;
@@ -712,6 +750,13 @@
       background: rgba(255,255,255,0.88);
       box-shadow: 0 10px 24px rgba(33,58,82,0.06);
     }
+    .paper-card.starred {
+      opacity: 1;
+      border-color: rgba(212,160,23,.42);
+      background-color: rgba(255,253,243,.97);
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 36 36'%3E%3Cpath d='M18 5.5l2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z' fill='%23d4a017' fill-opacity='.08'/%3E%3C/svg%3E");
+      background-size: 36px 36px;
+    }
     .paper-card.saved-muted {
       opacity: .68;
       background: rgba(255,255,255,0.56);
@@ -720,6 +765,13 @@
     .paper-card.saved-muted:hover {
       opacity: .86;
     }
+    .paper-card.starred.saved-muted {
+      opacity: .94;
+      background-color: rgba(255,253,243,.97);
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 36 36'%3E%3Cpath d='M18 5.5l2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z' fill='%23d4a017' fill-opacity='.08'/%3E%3C/svg%3E");
+      background-size: 36px 36px;
+    }
+    .paper-card.starred.saved-muted:hover { opacity: 1; }
     .paper-card.pending-read { animation: favoriteReadFade 3s ease forwards; }
     @keyframes favoriteReadFade {
       from { opacity: 1; }
@@ -742,9 +794,43 @@
     .source { color: #75859a; font-size: 12px; font-weight: 800; }
     .paper-title-row {
       display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
       gap: 8px;
       align-items: start;
       margin: 7px 0 5px;
+    }
+    .paper-title-metric {
+      min-width: 58px;
+      padding: 5px 7px;
+      border: 1px solid #dbe5ea;
+      border-radius: 6px;
+      background: rgba(255,255,255,.88);
+      color: #5f7286;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .paper-title-metric b { display: block; color: #203049; font-size: 15px; }
+    .paper-title-metric span { display: block; font-size: 10px; font-weight: 780; }
+    .paper-authors {
+      margin: 0 0 5px;
+      color: #718195;
+      font-size: 11px;
+      font-weight: 720;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+    .paper-ai-failure {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin: 7px 0;
+      padding: 7px 9px;
+      border-left: 3px solid #d97706;
+      background: rgba(255,247,237,.9);
+      color: #9a4f08;
+      font-size: 11px;
+      font-weight: 760;
     }
     .paper-title-tools {
       display: flex;
@@ -1749,6 +1835,29 @@
       border-top: 1px solid #e7eef2;
     }
     .today-task-state strong { color: #40566b; }
+    .fetch-failure-details {
+      border: 1px solid #f0d5c2;
+      border-radius: 7px;
+      background: #fffaf6;
+    }
+    .fetch-failure-details summary {
+      padding: 7px 9px;
+      color: #8e4b1f;
+      font-size: 11px;
+      font-weight: 820;
+      cursor: pointer;
+    }
+    .fetch-failure-list { display: grid; gap: 1px; border-top: 1px solid #f2dfd1; }
+    .fetch-failure-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      padding: 7px 9px;
+      color: #7b5b47;
+      font-size: 11px;
+    }
+    .fetch-failure-row strong { color: #7f3f18; }
     .today-source-tabs {
       display: flex;
       gap: 2px;
@@ -1837,6 +1946,16 @@
       .today-fetch-actions { flex-wrap: wrap; }
       .today-fetch-actions button { flex-basis: 100%; }
       .last-fetch-status { min-width: 0; justify-items: start; text-align: left; }
+      .timeline-list { padding-left: 14px; }
+      .timeline-item { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+      .timeline-stamp { padding: 0 0 0 4px; }
+      .timeline-sort-button {
+        grid-template-columns: auto auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 6px;
+      }
+      .timeline-time { font-size: 13px; }
+      .timeline-source-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .paper-head { grid-template-columns: minmax(0, 1fr); }
       .head-actions { flex-wrap: wrap; justify-content: flex-start; white-space: normal; }
       .short-title-row { width: 100%; min-width: 0; grid-template-columns: 1fr; }
@@ -1914,10 +2033,11 @@
             </div>
             <div class="config-section" style="margin-top:12px">
               <label><span><input type="checkbox" data-export-include-papers checked> 包含本地论文库、收藏、待读、已读和标星</span></label>
-              <label><span><input type="checkbox" data-export-include-stats> 包含统计缓存和抓取进度缓存</span></label>
+              <label><span><input type="checkbox" data-export-include-stats> 包含统计缓存、WoS 请求用量和抓取进度缓存</span></label>
               <label><span><input type="checkbox" data-export-include-logs> 包含抓取日志和操作日志</span></label>
               <label><span><input type="checkbox" data-export-include-profile> 包含用户资料和研究背景</span></label>
               <label><span><input type="checkbox" data-export-include-secrets> 包含 API Key 和外部接口配置</span></label>
+              <div class="small-text">领域关键词和 Boolean 搜索逻辑默认随用户配置导出；WoS 请求用量只在勾选统计后导出，近期抓取断点不会导出。</div>
               <div class="small-text">包含 API Key 的导出文件只能保存在自己的设备中，不要上传 GitHub 或发给他人。</div>
               <label><span><input type="checkbox" data-import-allow-secrets> 允许导入并覆盖本机 API Key</span></label>
               <div class="small-text">默认导入会跳过 ZIP/JSON 里的 API 配置；只有勾选后才会覆盖本机接口配置。</div>
@@ -2084,6 +2204,7 @@
     let fetchProgress = null;
     const fetchRangeStorageKey = "paperhot.fetchRange.v1";
     const fetchSessionsStorageKey = "paperhot.todayFetchSessions.v1";
+    const taskFailureStorageKey = "paperhot.todayTaskFailures.v1";
     let todayPaperSearchQuery = "";
     let allPaperSearchQuery = "";
     let allPaperSearchTimer = null;
@@ -2091,6 +2212,7 @@
     let paperSearchTimer = null;
     let fetchRange = loadFetchRange();
     let todayRangePreset = fetchRange.preset || "3m";
+    let todayTaskFailureStates = loadTodayTaskFailureStates();
     let todayFetchSessions = loadTodayFetchSessions();
     let activeTodayFetchSessionId = todayFetchSessions[0]?.id || "";
     if (activeTodayFetchSessionId) {
@@ -2362,6 +2484,60 @@
       };
     }
 
+    function loadTodayTaskFailureStates() {
+      try {
+        const stored = JSON.parse(localStorage.getItem(taskFailureStorageKey) || "{}");
+        if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
+        return Object.fromEntries(Object.entries(stored)
+          .filter(([fingerprint, state]) => fingerprint && state && typeof state === "object")
+          .map(([fingerprint, state]) => [fingerprint, {
+            taskFingerprint: fingerprint,
+            sourcePages: { ...(state.sourcePages || {}) },
+            sourceResults: Array.isArray(state.sourceResults) ? [...state.sourceResults] : [],
+            errors: Array.isArray(state.errors) ? [...state.errors] : []
+          }]));
+      } catch (error) {
+        console.warn("Task failure states load failed", error);
+        return {};
+      }
+    }
+
+    function saveTodayTaskFailureStates() {
+      try {
+        localStorage.setItem(taskFailureStorageKey, JSON.stringify(todayTaskFailureStates));
+      } catch (error) {
+        console.warn("Task failure states save failed", error);
+      }
+    }
+
+    function persistTodayTaskFailureState(taskMeta = {}) {
+      const fingerprint = String(taskMeta.taskFingerprint || "").trim();
+      if (!fingerprint) return null;
+      const errors = Array.isArray(taskMeta.errors) ? [...taskMeta.errors] : [];
+      if (!errors.length) {
+        if (todayTaskFailureStates[fingerprint]) {
+          const nextStates = { ...todayTaskFailureStates };
+          delete nextStates[fingerprint];
+          todayTaskFailureStates = nextStates;
+          saveTodayTaskFailureStates();
+        }
+        return null;
+      }
+      const state = {
+        taskFingerprint: fingerprint,
+        sourcePages: { ...(taskMeta.sourcePages || {}) },
+        sourceResults: Array.isArray(taskMeta.sourceResults) ? [...taskMeta.sourceResults] : [],
+        errors
+      };
+      todayTaskFailureStates = { ...todayTaskFailureStates, [fingerprint]: state };
+      saveTodayTaskFailureStates();
+      return state;
+    }
+
+    function todayTaskFailureState(fingerprint) {
+      return todayTaskFailureStates[String(fingerprint || "").trim()] || null;
+    }
+
     function loadTodayFetchSessions() {
       try {
         const sessions = JSON.parse(localStorage.getItem(fetchSessionsStorageKey) || "[]");
@@ -2380,6 +2556,32 @@
         console.warn("Fetch sessions load failed", error);
         return [];
       }
+    }
+
+    function mergeTodayFetchSessionTaskMeta(sessions = [], taskMeta = {}) {
+      const fingerprint = String(taskMeta.taskFingerprint || "").trim();
+      if (!fingerprint) return sessions;
+      return sessions.map(session => {
+        if (String(session?.meta?.taskFingerprint || "").trim() !== fingerprint) return session;
+        return {
+          ...session,
+          meta: {
+            ...session.meta,
+            ...taskMeta,
+            sourcePages: { ...(taskMeta.sourcePages || {}) },
+            sourceResults: Array.isArray(taskMeta.sourceResults) ? [...taskMeta.sourceResults] : [],
+            errors: Array.isArray(taskMeta.errors) ? [...taskMeta.errors] : []
+          }
+        };
+      });
+    }
+
+    function persistTodayFetchSessionTaskMeta(taskMeta = {}) {
+      const nextSessions = mergeTodayFetchSessionTaskMeta(todayFetchSessions, taskMeta);
+      if (!nextSessions.some((session, index) => session !== todayFetchSessions[index])) return false;
+      todayFetchSessions = nextSessions;
+      saveTodayFetchSessions();
+      return true;
     }
 
     function saveTodayFetchSessions() {
@@ -2468,6 +2670,55 @@
       return [paper.doi, paper.url, paper.pdfUrl, paper.id, paper.title]
         .map(value => String(value || "").trim().toLowerCase().replace(/\s+/g, " "))
         .filter(Boolean);
+    }
+
+    function paperRetryIdentityMatches(left = {}, right = {}) {
+      const clean = value => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+      const doi = value => clean(value)
+        .replace(/^https?:\/\/(?:dx\.)?doi\.org\//, "")
+        .replace(/^doi:\s*/, "");
+      const leftDoi = doi(left.doi);
+      const rightDoi = doi(right.doi);
+      if (leftDoi && rightDoi) return leftDoi === rightDoi;
+
+      const leftId = clean(left.id);
+      const rightId = clean(right.id);
+      if (leftId && rightId && leftId === rightId) return true;
+
+      const leftSource = clean(left.retrievalSource);
+      const rightSource = clean(right.retrievalSource);
+      const leftSourceId = clean(left.sourceId);
+      const rightSourceId = clean(right.sourceId);
+      if (leftSource && leftSource === rightSource && leftSourceId && leftSourceId === rightSourceId) return true;
+      if (leftId || rightId || leftSourceId || rightSourceId) return false;
+
+      const leftStage = clean(left.publicationStage || "formal");
+      const rightStage = clean(right.publicationStage || "formal");
+      const titleKey = value => clean(value).normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+      const authorIdentities = authors => (Array.isArray(authors) ? authors : [])
+        .map(author => clean(author).match(/[\p{L}\p{N}]+/gu) || [])
+        .filter(tokens => tokens.length)
+        .map(tokens => ({
+          fullName: tokens.join(""),
+          familyName: tokens.length > 1 ? tokens.at(-1) : "",
+          givenInitial: tokens.length > 1 ? tokens[0][0] : ""
+        }));
+      const leftAuthors = authorIdentities(left.authors);
+      const rightAuthors = authorIdentities(right.authors);
+      const authorOverlap = leftAuthors.some(leftAuthor => rightAuthors.some(rightAuthor => (
+        leftAuthor.fullName === rightAuthor.fullName
+        || Boolean(
+          leftAuthor.familyName
+          && leftAuthor.familyName === rightAuthor.familyName
+          && leftAuthor.givenInitial
+          && leftAuthor.givenInitial === rightAuthor.givenInitial
+        )
+      )));
+      const leftTitle = titleKey(left.title);
+      return leftStage === rightStage
+        && Boolean(leftTitle)
+        && leftTitle === titleKey(right.title)
+        && authorOverlap;
     }
 
     function paperLooksLikeGeneratedSummary(value) {
@@ -2663,6 +2914,33 @@
       return `<button class="ghost-btn" type="button" data-refresh-paper-llm="${escapeHTML(key)}" ${loading || archiveLlmRefreshingAll ? "disabled" : ""}>${loading ? "LLM中" : "LLM"}</button>`;
     }
 
+    function removePaperLlmFailure(errors = [], paper = {}) {
+      return errors.filter(error => error?.source !== "llm"
+        || !error.paper
+        || !paperRetryIdentityMatches(error.paper, paper));
+    }
+
+    function paperLlmFailureForPaper(paper) {
+      const errors = [
+        ...(Array.isArray(paperDataMeta?.errors) ? paperDataMeta.errors : []),
+        ...(Array.isArray(recentDataMeta?.errors) ? recentDataMeta.errors : [])
+      ];
+      return errors.find(error => error?.source === "llm"
+        && error.paper
+        && paperRetryIdentityMatches(error.paper, paper)) || null;
+    }
+
+    function paperLlmFailureControl(paper, scope = "") {
+      const failure = paperLlmFailureForPaper(paper);
+      if (!failure) return "";
+      return `
+        <div class="paper-ai-failure" role="status">
+          <span>AI 总结失败：${escapeHTML(failure.message || "未返回错误详情")}</span>
+          ${paperLlmRefreshButton(paper, scope)}
+        </div>
+      `;
+    }
+
     function paperShortTitleEditor(paper) {
       const key = paperStableKey(paper);
       if (!key) return "";
@@ -2706,29 +2984,37 @@
       const journalMetrics = paperJournalMetrics(paper);
       const publishedLabel = paperPublishedDateLabel(paper);
       const publishedDoiControl = paperPublishedDoiControl(paper, publishedLabel);
+      const sourceLabel = paperVisibleSourceLabel(paper);
+      const citationMetric = paperCitationMetric(paper);
+      const authorsLabel = paperAuthorsLabel(paper);
+      const llmFailureControl = paperLlmFailureControl(paper, scope);
+      const llmButton = llmFailureControl ? "" : paperLlmRefreshButton(paper, scope);
       const matchLabel = paperKeywordMatchLabel(paper);
       const abstractBlock = paperAbstractBlock(paper);
       const reasonBlock = paperReasonBlock(paper);
       return `
-        <article class="paper-card ${isPendingFavoriteRead ? "pending-read" : ""} ${isSavedMuted ? "saved-muted" : ""}">
+        <article class="paper-card ${isStarred ? "starred" : ""} ${isPendingFavoriteRead ? "pending-read" : ""} ${isSavedMuted ? "saved-muted" : ""}">
           <div class="paper-head">
             <div>
               <div class="paper-source-row">
                 ${publishedDoiControl}
-                <span class="source">${escapeHTML(paperSourceLabel(paper))}</span>
+                ${sourceLabel ? `<span class="source">${escapeHTML(sourceLabel)}</span>` : ""}
                 ${journalMetricTags(journalMetrics)}
               </div>
             </div>
             <div class="head-actions">
-              ${scope === "favorites" ? favoritePaperWorkflowButton(paper, scope) : paperLlmRefreshButton(paper, scope)}
-              ${scope === "favorites" ? paperLlmRefreshButton(paper, scope) : favoritePaperWorkflowButton(paper, scope)}
+              ${scope === "favorites" ? favoritePaperWorkflowButton(paper, scope) : ""}
+              ${llmButton}
               <button class="star-btn ${isStarred ? "starred" : ""}" data-star-toggle="${paperId}">${isStarred ? "已标星" : "☆ 标星"}</button>
               <button class="favorite ${isSaved ? "saved" : ""}" data-favorite="${paperId}">${isSaved ? "已收藏" : "♡ 加入个人收藏"}</button>
             </div>
           </div>
           <div class="paper-title-row">
             <h2 class="paper-title">${paperTitleLink(paper)}</h2>
+            ${citationMetric ? `<div class="paper-title-metric"><b>${escapeHTML(citationMetric.value)}</b><span>${escapeHTML(citationMetric.label)}</span></div>` : ""}
           </div>
+          <div class="paper-authors">${escapeHTML(authorsLabel)}</div>
+          ${llmFailureControl}
           <div class="paper-title-tools">
             ${paperShortTitleEditor(paper)}
           </div>
@@ -3098,9 +3384,36 @@
       return `<button class="published-date-pill" type="button"${copyAttrs}>发表时间：${escapeHTML(publishedLabel)}</button>`;
     }
 
-    function paperSourceLabel(paper) {
+    function paperCitationMetric(paper) {
+      const source = String(paper.retrievalSource || "").toLowerCase().replace(/[^a-z]/g, "");
+      if (source === "arxiv") return { value: "arXiv", label: "预印本" };
+      if (source === "biorxiv" || source === "bioarxiv") return { value: "bioRxiv", label: "预印本" };
+      if (paper.citationCount === null || paper.citationCount === undefined || paper.citationCount === "") return null;
+      const citationSource = String(paper.citationSource || "").toLowerCase();
+      const label = source === "webofscience" || citationSource.includes("web of science")
+        ? "WoS 引用"
+        : source === "semanticscholar" || citationSource.includes("semantic")
+          ? "Semantic 引用"
+          : "Scholar 引用";
+      return { value: String(paper.citationCount), label };
+    }
+
+    function paperAuthorsLabel(paper) {
+      const authors = (Array.isArray(paper.authors) ? paper.authors : String(paper.authors || "").split(/\s*;\s*/))
+        .map(author => String(author || "").trim())
+        .filter(Boolean);
+      if (!authors.length) return "作者未记录";
+      const shown = authors.slice(0, 3).join("、");
+      return authors.length > 3 ? `${shown} 等 ${authors.length} 位作者` : shown;
+    }
+
+    function paperVisibleSourceLabel(paper) {
+      const sourceKey = String(paper.retrievalSource || "").toLowerCase().replace(/[^a-z]/g, "");
       const journal = String(paper.journal || paper.venue || "").trim();
-      if (journal) return `期刊：${journal}`;
+      const isPlatformJournal = ["webofscience", "googlescholar", "arxiv", "biorxiv", "bioarxiv"].includes(sourceKey)
+        && journal.toLowerCase().replace(/[^a-z]/g, "") === sourceKey;
+      if (journal && !isPlatformJournal) return `期刊：${journal}`;
+      if (["webofscience", "googlescholar", "arxiv", "biorxiv", "bioarxiv"].includes(sourceKey)) return "";
       return paper.source || "来源未记录";
     }
 
@@ -3878,7 +4191,46 @@
       `;
     }
 
+    function todayFailureRows(errors = [], sourcePages = {}, canRetry = false) {
+      const sourceIds = new Set(["googlesearch", "googlescholar", "webofscience", "arxiv", "biorxiv", "semanticscholar"]);
+      const failures = errors.filter(error => sourceIds.has(String(error?.source || "").toLowerCase()));
+      if (!failures.length) return "";
+      return `
+        <details class="fetch-failure-details" data-fetch-failure-details open>
+          <summary>${failures.length} 个信源抓取失败；详细记录同时保存在抓取日志</summary>
+          <div class="fetch-failure-list">
+            ${failures.map(error => {
+              const source = String(error.source || "").toLowerCase();
+              const page = sourcePages[source] || {};
+              const pageText = page.nextPage ? `下页 ${page.nextPage}` : "从失败位置继续";
+              return `
+                <div class="fetch-failure-row">
+                  <strong>${escapeHTML(error.label || error.source || "信源")}</strong>
+                  <span>${escapeHTML(error.message || "未返回错误详情")} · ${escapeHTML(pageText)}</span>
+                  <button class="ghost-btn" type="button" data-retry-source-page="${escapeHTML(source)}" ${canRetry ? "" : "disabled"}>重试失败页</button>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        </details>
+      `;
+    }
+
     function todayDiscoveryWorkbench() {
+      const currentCanonical = todayRunningTask?.canonicalState || todayPreflightCanonicalState;
+      const persistedFailureState = todayTaskFailureState(currentCanonical.taskFingerprint);
+      const completedFailureState = Array.isArray(paperDataMeta?.errors)
+        && paperDataMeta.errors.length
+        && (!currentCanonical.taskFingerprint || paperDataMeta.taskFingerprint === currentCanonical.taskFingerprint)
+        ? paperDataMeta
+        : null;
+      const failureState = todayRunningTask?.canonicalState?.errors?.length
+        ? todayRunningTask.canonicalState
+        : completedFailureState || persistedFailureState;
+      const canRetry = Boolean(failureState?.taskFingerprint)
+        && !todayRunningTask
+        && todayTaskPreflightStatus === "ready"
+        && failureState.taskFingerprint === currentCanonical.taskFingerprint;
       return `
         <section class="today-discovery-workbench">
           ${todaySearchModeControl()}
@@ -3886,6 +4238,7 @@
           ${todaySourceControls()}
           ${todaySearchMode === "direction" ? todayKeywordGraph() : ""}
           ${todayFetchTaskStatus()}
+          ${todayFailureRows(failureState?.errors, failureState?.sourcePages, canRetry)}
         </section>
         ${todaySourceTabs()}
       `;
@@ -4121,6 +4474,17 @@
           });
         }
       } catch (error) {
+        if (isRangeFetch && error.taskState) {
+          paperDataMeta = {
+            ...(paperDataMeta || {}),
+            taskFingerprint: error.taskState.taskFingerprint || "",
+            sourcePages: { ...(error.taskState.sourcePages || {}) },
+            sourceResults: Array.isArray(error.taskState.sourceResults) ? [...error.taskState.sourceResults] : [],
+            errors: Array.isArray(error.taskState.errors) ? [...error.taskState.errors] : []
+          };
+          persistTodayTaskFailureState(paperDataMeta);
+          persistTodayFetchSessionTaskMeta(paperDataMeta);
+        }
         if (requestMode === "recent") {
           recentDataStatus = `后端接口暂不可用，正在使用本地示例数据：${error.message}`;
           if (isRangeFetch) paperDataStatus = recentDataStatus;
@@ -4203,7 +4567,11 @@
           if (isRangeFetch) syncTodayRunningCanonicalState(runningTask, todayRunningTask, status.result || status);
           return status.result;
         }
-        if (status.status === "error") throw new Error(status.error || "抓取失败");
+        if (status.status === "error") {
+          const error = new Error(status.error || "抓取失败");
+          error.taskState = status;
+          throw error;
+        }
       }
     }
 
@@ -4212,6 +4580,7 @@
     }
 
     function applyPaperPayload(payload, { requestMode, isRangeFetch, refresh, rangeText, discoveryRequest }) {
+      persistTodayTaskFailureState(payload);
       if (isRangeFetch) {
         const archivePapers = Array.isArray(payload.papers) ? payload.papers.map(normalizePaperForView) : [];
         const resultPapers = todayResultPapers(payload, discoveryRequest.searchMode).map(normalizePaperForView);
@@ -4351,6 +4720,35 @@
       renderAll();
     }
 
+    function clearPaperLlmFailure(paper) {
+      if (paperDataMeta) {
+        paperDataMeta = { ...paperDataMeta, errors: removePaperLlmFailure(paperDataMeta.errors, paper) };
+      }
+      if (recentDataMeta) {
+        recentDataMeta = { ...recentDataMeta, errors: removePaperLlmFailure(recentDataMeta.errors, paper) };
+      }
+      let sessionsChanged = false;
+      todayFetchSessions = todayFetchSessions.map(session => {
+        if (!session.meta || !Array.isArray(session.meta.errors)) return session;
+        const errors = removePaperLlmFailure(session.meta.errors, paper);
+        if (errors.length === session.meta.errors.length) return session;
+        sessionsChanged = true;
+        return { ...session, meta: { ...session.meta, errors } };
+      });
+      if (sessionsChanged) saveTodayFetchSessions();
+      let taskFailuresChanged = false;
+      const nextTaskFailureStates = Object.fromEntries(Object.entries(todayTaskFailureStates).flatMap(([fingerprint, state]) => {
+        const errors = removePaperLlmFailure(state.errors, paper);
+        if (errors.length === state.errors.length) return [[fingerprint, state]];
+        taskFailuresChanged = true;
+        return errors.length ? [[fingerprint, { ...state, errors }]] : [];
+      }));
+      if (taskFailuresChanged) {
+        todayTaskFailureStates = nextTaskFailureStates;
+        saveTodayTaskFailureStates();
+      }
+    }
+
     async function refreshOnePaperLlm(key) {
       const paper = recentPapers.find(item => paperStableKey(item) === key)
         || todayPapers.find(item => paperStableKey(item) === key)
@@ -4375,6 +4773,7 @@
         applyArchivePayload(payload);
         if (payload.paper) recentPapers = mergePaperPool(recentPapers, [normalizePaperForView(payload.paper)]);
         if (payload.paper) todayPapers = mergePaperPool(todayPapers, [normalizePaperForView(payload.paper)]);
+        clearPaperLlmFailure(payload.paper || paper);
         const statusText = payload.updated ? "已重新生成该论文的摘要翻译和推荐理由" : "没有找到这篇论文的入库记录";
         recentDataStatus = statusText;
         paperDataStatus = statusText;
@@ -4454,6 +4853,7 @@
         sourcePages: state.sourcePages && typeof state.sourcePages === "object" ? { ...state.sourcePages } : {},
         errors: Array.isArray(state.errors) ? [...state.errors] : []
       };
+      persistTodayTaskFailureState(state);
       todayTaskPreflightStatus = "ready";
       todayTaskPreflightError = "";
     }
@@ -4739,6 +5139,12 @@
           }
           saveFetchRange();
           loadPaperData("range", true, button.getAttribute("data-today-fetch") || "new");
+        });
+      });
+      document.querySelectorAll("[data-retry-source-page]").forEach(button => {
+        button.addEventListener("click", () => {
+          if (todayRunningTask || button.disabled) return;
+          loadPaperData("range", true, "resume");
         });
       });
       if (todaySearchMode === "direction") bindTodayKeywordGraph();
@@ -6168,6 +6574,45 @@
       return "";
     }
 
+    function webOfScienceUsagePanel(wos = {}) {
+      const usage = wos.usage || {};
+      const monthRows = Object.entries(usage.months || {})
+        .sort(([left], [right]) => right.localeCompare(left))
+        .slice(0, 12);
+      const lastRequest = usage.lastRequestAt
+        ? new Date(usage.lastRequestAt).toLocaleString("zh-CN")
+        : "尚无记录";
+      const trackingStarted = usage.trackingStartedAt
+        ? new Date(usage.trackingStartedAt).toLocaleDateString("zh-CN")
+        : "尚未开始";
+      const lastStatus = usage.lastStatus === "ok" ? "成功" : usage.lastStatus === "failed" ? "失败" : "未记录";
+      const estimatedRequests = Math.max(1, Number(wos.maxPages || 1));
+      return `
+        <div class="wos-usage-panel">
+          <div class="wos-usage-head">
+            <strong>PaperHot 本地统计</strong>
+            <span class="small-text">统计起点 ${escapeHTML(trackingStarted)}</span>
+          </div>
+          <div class="wos-usage-grid">
+            <div class="wos-usage-stat"><b>${escapeHTML(usage.todayCount || 0)}</b><span>今日请求</span></div>
+            <div class="wos-usage-stat"><b>${escapeHTML(usage.monthCount || 0)}</b><span>本月请求</span></div>
+            <div class="wos-usage-stat"><b>${escapeHTML(usage.totalCount || 0)}</b><span>累计请求</span></div>
+          </div>
+          <div class="small-text">月度历史</div>
+          <div class="wos-usage-history">
+            ${monthRows.length ? monthRows.map(([month, count]) => `<span>${escapeHTML(month)} · ${escapeHTML(count)}</span>`).join("") : `<span>暂无月度记录</span>`}
+          </div>
+          <div class="small-text">最后请求：${escapeHTML(lastRequest)} · ${escapeHTML(lastStatus)}；按当前设置，本次每个查询预计最多 ${estimatedRequests} 页 / ${estimatedRequests} 次 API 请求。</div>
+        </div>
+      `;
+    }
+
+    function sourceUsageSummary(source) {
+      if (!/web of science/i.test(String(source?.title || ""))) return "";
+      const usage = integrationState.webOfScience.usage || {};
+      return `<div class="small-text">PaperHot 本地统计：今日 ${escapeHTML(usage.todayCount || 0)} · 本月 ${escapeHTML(usage.monthCount || 0)} · 累计 ${escapeHTML(usage.totalCount || 0)}</div>`;
+    }
+
     function sourceIntegrationFields(source) {
       const title = String(source?.title || "").toLowerCase();
       if (title.includes("google 搜索") || title.includes("google scholar") || title.includes("谷歌学术")) {
@@ -6224,6 +6669,7 @@
               </label>
             </div>
             <div class="small-text">默认查询模板会把当前主要关键词拼入 TS=({query})；如需使用机构订阅支持的其它语法，可在这里调整。</div>
+            ${webOfScienceUsagePanel(wos)}
           </div>
         `;
       }
@@ -6236,6 +6682,7 @@
           <h3>${escapeHTML(source.title)}</h3>
           <p class="source-desc">${escapeHTML(source.desc)}</p>
           <div class="tags">${source.tags.map(tag => `<span class="tag">${escapeHTML(tag)}</span>`).join("")}</div>
+          ${sourceUsageSummary(source)}
         </div>
       `;
     }
@@ -6266,6 +6713,7 @@
               <h3>${escapeHTML(source.title)}</h3>
               <p class="source-desc">${escapeHTML(source.desc)}</p>
               <div class="tags">${source.tags.map(tag => `<span class="tag">${escapeHTML(tag)}</span>`).join("")}</div>
+              ${sourceUsageSummary(source)}
             </div>
             <div class="source-actions">
               <button class="toggle ${source.enabled ? "" : "paused"}" data-source-toggle>${source.enabled ? "暂停" : "启用"}</button>

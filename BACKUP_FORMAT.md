@@ -68,11 +68,12 @@ config/journal-metrics.json
 config/web-of-science.json
 ```
 
-勾选“包含统计缓存和抓取进度缓存”时额外包含：
+勾选“包含统计缓存、WoS 请求用量和抓取进度缓存”时额外包含：
 
 ```text
 data/papers/journal-metrics-cache.json
 data/papers/google-rolling-cursors.json
+data/papers/web-of-science-usage.json
 data/papers/YYYY-MM-DD.json
 data/papers/YYYY-MM-DD-recent.json
 ```
@@ -84,7 +85,9 @@ data/papers/fetch-log.json
 data/papers/operation-log.jsonl
 ```
 
-近期抓取断点 `data/papers/recent-fetch-cursors.json` 是只对当前设备和完全相同任务有效的短期运行态。Google、WoS、arXiv 等每个启用信源只保存 `nextPage` 和 `complete`；恢复时跳过已完成信源，从未完成信源的 `nextPage` 继续，全部启用信源完成后删除该任务。Google 的近期抓取和指定论文检索不与旧 `google-rolling-cursors.json` 同步。该文件不进入默认或任何可选导出。`data/papers/web-of-science-usage.json` 只保存 PaperHot 本地聚合请求次数和最后状态，不保存请求 URL、Header 或 API Key；当前导出实现尚未把它加入 v1 ZIP 文件清单，因此本次持久化不改变格式版本。
+近期抓取断点 `data/papers/recent-fetch-cursors.json` 是只对当前设备和完全相同任务有效的短期运行态。Google、WoS、arXiv 等每个启用信源只保存 `nextPage` 和 `complete`；恢复时跳过已完成信源，从未完成信源的 `nextPage` 继续，全部启用信源完成后删除该任务。Google 的近期抓取和指定论文检索不与旧 `google-rolling-cursors.json` 同步。该文件不进入默认或任何可选导出。
+
+`data/papers/web-of-science-usage.json` 只保存 PaperHot 本地聚合请求次数、日/月计数和最后状态，不保存请求 URL、查询表达式、Header 或 API Key。它只在 `includeStats=true` 时进入 ZIP，并通过导入白名单恢复。旧 v1 备份没有该可选文件时继续正常导入，因此备份版本保持 `1`。
 
 ## Import Behavior
 
@@ -92,6 +95,7 @@ data/papers/operation-log.jsonl
 - 默认导入不会覆盖本机 API Key。
 - 只有用户勾选“允许导入并覆盖本机 API Key”时，才会写入 `config/*.json`。
 - 导入本地论文库、收藏、阅读状态和日志时，会覆盖对应本地 JSON 文件。
+- 如果 ZIP 包含可选的 `data/papers/web-of-science-usage.json`，导入会恢复本地 WoS 聚合用量；缺少该文件的旧 v1 包不受影响。
 - 导入成功后会追加一条 `local-data-import` 操作日志。
 
 ## Migration Rules
@@ -111,4 +115,4 @@ data/papers/operation-log.jsonl
 
 默认导出不保存 API Key、访问令牌或个人研究背景；这些内容必须由用户显式勾选后才会进入 ZIP。
 
-近期抓取断点也不导出，避免另一台设备恢复已过期的外部请求任务。
+近期抓取断点在任何导出选项下都不导出，避免另一台设备恢复已过期的外部请求任务。

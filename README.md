@@ -141,6 +141,9 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 - “继续抓取”“从头重抓”“开始新抓取”只依据后端返回的 canonical 任务指纹和可恢复状态显示，不根据页面已显示论文数猜测断点。预检失败时保留原结果和上一次断点信息，并禁用新抓取，避免把未确认状态破坏性降级为 `new`。
 - 结果按 Web of Science、Google Scholar、arXiv / bioRxiv、所有信源四个标签查看；每个标签初始显示 15 篇，接近底部后自动加载下一批 15 篇。
+- 论文卡标题右侧显示 WoS/Scholar 引用量；预印本显示 arXiv 或 bioRxiv。卡片同时显示最多 3 位作者和作者总数，不重复显示已经由右侧指标表达的信源标签。
+- 信源分页失败会在工作台下方显示失败页和“重试失败页”，相同 canonical 条件下自动以 `resume` 继续；AI 总结失败保留论文卡片，并在对应卡片显示单篇 LLM 重试。
+- 即使首次抓取在生成成功 session 前失败，页面也会按任务指纹把最小失败状态保存在浏览器本地，切换历史结果或刷新后仍可恢复；任务无错误后自动清除。该短期状态不进入本地数据 ZIP。
 - 关键词增删、OR 点亮和 AND 连线写回现有 `data/user/config.json` 的 `searchLogic`；“清空”只清除活动逻辑和连线，不删除关键词。指定论文输入、本次信源开关、结果标签、筛选和已加载数量都是临时页面状态。
 - 旧的 Google 手动起点、重置按钮和滚动开关已移除，避免与当前任务指纹分页产生两套控制。
 - 如果某些页触发反爬或失败，抓取日志会记录跳过范围，后续可以继续从后面抓。
@@ -203,6 +206,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 - 已阅读页面可以点击“未阅读”，让论文回到待读页面。
 - 删除按钮会把论文从收藏页移除。
 - 收藏页内的论文都是已收藏论文，所以不再弱化显示背景。
+- 标星论文卡片使用浅金色星纹背景，和普通白色卡片直接区分；标星状态仍写入现有 `paper-notes.json`。
 
 页面重点：
 
@@ -221,11 +225,13 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 - 点击 `?` 查看 API 获取说明和对应网站。
 - 保存接口时，空的 API Key 字段表示保留已有密钥。
 - 首次配置状态会提示哪些配置还缺失。
+- Web of Science 卡片显示 PaperHot 本地统计的今日、本月、累计请求量、月度历史和最后请求状态；这是本地计数，不代表 Clarivate 官方额度。
 
 本地数据导入导出：
 
 - 导出默认包含本地论文库、收藏、待读、已读和标星，以及 `data/user/config.json` 中的关键词、Boolean 搜索逻辑和信源开关。
-- 可以选择是否包含统计缓存、抓取日志、操作日志、用户资料、API Key。
+- 可以选择是否包含统计缓存、WoS 本地请求用量、抓取日志、操作日志、用户资料、API Key。
+- `recent-fetch-cursors.json` 是设备相关的短期断点，在任何导出选项下都不会进入 ZIP；勾选统计时导出的 WoS 用量可以恢复到另一台设备。
 - 导出默认不包含 API Key。
 - 导入默认不覆盖本机 API Key。
 - 只有勾选“允许导入并覆盖本机 API Key”后，导入包里的接口配置才会写入本机。
@@ -377,7 +383,7 @@ flowchart TD
 | `data/papers/journal-metrics-cache.json` | EasyScholar 期刊指标缓存 |
 | `data/papers/google-rolling-cursors.json` | 旧版直接 Google adapter 调用的滚动抓取位置；近期抓取和指定论文检索不读取或更新 |
 | `data/papers/recent-fetch-cursors.json` | 近期抓取和指定论文检索的唯一短期断点；Google、WoS、arXiv 等逐信源只保存下一页和完成态，仅相同检索模式、表达式、日期和信源任务可续传，全部信源完成后清除，不进入本地数据 ZIP |
-| `data/papers/web-of-science-usage.json` | PaperHot 本地记录的 WoS 请求日/月/累计次数及最后状态；不保存请求 URL、Header 或 API Key |
+| `data/papers/web-of-science-usage.json` | PaperHot 本地记录的 WoS 请求日/月/累计次数及最后状态；不保存请求 URL、Header 或 API Key，勾选统计时进入 v1 ZIP 并可导回 |
 | `data/papers/*.example.json` | 可提交的运行态 JSON 示例模板；真实运行文件继续只保留在本机 |
 
 ## 维护者统一任务流程

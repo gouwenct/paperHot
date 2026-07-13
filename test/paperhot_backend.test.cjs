@@ -83,6 +83,54 @@ const {
   fetchCrossrefWorkByDoi
 } = require("../paperhot_backend.cjs");
 
+function buildStoredZip(entries) {
+  const localParts = [];
+  const centralParts = [];
+  const records = [];
+  let offset = 0;
+
+  Object.entries(entries).forEach(([name, value]) => {
+    const nameBuffer = Buffer.from(name, "utf8");
+    const content = Buffer.isBuffer(value) ? value : Buffer.from(String(value), "utf8");
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0x0800, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt32LE(0, 14);
+    localHeader.writeUInt32LE(content.length, 18);
+    localHeader.writeUInt32LE(content.length, 22);
+    localHeader.writeUInt16LE(nameBuffer.length, 26);
+    localParts.push(localHeader, nameBuffer, content);
+    records.push({ nameBuffer, size: content.length, offset });
+    offset += localHeader.length + nameBuffer.length + content.length;
+  });
+
+  records.forEach(record => {
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0x0800, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt32LE(0, 16);
+    centralHeader.writeUInt32LE(record.size, 20);
+    centralHeader.writeUInt32LE(record.size, 24);
+    centralHeader.writeUInt16LE(record.nameBuffer.length, 28);
+    centralHeader.writeUInt32LE(record.offset, 42);
+    centralParts.push(centralHeader, record.nameBuffer);
+  });
+
+  const centralSize = centralParts.reduce((total, part) => total + part.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(records.length, 8);
+  end.writeUInt16LE(records.length, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...localParts, ...centralParts, end]);
+}
+
 test("short title defaults to year prefix for manual technique editing", () => {
   const shortTitle = inferPaperShortTitle({
     title: "A deep learning enabled structured illumination microscope",
@@ -2409,6 +2457,87 @@ test("refreshes one archived paper with LLM when requested", async () => {
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
+test("single-paper LLM refresh does not match a different paper with the same title", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-archive-llm-identity-"));
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    count: 2,
+    papers: [
+      {
+        id: "same-title-first",
+        doi: "10.1000/first",
+        title: "Shared microscopy title",
+        authors: ["Alice First"],
+        summary: "First abstract",
+        reason: "保留第一篇",
+        tokenUsage: { status: "未调用 AI" }
+      },
+      {
+        id: "same-title-target",
+        doi: "10.1000/target",
+        title: "Shared microscopy title",
+        authors: ["Bob Target"],
+        summary: "Target abstract",
+        reason: "更新第二篇",
+        tokenUsage: { status: "未调用 AI" }
+      }
+    ]
+  }, null, 2)}\n`, "utf8");
+
+  const payload = await refreshArchivePaperLlmInsight({
+    id: "same-title-target",
+    doi: "10.1000/target",
+    title: "Shared microscopy title",
+    authors: ["Bob Target"],
+    fetcher: async ({ paper }) => {
+      assert.equal(paper.id, "same-title-target");
+      return {
+        abstractZh: "第二篇中文摘要。",
+        reason: "只更新第二篇。",
+        tokenUsage: { prompt: 6, completion: 4, total: 10, model: "test-llm", status: "已调用 AI" }
+      };
+    }
+  }, { dataDir: tempDir });
+  const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+
+  assert.equal(payload.paper.id, "same-title-target");
+  assert.equal(archive.papers[0].reason, "保留第一篇");
+  assert.equal(archive.papers[1].reason, "只更新第二篇。");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("single-paper LLM refresh accepts a stable id when only the archive has a DOI", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-archive-llm-enriched-id-"));
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    count: 1,
+    papers: [{
+      id: "stable-paper-id",
+      doi: "10.1000/enriched-later",
+      title: "Metadata enriched paper",
+      authors: ["Alice Author"],
+      summary: "Archive abstract",
+      reason: "旧理由",
+      tokenUsage: { status: "未调用 AI" }
+    }]
+  }, null, 2)}\n`, "utf8");
+
+  const payload = await refreshArchivePaperLlmInsight({
+    id: "stable-paper-id",
+    title: "Metadata enriched paper",
+    fetcher: async ({ paper }) => ({
+      abstractZh: `更新 ${paper.id}`,
+      reason: "稳定 ID 匹配。",
+      tokenUsage: { prompt: 4, completion: 3, total: 7, model: "test-llm", status: "已调用 AI" }
+    })
+  }, { dataDir: tempDir });
+
+  assert.equal(payload.updated, true);
+  assert.equal(payload.paper.id, "stable-paper-id");
+  assert.equal(payload.paper.reason, "稳定 ID 匹配。");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
 test("refreshes missing archive LLM insights in bulk and skips completed papers", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-archive-llm-bulk-"));
   await fs.mkdir(tempDir, { recursive: true });
@@ -4455,6 +4584,21 @@ test("WoS usage counts today, month, total and concurrent attempts", async () =>
   }
 });
 
+test("WoS usage groups requests by the Asia Shanghai calendar day and month", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-wos-usage-timezone-"));
+  try {
+    await recordWebOfScienceRequest({ status: "ok", at: "2026-06-30T16:30:00.000Z" }, tempDir);
+    await recordWebOfScienceRequest({ status: "failed", at: "2026-06-30T17:00:00.000Z" }, tempDir);
+
+    const usage = await readWebOfScienceUsage(tempDir, new Date("2026-07-01T00:30:00.000Z"));
+    assert.equal(usage.todayCount, 2);
+    assert.equal(usage.monthCount, 2);
+    assert.deepEqual(usage.months, { "2026-07": 2 });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("WoS usage recovers after a rejected write across data directories and upgrades the no-days shape", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-wos-usage-recovery-"));
   const recoveredDir = path.join(tempRoot, "recovered");
@@ -5193,6 +5337,51 @@ test("local data import rejects unsupported backup versions before writing files
   }
 });
 
+test("zip import rejects an unsupported manifest before writing any local files", async () => {
+  const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-zip-version-source-"));
+  const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-zip-version-target-"));
+  const userDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-zip-version-user-"));
+  const targetConfigFile = path.join(userDir, "target-config.json");
+  try {
+    await fs.writeFile(path.join(sourceDir, "archive.json"), JSON.stringify({
+      mode: "archive",
+      papers: [{ id: "must-not-import", title: "Must not import" }]
+    }), "utf8");
+    await fs.writeFile(path.join(sourceDir, "web-of-science-usage.json"), JSON.stringify({
+      totalCount: 9,
+      months: { "2026-07": 9 },
+      days: { "2026-07-13": 9 }
+    }), "utf8");
+    await writeUserConfig({
+      keywords: { primary: [{ text: "MUST-NOT-WRITE", enabled: true }], secondary: [], inspiration: [] },
+      sources: []
+    }, path.join(userDir, "source-config.json"));
+
+    const exported = await exportLocalDataZip({
+      dataDir: sourceDir,
+      userConfigFile: path.join(userDir, "source-config.json"),
+      includeStats: true
+    });
+    const entries = parseZipEntries(exported);
+    const manifest = JSON.parse(entries["paperhot-local-data.json"].toString("utf8"));
+    entries["paperhot-local-data.json"] = Buffer.from(JSON.stringify({ ...manifest, version: 999 }), "utf8");
+    const unsupportedZip = buildStoredZip(entries);
+
+    await assert.rejects(
+      importLocalDataZip(unsupportedZip, { dataDir: targetDir, userConfigFile: targetConfigFile }),
+      /不支持的本地数据备份版本/
+    );
+    await assert.rejects(fs.readFile(targetConfigFile, "utf8"));
+    await assert.rejects(fs.readFile(path.join(targetDir, "archive.json"), "utf8"));
+    await assert.rejects(fs.readFile(path.join(targetDir, "web-of-science-usage.json"), "utf8"));
+    await assert.rejects(fs.readFile(path.join(targetDir, "operation-log.jsonl"), "utf8"));
+  } finally {
+    await fs.rm(sourceDir, { recursive: true, force: true });
+    await fs.rm(targetDir, { recursive: true, force: true });
+    await fs.rm(userDir, { recursive: true, force: true });
+  }
+});
+
 test("can export optional profile and API secrets when explicitly requested", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-secrets-"));
   const userDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-export-secrets-user-"));
@@ -5257,8 +5446,9 @@ test("exports local research data as zip without API secrets by default", async 
       message: ["Bearer", "shouldNotExportToken123456"].join(" ")
     })}\n`, "utf8");
     await writeUserConfig({
-      keywords: { primary: [{ text: "SIM", enabled: true }], secondary: [], inspiration: [] },
-      sources: []
+      keywords: { primary: [{ text: "SIM", enabled: true }], secondary: [{ text: "microscopy", enabled: true }], inspiration: [] },
+      sources: [],
+      searchLogic: { activeKeywords: ["SIM"], andEdges: [["SIM", "microscopy"]] }
     }, path.join(userDir, "config.json"));
     await writeUserProfile({
       name: "Local Researcher",
@@ -5283,12 +5473,18 @@ test("exports local research data as zip without API secrets by default", async 
       "paperhot-local-data.json"
     ].sort());
     assert.equal(JSON.parse(entries["data/user/config.json"].toString("utf8")).keywords.primary[0].text, "SIM");
+    assert.deepEqual(JSON.parse(entries["data/user/config.json"].toString("utf8")).searchLogic, {
+      activeKeywords: ["SIM"],
+      andEdges: [["SIM", "microscopy"]]
+    });
     assert.equal(JSON.parse(entries["data/papers/archive.json"].toString("utf8")).papers[0].doi, "10.1000/exportzip");
     assert.equal(entries["data/user/profile.json"], undefined);
     assert.equal(entries["config/llm.json"], undefined);
     assert.equal(entries["data/papers/fetch-log.json"], undefined);
     assert.equal(entries["data/papers/operation-log.jsonl"], undefined);
     assert.equal(entries["data/papers/journal-metrics-cache.json"], undefined);
+    assert.equal(entries["data/papers/web-of-science-usage.json"], undefined);
+    assert.equal(entries["data/papers/recent-fetch-cursors.json"], undefined);
     assert.equal(serialized.includes("apiKey"), false);
     assert.equal(serialized.includes("secret"), false);
     assert.equal(serialized.includes("should-not-export"), false);
@@ -5327,6 +5523,17 @@ test("can export optional stats and logs in zip when selected", async () => {
     await fs.writeFile(path.join(tempDir, "google-rolling-cursors.json"), `${JSON.stringify({
       cursors: { "SIM::googlescholar": { nextStart: 200 } }
     }, null, 2)}\n`, "utf8");
+    await fs.writeFile(path.join(tempDir, "web-of-science-usage.json"), `${JSON.stringify({
+      trackingStartedAt: "2026-06-01T00:00:00.000Z",
+      totalCount: 7,
+      months: { "2026-06": 7 },
+      days: { "2026-06-25": 2 },
+      lastRequestAt: "2026-06-25T01:00:00.000Z",
+      lastStatus: "ok"
+    }, null, 2)}\n`, "utf8");
+    await fs.writeFile(path.join(tempDir, "recent-fetch-cursors.json"), `${JSON.stringify({
+      tasks: { privateFingerprint: { queryExpression: "must-not-export", sourcePages: { webofscience: { nextPage: 3 } } } }
+    }, null, 2)}\n`, "utf8");
 
     const zip = await exportLocalDataZip({
       dataDir: tempDir,
@@ -5340,8 +5547,17 @@ test("can export optional stats and logs in zip when selected", async () => {
     assert.ok(entries["data/papers/operation-log.jsonl"]);
     assert.ok(entries["data/papers/journal-metrics-cache.json"]);
     assert.ok(entries["data/papers/google-rolling-cursors.json"]);
+    assert.ok(entries["data/papers/web-of-science-usage.json"]);
+    assert.equal(entries["data/papers/recent-fetch-cursors.json"], undefined);
     assert.ok(entries["data/papers/2026-06-25.json"]);
     assert.equal(JSON.parse(entries["data/papers/google-rolling-cursors.json"].toString("utf8")).cursors["SIM::googlescholar"].nextStart, 200);
+    assert.equal(JSON.parse(entries["data/papers/web-of-science-usage.json"].toString("utf8")).days["2026-06-25"], 2);
+
+    const targetDir = path.join(tempDir, "imported");
+    const imported = await importLocalDataZip(zip, { dataDir: targetDir, userConfigFile: path.join(userDir, "imported-config.json") });
+    assert.ok(imported.imported.includes("webOfScienceUsage"));
+    assert.equal((await readWebOfScienceUsage(targetDir, new Date("2026-06-25T12:00:00.000Z"))).todayCount, 2);
+    await assert.rejects(fs.readFile(path.join(targetDir, "recent-fetch-cursors.json"), "utf8"));
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
     await fs.rm(userDir, { recursive: true, force: true });
@@ -5573,7 +5789,7 @@ test("imports local research data from zip through a whitelist", async () => {
     });
 
     assert.equal(imported.ok, true);
-    assert.deepEqual(imported.imported.sort(), ["archive", "favorites", "fetchLog", "googleRollingCursors", "journalMetricsCache", "notes", "operationLog", "userConfig", "userProfile"].sort());
+    assert.deepEqual(imported.imported.sort(), ["archive", "favorites", "fetchLog", "googleRollingCursors", "journalMetricsCache", "notes", "operationLog", "userConfig", "userProfile", "webOfScienceUsage"].sort());
     assert.equal((await readArchivePayload({ dataDir: targetDir })).papers[0].doi, "10.1000/importzip");
     assert.equal((await readPaperNotesPayload({ dataDir: targetDir })).notes[0].shortTitle, "2026@RIM");
     assert.equal((await readUserState({ configFile: path.join(targetUserDir, "config.json"), profileFile: path.join(targetUserDir, "profile.json") })).config.keywords.primary[0].text, "RIM");
@@ -5617,9 +5833,18 @@ test("reads Web of Science configuration without embedding secrets in integratio
     request: { method: "GET", queryName: "q", databaseQueryName: "db", pageQueryName: "page", limitQueryName: "limit", apiKeyHeader: "X-ApiKey", useApiKeyHeader: true },
     responseMap: { items: "hits", title: "title", journal: "source.sourceTitle" }
   }), "utf8");
+  await fs.writeFile(path.join(tempDir, "web-of-science-usage.json"), JSON.stringify({
+    trackingStartedAt: "2026-07-01T00:00:00.000Z",
+    totalCount: 5,
+    months: { "2026-07": 5 },
+    days: { "2026-07-13": 2 },
+    lastRequestAt: "2026-07-13T01:00:00.000Z",
+    lastStatus: "ok"
+  }), "utf8");
 
   const config = await readWebOfScienceConfig(webOfScienceConfigFile);
   const integrations = await readIntegrationConfigs({
+    dataDir: tempDir,
     webOfScienceConfigFile,
     llmConfigFile: path.join(tempDir, "missing-llm.json"),
     googleScholarConfigFile: path.join(tempDir, "missing-google.json"),
@@ -5639,6 +5864,10 @@ test("reads Web of Science configuration without embedding secrets in integratio
   assert.equal(config.pageSize, 25);
   assert.equal(integrations.webOfScience.apiKey, "");
   assert.equal(integrations.webOfScience.hasApiKey, true);
+  assert.equal(integrations.webOfScience.usage.todayCount, 2);
+  assert.equal(integrations.webOfScience.usage.monthCount, 5);
+  assert.equal(integrations.webOfScience.usage.totalCount, 5);
+  assert.doesNotMatch(JSON.stringify(integrations.webOfScience.usage), /wos-private-key/);
   assert.equal(secrets.webOfScience.apiKey, "wos-private-key");
   await fs.rm(tempDir, { recursive: true, force: true });
 });
