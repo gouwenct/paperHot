@@ -130,6 +130,15 @@ function buildFrozenRefreshOptions(body, progressHandler, effectiveDate) {
   };
 }
 
+function readRefreshTaskState(body) {
+  const taskOptions = buildFrozenRefreshOptions(body);
+  return readDiscoveryTaskState(taskOptions).then(state => ({
+    ok: true,
+    ...buildDiscoveryTaskDescriptor(taskOptions),
+    ...state
+  }));
+}
+
 function createFetchJob(id, state = {}, startedAt = new Date().toISOString(), updatedAt = Date.now()) {
   const sourcePages = { ...(state.sourcePages || {}) };
   const errors = Array.isArray(state.errors) ? [...state.errors] : [];
@@ -522,6 +531,12 @@ async function handleApi(req, res, url) {
     const body = await collectRequestBody(req);
     const payload = await refreshArchivePaperLlmInsight(body.paper || body);
     sendJson(res, 200, payload);
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/api/papers/refresh/state") {
+    const body = await collectRequestBody(req);
+    sendJson(res, 200, await readRefreshTaskState(body));
     return true;
   }
 

@@ -29,7 +29,7 @@ Paper Hot 的主要目的只有两个：
 - bioRxiv。
 - Semantic Scholar。
 - Crossref 和出版方页面元数据补全。
-- 方向检索把保存的 Boolean 搜索图传给信源；WoS、bioRxiv、arXiv、Google Scholar 和 Google Search 使用各自支持的冻结日期约束。近期抓取和指定论文检索统一按任务指纹保存逐信源下一页和完成态，Google 不读取或更新旧滚动位置；`resumeMode=resume` 恢复同指纹断点，`restart` 或 `new` 从第一页开始。现有 refresh start/status 任务接口直接返回后端的任务指纹、可恢复状态、逐信源页码、逐信源结果和错误，只有全部启用信源完成后才清除断点。
+- 方向检索把保存的 Boolean 搜索图传给信源；WoS、bioRxiv、arXiv、Google Scholar 和 Google Search 使用各自支持的冻结日期约束。近期抓取和指定论文检索统一按任务指纹保存逐信源下一页和完成态，Google 不读取或更新旧滚动位置；`resumeMode=resume` 恢复同指纹断点，`restart` 或 `new` 从第一页开始。refresh state/start/status 接口直接返回后端的任务指纹、可恢复状态、逐信源页码、逐信源结果和错误，只有全部启用信源完成后才清除断点。
 - 指定论文检索可识别 DOI、Web of Science UT、arXiv ID/URL、普通 URL 和标题；信源端不附加方向关键词或日期限制。稳定标识结果可进入现有归档，标题出现多个相近结果时只返回候选供用户确认，不写归档、缓存或抓取日志。
 
 ### 论文处理
@@ -123,23 +123,34 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 ### 今日论文
 
-“今日论文”用于发起一次新的论文抓取。
+“今日论文”用于按研究方向或指定论文发起多信源抓取，并查看本次新结果。
 
 使用逻辑：
 
-- 选择日期范围。
-- 选择或确认启用的信源。
-- 点击抓取后，前端创建本地后端任务。
+- 在“方向检索”和“指定论文”之间切换；指定论文支持标题、DOI、Web of Science UT、arXiv ID 和 URL。
+- 方向检索默认选择近 3 个月，也可快速切换近 1/6 个月或使用自定义起止日期。
+- 单击关键词把它作为独立 OR 条件点亮；把关键词拖到另一个关键词会建立明确的 AND 连线，连通组之间仍为 OR。
+- 本次信源开关来自“领域配置”，只影响当前抓取，不覆盖全局配置。
+- 页面加载或七个 discovery 字段稳定变化后，前端先调用只读 refresh state 接口检查相同 canonical 指纹的 durable 断点；点击抓取后再通过 refresh start/status 接口创建并轮询本地后端任务。
 - 后端从多个信源抓取候选论文，完成过滤、补全、LLM 处理、期刊指标查询和排序。
-- 抓取结果显示在当前页面，同时写入全部论文归档。
+- 本次 canonical `newPapers` 或指定论文候选显示在当前页面，正常入库结果同时写入全部论文归档。
 - 每次抓取会生成一个带日期范围和抓取时间的会话标签。
 - 清除今日论文显示只清空页面上的临时结果，不删除已入库论文。
 
 页面重点：
 
-- 旧的 Google 手动起点、重置按钮和滚动开关已从页面移除，避免显示与当前任务指纹分页不一致的控制；当前页面创建新抓取任务，统一的恢复/重抓控制由后续近期论文工作台提供。
+- “继续抓取”“从头重抓”“开始新抓取”只依据后端返回的 canonical 任务指纹和可恢复状态显示，不根据页面已显示论文数猜测断点。预检失败时保留原结果和上一次断点信息，并禁用新抓取，避免把未确认状态破坏性降级为 `new`。
+- 结果按 Web of Science、Google Scholar、arXiv / bioRxiv、所有信源四个标签查看；每个标签初始显示 15 篇，接近底部后自动加载下一批 15 篇。
+- 关键词增删、OR 点亮和 AND 连线写回现有 `data/user/config.json` 的 `searchLogic`；“清空”只清除活动逻辑和连线，不删除关键词。指定论文输入、本次信源开关、结果标签、筛选和已加载数量都是临时页面状态。
+- 旧的 Google 手动起点、重置按钮和滚动开关已移除，避免与当前任务指纹分页产生两套控制。
 - 如果某些页触发反爬或失败，抓取日志会记录跳过范围，后续可以继续从后面抓。
 - 最近一次抓取时间和距离当前的时间会显示在页面顶部。
+
+只读断点预检接口：
+
+- `POST /api/papers/refresh/state` 接收与 start 相同的 `mode`、`searchMode`、`queryExpression`、`searchLogic`、`sources`、`startDate`、`endDate` 和 `resumeMode` 请求体。
+- 响应返回 `taskFingerprint`、`resumable`、`sourcePages`、`sourceResults` 和 `errors`。接口复用 start 的冻结日期和 canonical descriptor，并直接读取 durable cursor；不会创建 job、启动抓取、清除或写入 cursor。
+- `POST /api/papers/refresh/start` 创建任务；`GET /api/papers/refresh/status?id=...` 只轮询该进程内的活动任务。
 
 ### 全部论文
 
@@ -352,6 +363,7 @@ flowchart TD
 | `.superpowers/sdd/task-3-report.md` | Task 3 近期抓取游标与 WoS 本地请求用量的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-4-report.md` | Task 4 日期感知、断点恢复、指定论文检索及独立审查修复的 TDD 和验证报告 |
 | `.superpowers/sdd/task-5-report.md` | Task 5 现有 refresh job 请求、恢复与轮询状态契约的 TDD 和验证报告 |
+| `.superpowers/sdd/task-6-report.md` | Task 6 今日论文工作台、关键词关系图、canonical 恢复按钮与分信源自动加载的 TDD 和浏览器验证报告 |
 
 ### 主要数据文件
 

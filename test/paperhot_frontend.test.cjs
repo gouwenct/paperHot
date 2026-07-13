@@ -283,6 +283,7 @@ test("refresh request contract forwards cleaned discovery options and keeps exis
 
   assert.match(serverSource, /pathname === "\/api\/papers\/refresh\/start"/);
   assert.match(serverSource, /pathname === "\/api\/papers\/refresh\/status"/);
+  assert.match(serverSource, /pathname === "\/api\/papers\/refresh\/state"/);
   assert.match(html, /fetch\("\/api\/papers\/refresh\/start"/);
   assert.match(html, /fetch\(`\/api\/papers\/refresh\/status\?id=/);
   const requestBodySource = readNamedFunction(html, "paperRefreshBody", "runPaperRefreshJob");
@@ -291,7 +292,7 @@ test("refresh request contract forwards cleaned discovery options and keeps exis
   }
 
   const modeSource = readNamedFunction(serverSource, "refreshRequestMode", "buildFrozenRefreshOptions");
-  const frozenSource = readNamedFunction(serverSource, "buildFrozenRefreshOptions", "createFetchJob");
+  const frozenSource = readNamedFunction(serverSource, "buildFrozenRefreshOptions", "readRefreshTaskState");
   const buildFrozenRefreshOptions = new Function(
     "buildDiscoveryTaskContext",
     `${buildSource}; ${modeSource}; ${frozenSource}; return buildFrozenRefreshOptions;`
@@ -311,6 +312,52 @@ test("refresh request contract forwards cleaned discovery options and keeps exis
   assert.match(startRoute, /const taskOptions = buildFrozenRefreshOptions\(body\)/);
   assert.doesNotMatch(startRoute, /Object\.assign\(initialState, await readDiscoveryTaskState/);
   assert.equal(startRoute.match(/readDiscoveryTaskState/g)?.length, 1, "durable cursor is read only after backend rejection");
+});
+
+test("refresh state preflight reuses the frozen canonical descriptor without starting a job", async () => {
+  const serverSource = await fs.readFile(serverFile, "utf8");
+  const buildSource = readNamedFunction(serverSource, "buildRefreshOptions", "runRefreshPayload");
+  const modeSource = readNamedFunction(serverSource, "refreshRequestMode", "buildFrozenRefreshOptions");
+  const frozenSource = readNamedFunction(serverSource, "buildFrozenRefreshOptions", "readRefreshTaskState");
+  const stateSource = readNamedFunction(serverSource, "readRefreshTaskState", "createFetchJob");
+  let readOptions;
+  const readRefreshTaskState = new Function(
+    "buildDiscoveryTaskContext", "buildDiscoveryTaskDescriptor", "readDiscoveryTaskState",
+    `${buildSource}; ${modeSource}; ${frozenSource}; ${stateSource}; return readRefreshTaskState;`
+  )(
+    buildDiscoveryTaskContext,
+    buildDiscoveryTaskDescriptor,
+    async options => {
+      readOptions = options;
+      return {
+        taskFingerprint: "canonical-fingerprint",
+        resumable: true,
+        sourcePages: { arxiv: { nextPage: 3, complete: false } },
+        sourceResults: [],
+        errors: []
+      };
+    }
+  );
+  const payload = await readRefreshTaskState({
+    mode: "recent",
+    searchMode: "direction",
+    queryExpression: "SIM",
+    searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+    sources: ["arXiv"],
+    startDate: "2026-04-13",
+    endDate: "2026-07-13",
+    resumeMode: "resume"
+  });
+
+  assert.equal(readOptions.mode, "recent");
+  assert.equal(payload.ok, true);
+  assert.equal(payload.taskFingerprint, "canonical-fingerprint");
+  assert.equal(payload.resumable, true);
+  assert.deepEqual(payload.sourcePages, { arxiv: { nextPage: 3, complete: false } });
+  const route = serverSource.match(/if \(req\.method === "POST" && pathname === "\/api\/papers\/refresh\/state"\)[\s\S]*?(?=\n\s*if \(req\.method === "POST" && pathname === "\/api\/papers\/refresh\/start"\))/)?.[0];
+  assert.ok(route, "expected read-only refresh state route");
+  assert.match(route, /readRefreshTaskState\(body\)/);
+  assert.doesNotMatch(route, /runRefreshPayload|createFetchJob|fetchJobs\.set/);
 });
 
 test("refresh job transitions preserve canonical state and monotonic progress", async () => {
@@ -479,7 +526,7 @@ test("all papers page exposes archive LLM refresh actions", async () => {
 test("today papers page exposes single paper LLM refresh actions", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /page !== "all" && scope !== "today" && scope !== "favorites"/);
-  assert.match(html, /renderPaperTimeline\(filteredPapers, "today"\)/);
+  assert.match(html, /renderTodayPaperTimeline\(filteredPapers\)/);
   assert.match(html, /todayPapers = mergePaperPool\(todayPapers, \[normalizePaperForView\(payload\.paper\)\]\)/);
   assert.match(html, /document\.querySelectorAll\("\[data-refresh-paper-llm\]"\)/);
   assert.match(html, /\/api\/archive\/llm\/paper/);
@@ -627,6 +674,544 @@ test("today fetch panel removes disconnected Google manual and rolling controls"
   assert.doesNotMatch(html, /resetGoogleRollingStart/);
   assert.doesNotMatch(html, /留空时按本地滚动游标继续/);
   assert.doesNotMatch(html, /从第几篇开始/);
+});
+
+test("today workbench exposes approved discovery controls", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /data-search-mode="direction"/);
+  assert.match(html, /data-search-mode="exact"/);
+  assert.match(html, /方向检索/);
+  assert.match(html, /指定论文/);
+  assert.match(html, /data-keyword-clear/);
+  assert.match(html, /data-keyword-delete/);
+  assert.match(html, /AND 使用关键词之间的连接，OR 用于单独点亮关键词/);
+  assert.match(html, /继续抓取/);
+  assert.match(html, /从头重抓/);
+  assert.match(html, /开始新抓取/);
+  assert.match(html, /type="date"/);
+  assert.match(html, /1个月[\s\S]*3个月[\s\S]*6个月[\s\S]*自定义/);
+});
+
+test("today search graph executes connected AND groups and independent OR state", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const groupsSource = readNamedFunction(html, "todaySearchLogicGroups", "buildTodaySearchExpression");
+  const expressionSource = readNamedFunction(html, "buildTodaySearchExpression", "clearTodaySearchLogic");
+  const clearSource = readNamedFunction(html, "clearTodaySearchLogic", "toggleTodayKeywordOr");
+  const toggleSource = readNamedFunction(html, "toggleTodayKeywordOr", "connectTodayKeywords");
+  const connectSource = readNamedFunction(html, "connectTodayKeywords", "removeTodayKeyword");
+  const removeSource = readNamedFunction(html, "removeTodayKeyword", "todayDiscoveryRequestState");
+  const api = new Function(`
+    ${groupsSource}
+    ${expressionSource}
+    ${clearSource}
+    ${toggleSource}
+    ${connectSource}
+    ${removeSource}
+    return { buildTodaySearchExpression, clearTodaySearchLogic, toggleTodayKeywordOr, connectTodayKeywords, removeTodayKeyword };
+  `)();
+
+  let logic = { activeKeywords: ["SIM", "RIM"], andEdges: [] };
+  logic = api.connectTodayKeywords(logic, "SIM", "inverse problem");
+  assert.equal(api.buildTodaySearchExpression(logic), "(SIM AND inverse problem) OR RIM");
+  logic = api.toggleTodayKeywordOr(logic, "SIM");
+  assert.deepEqual(logic, { activeKeywords: ["RIM", "SIM"], andEdges: [] });
+  logic = api.connectTodayKeywords(logic, "RIM", "far keyword");
+  logic = api.removeTodayKeyword(logic, "far keyword");
+  assert.deepEqual(logic, { activeKeywords: ["SIM"], andEdges: [] });
+  assert.deepEqual(api.clearTodaySearchLogic(logic), { activeKeywords: [], andEdges: [] });
+});
+
+test("today keyword links use raised orthogonal lanes and expose a keyboard connection path", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const pathSource = readNamedFunction(html, "todayKeywordLinkPath", "todayKeyboardConnectionStep");
+  const stepSource = readNamedFunction(html, "todayKeyboardConnectionStep", "todayDiscoveryRequestState");
+  const api = new Function(`${pathSource}; ${stepSource}; return { todayKeywordLinkPath, todayKeyboardConnectionStep };`)();
+
+  assert.equal(api.todayKeywordLinkPath({ x: 10, y: 20 }, { x: 90, y: 20 }, 5), "M 10 20 L 10 5 L 90 5 L 90 20");
+  assert.deepEqual(api.todayKeyboardConnectionStep("", "SIM"), { selected: "SIM", connection: null });
+  assert.deepEqual(api.todayKeyboardConnectionStep("SIM", "RIM"), { selected: "", connection: ["SIM", "RIM"] });
+  assert.deepEqual(api.todayKeyboardConnectionStep("SIM", "SIM"), { selected: "", connection: null });
+  assert.match(html, /data-keyword-connect=/);
+  assert.match(html, /aria-label="连接 \$\{escapeHTML\(keyword\)\} 到另一个关键词"/);
+  assert.match(html, /title="连接到另一个关键词"/);
+  assert.match(html, /event\.key === "Escape"/);
+  assert.doesNotMatch(html, /<[^>]+>OR<\/[^>]+>/);
+});
+
+test("user config writes serialize snapshots, ignore stale responses, and continue after failure", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const queueSource = readNamedFunction(html, "queueUserConfigWrite", "saveUserConfig");
+  const requests = [];
+  const applied = [];
+  const pending = [];
+  const harness = new Function("fetch", "applyUserConfig", "location", `
+    let userConfigSaveQueue = Promise.resolve();
+    let userConfigSaveRevision = 0;
+    ${queueSource}
+    return { queueUserConfigWrite };
+  `)(
+    (url, options) => new Promise((resolve, reject) => {
+      requests.push({ url, body: JSON.parse(options.body) });
+      pending.push({ resolve, reject });
+    }),
+    config => applied.push(config),
+    { protocol: "http:" }
+  );
+
+  const oldConfig = { searchLogic: { activeKeywords: ["old"], andEdges: [] } };
+  const newConfig = { searchLogic: { activeKeywords: ["new"], andEdges: [] } };
+  const first = harness.queueUserConfigWrite(oldConfig);
+  oldConfig.searchLogic.activeKeywords[0] = "mutated-after-enqueue";
+  const second = harness.queueUserConfigWrite(newConfig);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests.length, 1, "second disk write must wait for the first response");
+  assert.deepEqual(requests[0].body.searchLogic.activeKeywords, ["old"]);
+  pending[0].resolve({ ok: true, json: async () => ({ config: requests[0].body }) });
+  await first;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests.length, 2);
+  assert.deepEqual(applied, [], "the older response must not roll the UI back");
+  pending[1].resolve({ ok: true, json: async () => ({ config: requests[1].body }) });
+  await second;
+  assert.deepEqual(applied.map(config => config.searchLogic.activeKeywords), [["new"]]);
+
+  const failed = harness.queueUserConfigWrite({ searchLogic: { activeKeywords: [], andEdges: [] } });
+  const recovered = harness.queueUserConfigWrite({ searchLogic: { activeKeywords: ["after-failure"], andEdges: [] } });
+  await new Promise(resolve => setImmediate(resolve));
+  pending[2].reject(new Error("disk failed"));
+  await assert.rejects(failed, /disk failed/);
+  await new Promise(resolve => setImmediate(resolve));
+  pending[3].resolve({ ok: true, json: async () => ({ config: requests[3].body }) });
+  await recovered;
+  assert.deepEqual(applied.at(-1).searchLogic.activeKeywords, ["after-failure"]);
+});
+
+test("today calendar ranges use local date parts, clamp month ends, and reject incomplete custom dates", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const dateSource = readNamedFunction(html, "todayDateInputValue", "todayMonthsAgo");
+  const monthsSource = readNamedFunction(html, "todayMonthsAgo", "todayPresetRange");
+  const presetSource = readNamedFunction(html, "todayPresetRange", "normalizeFetchRange");
+  const normalizeSource = readNamedFunction(html, "normalizeFetchRange", "loadFetchRange");
+  const validDateSource = readNamedFunction(html, "todayDateIsValid", "todayFetchRangeValidation");
+  const validationSource = readNamedFunction(html, "todayFetchRangeValidation", "todaySearchLogicGroups");
+  const api = new Function(`${dateSource}; ${monthsSource}; ${presetSource}; ${normalizeSource}; ${validDateSource}; ${validationSource}; return { todayDateInputValue, todayMonthsAgo, todayPresetRange, normalizeFetchRange, todayFetchRangeValidation };`)();
+
+  assert.equal(api.todayDateInputValue({ getFullYear: () => 2026, getMonth: () => 6, getDate: () => 13 }), "2026-07-13");
+  assert.equal(api.todayMonthsAgo(1, "2026-03-31"), "2026-02-28");
+  assert.equal(api.todayMonthsAgo(1, "2024-03-31"), "2024-02-29");
+  assert.deepEqual(api.normalizeFetchRange({ preset: "3m", startDate: "2020-01-01", endDate: "2020-04-01" }, "2026-07-13"), {
+    preset: "3m", startDate: "2026-04-13", endDate: "2026-07-13"
+  });
+  assert.equal(api.normalizeFetchRange({ preset: "3m" }, "2026-07-14").endDate, "2026-07-14");
+  assert.equal(api.todayFetchRangeValidation({ preset: "custom", startDate: "", endDate: "2026-07-13" }).valid, false);
+  assert.equal(api.todayFetchRangeValidation({ preset: "custom", startDate: "2026-07-14", endDate: "2026-07-13" }).valid, false);
+  assert.equal(api.todayFetchRangeValidation({ preset: "custom", startDate: "2026-02-30", endDate: "2026-03-01" }).valid, false);
+  assert.deepEqual(api.todayFetchRangeValidation({ preset: "custom", startDate: "2026-07-01", endDate: "2026-07-13" }), { valid: true, error: "" });
+  assert.doesNotMatch(monthsSource, /toISOString/);
+});
+
+test("today discovery request emits the seven canonical fields from one state", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const groupsSource = readNamedFunction(html, "todaySearchLogicGroups", "buildTodaySearchExpression");
+  const expressionSource = readNamedFunction(html, "buildTodaySearchExpression", "clearTodaySearchLogic");
+  const requestSource = readNamedFunction(html, "todayDiscoveryRequestBody", "todaySourceKeyForPaper");
+  const todayDiscoveryRequestBody = new Function(`
+    ${groupsSource}
+    ${expressionSource}
+    ${requestSource}
+    return todayDiscoveryRequestBody;
+  `)();
+  const directionState = {
+    searchMode: "direction",
+    exactInput: "must not leak",
+    searchLogic: { activeKeywords: ["SIM", "RIM"], andEdges: [["SIM", "RIM"]] },
+    sources: ["arxiv", "webofscience"],
+    fetchRange: { startDate: "2026-04-13", endDate: "2026-07-13" }
+  };
+  assert.deepEqual(todayDiscoveryRequestBody("resume", directionState), {
+    searchMode: "direction",
+    queryExpression: "(SIM AND RIM)",
+    searchLogic: directionState.searchLogic,
+    sources: ["arxiv", "webofscience"],
+    startDate: "2026-04-13",
+    endDate: "2026-07-13",
+    resumeMode: "resume"
+  });
+  const exact = todayDiscoveryRequestBody("new", { ...directionState, searchMode: "exact", exactInput: "  WOS:000123  " });
+  assert.equal(exact.queryExpression, "WOS:000123");
+  assert.deepEqual(Object.keys(exact).sort(), ["endDate", "queryExpression", "resumeMode", "searchLogic", "searchMode", "sources", "startDate"]);
+
+  const actionSource = readNamedFunction(html, "todayFetchActionState", "loadTodayFetchSessions");
+  const todayFetchActionState = new Function(`${actionSource}; return todayFetchActionState;`)();
+  assert.deepEqual(todayFetchActionState({ taskFingerprint: "same", resumable: true }, "ready"), {
+    primaryLabel: "继续抓取",
+    resumeMode: "resume",
+    showRestart: true,
+    disabled: false
+  });
+  assert.deepEqual(todayFetchActionState({ taskFingerprint: "same", resumable: false }, "ready"), {
+    primaryLabel: "开始新抓取",
+    resumeMode: "new",
+    showRestart: false,
+    disabled: false
+  });
+  assert.equal(todayFetchActionState({ taskFingerprint: "same", resumable: true }, "loading").resumeMode, "");
+  assert.equal(todayFetchActionState({ taskFingerprint: "same", resumable: false }, "error").disabled, true);
+});
+
+test("today running task freezes its request and cannot replace current preflight state", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const freezeSource = readNamedFunction(html, "freezeTodayDiscoveryRequest", "syncTodayRunningCanonicalState");
+  const syncSource = readNamedFunction(html, "syncTodayRunningCanonicalState", "todaySourceKeyForPaper");
+  const api = new Function(`${freezeSource}; ${syncSource}; return { freezeTodayDiscoveryRequest, syncTodayRunningCanonicalState };`)();
+  const request = {
+    searchMode: "direction",
+    queryExpression: "A",
+    searchLogic: { activeKeywords: ["A"], andEdges: [["A", "B"]] },
+    sources: ["arxiv"],
+    startDate: "2026-04-13",
+    endDate: "2026-07-13",
+    resumeMode: "resume"
+  };
+  const runningA = {
+    frozenRequest: api.freezeTodayDiscoveryRequest(request),
+    canonicalState: { taskFingerprint: "A-start", resumable: true, sourcePages: {}, errors: [] },
+    conditionRevision: 1
+  };
+  request.searchLogic.activeKeywords[0] = "mutated";
+  request.sources.push("webofscience");
+  assert.equal(runningA.frozenRequest.searchLogic.activeKeywords[0], "A");
+  assert.deepEqual(runningA.frozenRequest.sources, ["arxiv"]);
+  assert.ok(Object.isFrozen(runningA.frozenRequest.searchLogic.andEdges[0]));
+
+  const currentB = { taskFingerprint: "B-current", resumable: true, sourcePages: {}, errors: [] };
+  assert.equal(api.syncTodayRunningCanonicalState(runningA, runningA, {
+    taskFingerprint: "A-poll", resumable: false, sourcePages: { arxiv: { nextPage: 2 } }, errors: []
+  }), true);
+  assert.equal(runningA.canonicalState.taskFingerprint, "A-poll");
+  assert.equal(currentB.taskFingerprint, "B-current", "A poll must not overwrite B preflight state");
+
+  const runningB = { frozenRequest: api.freezeTodayDiscoveryRequest({ ...request, queryExpression: "B" }), canonicalState: currentB, conditionRevision: 2 };
+  assert.equal(api.syncTodayRunningCanonicalState(runningA, runningB, {
+    taskFingerprint: "A-late", resumable: false, sourcePages: {}, errors: []
+  }), false);
+  assert.equal(runningA.canonicalState.taskFingerprint, "A-poll", "late A poll must be ignored after the active run changes");
+
+  const actionSource = readNamedFunction(html, "todayFetchActionState", "loadTodayFetchSessions");
+  const todayFetchActionState = new Function(`${actionSource}; return todayFetchActionState;`)();
+  assert.deepEqual(todayFetchActionState(currentB, "ready", runningA), {
+    primaryLabel: "抓取中",
+    resumeMode: "",
+    showRestart: false,
+    disabled: true
+  });
+});
+
+test("today results use fixed source tabs and automatic 15-paper batches", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /Web of Science[\s\S]*Google Scholar[\s\S]*arXiv \/ bioRxiv[\s\S]*所有信源/);
+  assert.match(html, /const todayPaperBatchSize = 15/);
+  assert.match(html, /const todayLoadedCounts = \{ webofscience: 15, googlescholar: 15, preprints: 15, all: 15 \}/);
+  assert.match(html, /data-today-load-sentinel/);
+  assert.match(html, /function bindTodayAutoLoad/);
+  assert.match(html, /todayAutoLoadObserver\.disconnect\(\)/);
+  assert.doesNotMatch(html, /data-load-more-papers/);
+
+  const sourceKeySource = readNamedFunction(html, "todaySourceKeyForPaper", "todayPapersForSource");
+  const sourceFilterSource = readNamedFunction(html, "todayPapersForSource", "nextTodayLoadedCount");
+  const batchSource = readNamedFunction(html, "nextTodayLoadedCount", "todayFilterValueMatches");
+  const api = new Function(`
+    ${sourceKeySource}
+    ${sourceFilterSource}
+    ${batchSource}
+    return { todaySourceKeyForPaper, todayPapersForSource, nextTodayLoadedCount };
+  `)();
+  const papers = [
+    { id: "w", retrievalSource: "webofscience" },
+    { id: "g", retrievalSource: "googlescholar" },
+    { id: "a", retrievalSource: "arxiv" },
+    { id: "b", retrievalSource: "biorxiv" },
+    { id: "s", retrievalSource: "semanticscholar" }
+  ];
+  assert.deepEqual(api.todayPapersForSource(papers, "preprints").map(paper => paper.id), ["a", "b"]);
+  assert.deepEqual(api.todayPapersForSource(papers, "all").map(paper => paper.id), ["w", "g", "a", "b", "s"]);
+  assert.equal(api.nextTodayLoadedCount(15), 30);
+
+  const resultSource = readNamedFunction(html, "todayResultPapers", "todayDefaultSourceTab");
+  const tabSource = readNamedFunction(html, "todayDefaultSourceTab", "todayVisiblePaperList");
+  const { todayResultPapers, todayDefaultSourceTab } = new Function(`${sourceKeySource}; ${sourceFilterSource}; ${resultSource}; ${tabSource}; return { todayResultPapers, todayDefaultSourceTab };`)();
+  assert.deepEqual(todayResultPapers({ newPapers: [{ id: "new" }], papers: [{ id: "archive" }] }, "direction"), [{ id: "new" }]);
+  assert.deepEqual(todayResultPapers({ exactCandidates: [{ id: "candidate" }], newPapers: [] }, "exact"), [{ id: "candidate" }]);
+  assert.deepEqual(todayResultPapers({ exactCandidates: [], newPapers: [], papers: [{ id: "already-archived" }] }, "exact"), [{ id: "already-archived" }]);
+  const tabPapers = [
+    { id: "a", retrievalSource: "arxiv" },
+    { id: "g", retrievalSource: "googlescholar" }
+  ];
+  assert.equal(todayDefaultSourceTab(tabPapers, ["arXiv", "Google Scholar"]), "googlescholar");
+  assert.equal(todayDefaultSourceTab([{ id: "a", retrievalSource: "arxiv" }], ["arXiv"]), "preprints");
+  assert.equal(todayDefaultSourceTab([], ["Web of Science"]), "all");
+
+  const matchSource = readNamedFunction(html, "todayFilterValueMatches", "todayPaperMatchesFilters");
+  const todayFilterValueMatches = new Function(`${sourceKeySource}; ${matchSource}; return todayFilterValueMatches;`)();
+  assert.equal(todayFilterValueMatches({ citationCount: null }, "citation", "zero"), false);
+  assert.equal(todayFilterValueMatches({ citationCount: 0 }, "citation", "zero"), true);
+  assert.equal(todayFilterValueMatches({ publishedPrecision: "month" }, "precision", "month"), true);
+  assert.match(html, /\["month", "精确到月份"\]/);
+});
+
+test("today result tab selects once, preserves manual choice, and resets for a new result set", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const sourceKeySource = readNamedFunction(html, "todaySourceKeyForPaper", "todayPapersForSource");
+  const sourceFilterSource = readNamedFunction(html, "todayPapersForSource", "nextTodayLoadedCount");
+  const defaultSource = readNamedFunction(html, "todayDefaultSourceTab", "todaySourceTabForResults");
+  const selectionSource = readNamedFunction(html, "todaySourceTabForResults", "todayVisiblePaperList");
+  const api = new Function(`${sourceKeySource}; ${sourceFilterSource}; ${defaultSource}; ${selectionSource}; return { todaySourceTabForResults };`)();
+  const papers = [{ id: "a", retrievalSource: "arxiv" }];
+
+  assert.equal(api.todaySourceTabForResults("webofscience", papers, ["arXiv"], false, false), "preprints");
+  assert.equal(api.todaySourceTabForResults("googlescholar", papers, ["arXiv"], true, false), "googlescholar");
+  assert.equal(api.todaySourceTabForResults("googlescholar", papers, ["arXiv"], true, true), "preprints");
+  assert.match(html, /let todaySourceTabUserSelected = false/);
+});
+
+test("today keyboard connection keeps connector focus and uses one document Escape listener", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const renderSource = readNamedFunction(html, "renderTodayKeyboardConnectionState", "handleTodayKeyboardConnectionEscape");
+  const escapeSource = readNamedFunction(html, "handleTodayKeyboardConnectionEscape", "bindTodayKeyboardConnectionEscape");
+  const bindSource = readNamedFunction(html, "bindTodayKeyboardConnectionEscape", "renderTodayKeywordConnections");
+  const listeners = new Set();
+  const aria = [];
+  let focusCount = 0;
+  let renderCount = 0;
+  const connector = {
+    getAttribute: () => "SIM",
+    setAttribute: (name, value) => aria.push([name, value]),
+    focus: () => { focusCount += 1; }
+  };
+  const document = {
+    querySelectorAll: () => [connector],
+    addEventListener: (type, listener) => { if (type === "keydown") listeners.add(listener); },
+    removeEventListener: (type, listener) => { if (type === "keydown") listeners.delete(listener); }
+  };
+  const harness = new Function("document", "window", "renderToday", "location", `
+    let todayKeyboardConnectFrom = "SIM";
+    ${renderSource}
+    ${escapeSource}
+    ${bindSource}
+    return {
+      bindTodayKeyboardConnectionEscape,
+      renderTodayKeyboardConnectionState,
+      state: () => todayKeyboardConnectFrom
+    };
+  `)(document, { requestAnimationFrame: callback => callback() }, () => { renderCount += 1; }, { hash: "#today" });
+
+  harness.renderTodayKeyboardConnectionState("SIM");
+  assert.equal(focusCount, 1);
+  assert.deepEqual(aria.at(-1), ["aria-pressed", "true"]);
+  harness.bindTodayKeyboardConnectionEscape();
+  harness.bindTodayKeyboardConnectionEscape();
+  assert.equal(listeners.size, 1, "rebinding must not leak document listeners");
+  [...listeners][0]({ key: "Escape" });
+  assert.equal(harness.state(), "");
+  assert.equal(renderCount, 2);
+  assert.equal(focusCount, 2);
+  assert.deepEqual(aria.at(-1), ["aria-pressed", "false"]);
+});
+
+test("today keyboard connection Escape is scoped to the today page", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const escapeSource = readNamedFunction(html, "handleTodayKeyboardConnectionEscape", "bindTodayKeyboardConnectionEscape");
+  let renderCount = 0;
+  const harness = new Function("location", "renderTodayKeyboardConnectionState", `
+    let todayKeyboardConnectFrom = "SIM";
+    ${escapeSource}
+    return {
+      escape: handleTodayKeyboardConnectionEscape,
+      state: () => todayKeyboardConnectFrom
+    };
+  `)({ hash: "#config" }, () => { renderCount += 1; });
+
+  harness.escape({ key: "Escape" });
+  assert.equal(harness.state(), "SIM");
+  assert.equal(renderCount, 0);
+});
+
+test("config changes and returning to today invalidate the visible canonical task", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const applySource = readNamedFunction(html, "applyUserConfig", "applyUserState");
+  const saveSource = readNamedFunction(html, "saveUserConfig", "renderKeywordConfig");
+  const navigationSource = readNamedFunction(html, "handlePageHashChange", "startApp");
+  let invalidations = 0;
+  let renders = [];
+  const localStorage = { setItem() {} };
+  const applyHarness = new Function("invalidateTodayCanonicalTask", "localStorage", `
+    let userConfig = {};
+    let keywordState = {};
+    let sourceState = [];
+    let todaySearchLogic = { activeKeywords: [], andEdges: [] };
+    const mergeSourceDefaults = items => items;
+    const saveKeywordStateLocal = () => {};
+    const saveSourceStateLocal = () => {};
+    ${applySource}
+    return { applyUserConfig };
+  `)(() => { invalidations += 1; }, localStorage);
+  applyHarness.applyUserConfig({
+    keywords: { topics: [{ text: "RIM", enabled: true }] },
+    sources: [{ title: "arXiv", enabled: true }],
+    searchLogic: { activeKeywords: ["RIM"], andEdges: [] }
+  });
+  assert.equal(invalidations, 1);
+
+  const saveHarness = new Function("invalidateTodayCanonicalTask", `
+    const saveKeywordStateLocal = () => {};
+    const saveSourceStateLocal = () => {};
+    const currentUserConfig = () => ({ searchLogic: {} });
+    const queueUserConfigWrite = async () => ({ ok: true });
+    const console = { warn() {} };
+    ${saveSource.replace(/^function saveUserConfig/, "async function saveUserConfig")}
+    return { saveUserConfig };
+  `)(() => { invalidations += 1; });
+  await saveHarness.saveUserConfig();
+  assert.equal(invalidations, 2);
+
+  const location = { hash: "#config" };
+  const navigationHarness = new Function("location", "scheduleTodayTaskPreflight", "renderPage", "window", `
+    let todayKeyboardConnectFrom = "SIM";
+    ${navigationSource}
+    return { handlePageHashChange, connection: () => todayKeyboardConnectFrom };
+  `)(location, () => { invalidations += 1; }, page => renders.push(page), { addEventListener() {} });
+  navigationHarness.handlePageHashChange();
+  assert.equal(navigationHarness.connection(), "");
+  assert.equal(invalidations, 2);
+  assert.deepEqual(renders, ["config"]);
+  location.hash = "#today";
+  navigationHarness.handlePageHashChange();
+  assert.equal(invalidations, 3);
+  assert.deepEqual(renders, ["config", "today"]);
+
+  assert.doesNotMatch(html, /conditionRevision:/);
+});
+
+test("today preflight ignores stale responses and preserves the last canonical state on failure", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const runSource = readNamedFunction(html, "runTodayTaskPreflight", "syncTodayPreflightCanonicalState");
+  const pending = new Map();
+  const synced = [];
+  const harness = new Function("requestTodayTaskPreflight", "syncTodayPreflightCanonicalState", "renderToday", "location", `
+    let todayTaskPreflightRevision = 2;
+    let todayTaskPreflightStatus = "loading";
+    let todayTaskPreflightError = "";
+    async ${runSource}
+    return {
+      runTodayTaskPreflight,
+      state: () => ({ todayTaskPreflightStatus, todayTaskPreflightError })
+    };
+  `)(
+    (body, signal) => new Promise((resolve, reject) => pending.set(body.queryExpression, { resolve, reject, signal })),
+    state => synced.push(state),
+    () => {},
+    { hash: "#today" }
+  );
+  const oldController = new AbortController();
+  const newController = new AbortController();
+  const oldRun = harness.runTodayTaskPreflight(1, oldController, { queryExpression: "old" });
+  const newRun = harness.runTodayTaskPreflight(2, newController, { queryExpression: "new" });
+  pending.get("new").resolve({ taskFingerprint: "new-fp", resumable: true, sourcePages: {}, sourceResults: [], errors: [] });
+  await newRun;
+  pending.get("old").resolve({ taskFingerprint: "old-fp", resumable: false, sourcePages: {}, sourceResults: [], errors: [] });
+  await oldRun;
+  assert.deepEqual(synced.map(state => state.taskFingerprint), ["new-fp"]);
+  assert.equal(harness.state().todayTaskPreflightStatus, "ready");
+
+  const failedController = new AbortController();
+  const failedRun = harness.runTodayTaskPreflight(2, failedController, { queryExpression: "failed" });
+  pending.get("failed").reject(new Error("offline"));
+  await failedRun;
+  assert.deepEqual(synced.map(state => state.taskFingerprint), ["new-fp"], "failed preflight must retain the existing canonical state");
+  assert.equal(harness.state().todayTaskPreflightStatus, "error");
+  assert.match(harness.state().todayTaskPreflightError, /offline/);
+
+  assert.match(html, /clearTimeout\(todayTaskPreflightTimer\)/);
+  assert.match(html, /todayTaskPreflightController\?\.abort\(\)/);
+  assert.match(html, /scheduleTodayTaskPreflight/);
+});
+
+test("today auto-load disconnects stale observers and leaves short lists stable", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const source = readNamedFunction(html, "bindTodayAutoLoad", "bindPaperRefresh");
+  let sentinel = null;
+  let staleDisconnects = 0;
+  let newDisconnects = 0;
+  let callback;
+  const harness = new Function("document", "window", "nextTodayLoadedCount", "todayVisiblePaperList", "renderToday", "staleObserver", `
+    let todayAutoLoadObserver = staleObserver;
+    let todaySourceTab = "all";
+    const todayPaperBatchSize = 15;
+    const todayLoadedCounts = { all: 15 };
+    const IntersectionObserver = window.IntersectionObserver;
+    ${source}
+    return { bindTodayAutoLoad, count: () => todayLoadedCounts.all, observer: () => todayAutoLoadObserver };
+  `)(
+    { querySelector: () => sentinel },
+    { IntersectionObserver: class {
+      constructor(next) { callback = next; }
+      observe() {}
+      disconnect() { newDisconnects += 1; }
+    } },
+    (current, batch) => current + batch,
+    () => [{ id: 1 }],
+    () => {},
+    { disconnect: () => { staleDisconnects += 1; } }
+  );
+  harness.bindTodayAutoLoad();
+  assert.equal(staleDisconnects, 1);
+  assert.equal(harness.observer(), null);
+  assert.equal(harness.count(), 15);
+
+  sentinel = {};
+  harness.bindTodayAutoLoad();
+  callback([{ isIntersecting: true }]);
+  assert.equal(harness.count(), 30);
+  assert.equal(newDisconnects, 1);
+});
+
+test("today polling errors retain existing cards and reset the running state", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const source = readNamedFunction(html, "loadPaperData", "fetchPaperPayloadOnce");
+  let applyCalls = 0;
+  const harness = new Function("location", "renderPage", "runPaperRefreshJob", "applyPaperPayload", "loadArchiveData", "loadFetchLogData", "freezeTodayDiscoveryRequest", "todayDiscoveryRequestBody", "scheduleTodayTaskPreflight", `
+    let todayPapers = [{ id: "kept" }];
+    let paperDataStatus = "existing results";
+    let recentDataStatus = "existing results";
+    let todayRunningTask = null;
+    let todayTaskPreflightRevision = 0;
+    let todayTaskPreflightTimer = null;
+    let todayTaskPreflightController = null;
+    let fetchProgress = { percent: 50 };
+    const fetchRange = { startDate: "2026-07-01", endDate: "2026-07-13" };
+    async ${source}
+    return {
+      loadPaperData,
+      state: () => ({ todayPapers, paperDataStatus, todayRunningTask, fetchProgress })
+    };
+  `)(
+    { protocol: "http:", hash: "#today" },
+    () => {},
+    async () => { throw new Error("poll offline"); },
+    () => { applyCalls += 1; },
+    () => {},
+    async () => {},
+    request => JSON.parse(JSON.stringify(request)),
+    resumeMode => ({ searchMode: "direction", queryExpression: "SIM", searchLogic: {}, sources: ["arxiv"], startDate: "2026-07-01", endDate: "2026-07-13", resumeMode }),
+    () => {}
+  );
+
+  await harness.loadPaperData("range", true, "resume");
+  assert.deepEqual(harness.state().todayPapers, [{ id: "kept" }]);
+  assert.equal(applyCalls, 0);
+  assert.match(harness.state().paperDataStatus, /poll offline/);
+  assert.equal(harness.state().todayRunningTask, null);
+  assert.equal(harness.state().fetchProgress, null);
 });
 
 test("today fetch sessions keep duplicate ranges with compact timestamp labels", async () => {

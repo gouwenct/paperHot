@@ -78,6 +78,7 @@ const {
   rescorePaperAfterEnrichment,
   writeRecentFetchCursor,
   clearRecentFetchCursor,
+  readDiscoveryTaskState,
   detectExactPaperInput,
   fetchCrossrefWorkByDoi
 } = require("../paperhot_backend.cjs");
@@ -3186,10 +3187,52 @@ test("exact-input classification recognizes DOI, WoS, arXiv, URL, and title", ()
     value: "10.1038/s41592-026-00001-1"
   });
   assert.deepEqual(detectExactPaperInput("WOS:000123"), { type: "wos-ut", value: "WOS:000123" });
+  assert.deepEqual(detectExactPaperInput("2601.0123"), { type: "arxiv", value: "2601.0123" });
+  assert.deepEqual(detectExactPaperInput("2601.01234v3"), { type: "arxiv", value: "2601.01234v3" });
   assert.deepEqual(detectExactPaperInput("arXiv:2601.01234"), { type: "arxiv", value: "2601.01234" });
   assert.deepEqual(detectExactPaperInput("https://arxiv.org/abs/2601.01234v2"), { type: "arxiv", value: "2601.01234v2" });
   assert.deepEqual(detectExactPaperInput("https://example.test/paper"), { type: "url", value: "https://example.test/paper" });
   assert.deepEqual(detectExactPaperInput("A full paper title"), { type: "title", value: "A full paper title" });
+});
+
+test("discovery task state preflight reads the canonical cursor without changing it", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-task-state-preflight-"));
+  const task = {
+    searchMode: "direction",
+    queryExpression: "SIM",
+    startDate: "2026-04-13",
+    endDate: "2026-07-13",
+    sources: ["arxiv", "webofscience"],
+    sourcePages: {
+      arxiv: { nextPage: 2, complete: true },
+      webofscience: { nextPage: 4, complete: false }
+    }
+  };
+  try {
+    await writeRecentFetchCursor(task, tempDir);
+    const cursorPath = path.join(tempDir, "recent-fetch-cursors.json");
+    const before = await fs.readFile(cursorPath, "utf8");
+    const state = await readDiscoveryTaskState({
+      dataDir: tempDir,
+      mode: "recent",
+      date: "2026-07-13",
+      searchMode: task.searchMode,
+      queryExpression: task.queryExpression,
+      searchLogic: { activeKeywords: ["SIM"], andEdges: [] },
+      sources: ["arXiv", "Web of Science"],
+      startDate: task.startDate,
+      endDate: task.endDate
+    });
+
+    assert.equal(state.taskFingerprint, buildDiscoveryTaskFingerprint(task));
+    assert.equal(state.resumable, true);
+    assert.deepEqual(state.sourcePages, task.sourcePages);
+    assert.deepEqual(state.sourceResults, []);
+    assert.deepEqual(state.errors, []);
+    assert.equal(await fs.readFile(cursorPath, "utf8"), before);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("exact DOI lookup reuses the Crossref DOI helper", async () => {

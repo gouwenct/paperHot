@@ -458,7 +458,8 @@ function detectExactPaperInput(value) {
   const doi = normalizeDoi(clean);
   if (/^10\.\d{4,9}\/\S+$/i.test(doi)) return { type: "doi", value: doi };
   if (/^WOS:\d+$/i.test(clean)) return { type: "wos-ut", value: clean.toUpperCase() };
-  const arxiv = clean.match(/(?:^arXiv:|arxiv\.org\/abs\/)(\d{4}\.\d{4,5}(?:v\d+)?)/i);
+  const arxiv = clean.match(/^(?:arXiv:)?(\d{4}\.\d{4,5}(?:v\d+)?)$/i)
+    || clean.match(/arxiv\.org\/abs\/(\d{4}\.\d{4,5}(?:v\d+)?)/i);
   if (arxiv) return { type: "arxiv", value: arxiv[1] };
   if (/^https?:\/\//i.test(clean)) return { type: "url", value: clean };
   return { type: "title", value: clean };

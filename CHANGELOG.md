@@ -116,6 +116,7 @@
 
 ### 新增功能
 
+- 今日论文页新增近期论文工作台：支持“方向检索/指定论文”切换、只读 Boolean 最终表达式、标题/DOI/WOS UT/arXiv ID/URL 精确输入、近 1/3/6 个月及自定义日期、本次信源开关、关键词 OR 点亮与拖动 AND 连线，以及固定顺序的分信源结果标签和筛选。
 - 后端近期抓取支持信源端日期约束、可恢复分页和指定论文查询：可识别 DOI、Web of Science UT、arXiv ID/URL、普通 URL 与标题；稳定标识结果沿用现有追加式归档，标题存在多个相近结果时仅返回候选等待确认。
 - 后端新增近期抓取任务指纹与短期断点持久化，只允许检索模式、规范化表达式、冻结日期和信源集合完全一致的任务续传；同时本地聚合记录每次 Web of Science HTTP 请求的日/月/累计次数和最后状态。
 - 后端新增 Boolean 搜索逻辑的持久化与计算：可把相连关键词组成 AND 条件，并将多个条件组以 OR 连接；论文匹配只检查标题、摘要和标签，不改写来源标题。
@@ -123,12 +124,18 @@
 
 ### 功能优化
 
+- 今日论文把当前条件的 preflight canonical 状态与运行任务状态分离；抓取开始时深度冻结七字段请求，运行中禁用模式、查询、日期、信源和关键词编辑，完成或失败后始终按当前条件重新预检。运行结果与默认信源标签只按冻结的模式和信源解释，旧轮询不再覆盖新条件断点。
+- 今日论文页新增只读 durable cursor 预检：页面加载、检索条件稳定变化、领域配置修改或重新进入今日页后自动查询 canonical 状态，恢复相同条件时重新显示“继续抓取”；预检失败保留原结果和断点显示，并在 canonical 状态确认前禁止 `new`。用户配置写入统一进入串行快照队列，旧响应不再覆盖快速 OR/AND/清空/新增后的新状态，单次失败也不会阻断后续保存。
+- 日期预设每次按本地当天重算并正确收缩到月末；自定义范围必须填写两个合法日期且开始不晚于结束才可预检或抓取。新结果首次打开固定顺序中首个“已启用且有结果”的信源标签，用户手动切换后不再被 render 抢回。
+- 今日论文的“继续抓取/从头重抓/开始新抓取”仅由后端 canonical 任务指纹与 `resumable` 决定；七个 discovery 字段由同一前端状态快照生成。本次结果优先显示 canonical `newPapers` 或指定论文候选，各信源标签独立从 15 篇开始并通过单一 `IntersectionObserver` 自动追加 15 篇。
 - 扩展现有论文刷新任务契约：请求深度清洗并转发检索模式、表达式、Boolean 搜索图、信源、合法日期和 `resumeMode`；请求入队前一次性冻结生效日期范围和任务指纹，同一任务指纹的整次抓取在本地进程内串行，`restart`/`new` 先清除旧断点再从第一页开始，`resume` 在自己的执行轮次读取断点。start/status 轮询持续保留任务指纹、可恢复状态、逐信源页码、逐信源结果和错误，不新增接口、任务表或依赖。
 - WoS 请求现在发送精确起止日期并从保存页继续，arXiv 用有限默认页预算按最新顺序分页且遇到整页旧结果停止，bioRxiv 使用精确日期 endpoint 后按搜索图过滤；Google Scholar 使用年份范围，Google Search 使用自定义日期范围。指定论文检索不再附加方向日期或关键词过滤。
 - 多信源候选现在保留原始标题并单独生成显示标题；同版本精确重复优先保留 Web of Science、其次 Google Scholar，正式版与预印本不再互相覆盖并会建立双向版本关联。
 
 ### 修复问题
 
+- 修复初始会话或普通今日 payload 仍默认打开空 WoS 标签，以及键盘连接首击重渲染后焦点丢失、Esc 无法取消或在其它页面错误重绘今日内容的问题；默认标签现在只在结果集首次落地时选择，手动切换后不被普通 render/poll 抢回，连接按钮重渲染后恢复焦点，离开今日页会取消待连接状态。
+- 修复刷新页面或条件改回后无法发现 durable cursor、已归档 exact 命中显示为空、plain arXiv ID 被当成标题、未知引用量被归入真实 0、月份精度无法筛选，以及非相邻 AND 直线穿过中间关键词的问题。AND 连线改为带明确端点的上抬正交路径，并增加键盘可达的两步连接按钮和 Esc 取消。
 - 修复畸形 refresh 请求可让 Boolean 边集合在后端 `.flat()` 崩溃、同指纹并发 resume/restart 混写断点，以及运行中/失败 job 返回空占位或旧 cursor 状态的问题；server 不再在 backend 队列外预读或解释 cursor，完整 canonical snapshot 会直接替换分页、结果和错误，普通进度只保持百分比、阶段、消息和计数单调；pipeline 失败后读取的 durable cursor 只替换指纹、页码和可恢复态，不再清空 live job 已记录的失败信源结果和原始错误。
 - 修复分页抓满预算后误清断点、恢复时重复请求已完成信源、首页失败不保存起始页，以及同一游标文件的跨任务并发写入/清除互相覆盖问题；现在逐信源持久化 `nextPage`/`complete`，同一文件的更新在进程内串行且失败后队列可继续，只有全部信源完成才清除。
 - 修复标题多候选仍创建空归档、缓存和抓取日志的问题；候选现在会在 Crossref、LLM 和任何归档副作用前直接返回。
@@ -141,6 +148,7 @@
 
 ### 配置与数据
 
+- 今日工作台的关键词新增、删除、OR 活动状态和 AND 边复用现有 `searchLogic` 与 `/api/user/config` 持久化，继续随用户配置进入现有 v1 ZIP；本次信源开关、指定论文输入、结果标签、筛选和加载数量不持久化、不导出，因此不改变备份格式或版本。
 - 新增 `recent-fetch-cursors` 与 `web-of-science-usage` 示例；近期游标按 schema 保存紧凑化查询表达式及当前启用信源的 `nextPage`/`complete` 最小运行态，WoS 用量文件只保存聚合计数和最后状态，不含请求 URL、查询全文、Header 或 API Key。近期游标不进入任何本地数据 ZIP，WoS 用量本次也不提前扩展导出逻辑，备份格式继续为 v1。
 - 论文记录新增可选的显示标题、日期精度、发表阶段、检索信源、信源 ID、引用数/引用数据库和关联版本字段；旧论文缺少字段时继续兼容读取，ZIP 备份格式保持 `paperhot-local-data` v1，无需迁移。
 - Web of Science 示例配置新增 `citationCount` 响应映射，不涉及 API Key 或真实本机配置。
@@ -149,6 +157,8 @@
 
 ### 文档
 
+- 更新 README 的 refresh state/start/status 契约，并追加 Task 6 独立审查修复的 RED/GREEN、测试和浏览器验证记录；只读 state route 不改变持久化 schema 或 v1 备份格式。
+- 更新 README 并新增 Task 6 报告，说明今日论文工作台的方向/指定检索、关键词关系、运行级信源、canonical 恢复按钮、分信源筛选和 15 篇自动加载；本次不修改后端接口、持久化 schema 或备份版本。
 - 更新 README 并新增 Task 5 报告，说明 refresh job 的七字段 discovery 请求、显式恢复语义、同指纹串行边界和轮询返回字段；旧 Google 手动起点、重置与滚动开关因已断开当前 discovery 流程而从页面移除，本次不改变持久化数据或 ZIP 备份格式。
 - 更新 README 与 BACKUP_FORMAT，说明近期抓取断点、WoS 本地用量文件、敏感信息边界和当前 v1 备份排除范围。
 - 更新 README 和 BACKUP_FORMAT，说明多信源元数据、正式版/预印本关联字段及备份 v1 的向后兼容规则。
@@ -158,7 +168,15 @@
 
 ### 测试与验证
 
+- 增加 Task 6 状态边界回归，覆盖七字段 plain request 深冻结、A 任务轮询不覆盖 B 当前 preflight、过期运行对象拒绝写入、运行中 action 禁用、配置修改/回到今日页重新预检、结果标签一次性选择/手动保留/新结果重置，以及 fake DOM 下连接按钮焦点、`aria-pressed`、跨页 Esc 和 document listener 去重；前端完整测试 `54/54` 通过。
+- 增加 Task 6 审查回归，覆盖只读 preflight、plain/prefix/URL arXiv、exact 已归档结果、串行配置保存与失败恢复、本地日历/月末/custom 校验、默认信源标签、preflight stale/失败保留、raised AND path、键盘连接、unknown citation/month、observer 生命周期和 poll error 保留旧卡片；所有 API 和信源使用 fake/memory 数据，不改真实配置或论文库。
+- 增加 Task 6 前端可执行回归，覆盖 Boolean 连通组/独立 OR、清空/删除、七字段方向与指定论文请求、canonical 按钮状态、信源分流、结果优先级和 15 篇批次；完整前端测试 `42/42` 通过，内嵌脚本语法通过。使用 mock API 的隔离 Chrome 验证 `320/768/1024/1440` 无页面或控件横向溢出、删除按钮聚焦可见、鼠标拖线更新表达式、exact 输入切换正确且控制台无错误或警告。
 - 增加 refresh 请求与 job/status 契约回归，实际执行 `buildRefreshOptions()` 覆盖继承属性、对象查询、畸形搜索图、非法日期、信源去重和 enum allowlist；纯冻结 helper 覆盖跨日期等待时范围/指纹不漂移，job transition 覆盖 canonical cursor 回退直接替换、cursor-only 失败回读保留 live 信源结果/错误并去重追加 server 错误、普通/late progress、running/done/error，fake source 覆盖多信源 partial、同指纹 concurrent resume/restart 及 progress callback 导致队列 reject 后的恢复和清理，并保留 Task 4 canonical/cursor 并发与完整前端回归；本轮 Task 5 聚焦 `4/4`、前端完整 `38/38`、Task 4/5 canonical/cursor/concurrency 聚焦 `16/16` 及两项 Node 语法检查均通过。
+
+### 视觉改善
+
+- 关键词 AND 关系改用与确认原型一致的上抬正交 lane，非相邻端点不再用直线穿过中间关键词；每个关键词增加小连接图标按钮，为键盘用户提供与鼠标拖线等价的操作。
+- 今日论文工作台采用已确认的紧凑方案 A；在 320px 移动端让模式、日期、动作、信源、关键词、结果标签和论文卡片自动换行，在桌面端保持工作台与分信源筛选并排，不以颜色作为 AND/OR 关系的唯一表达。
 - 增加 Task 4 fake-fetch 聚焦测试，关键 exact/recent 回归直接经过实际 WoS、Google Scholar 和 Google Search adapter，覆盖 legacy offset 隔离、Google 满页续传与首页失败、分页满预算恢复与完成信源跳过、标题候选零副作用、arXiv 默认多页、多键新增身份与正式版/预印本边界、缩写搜索图、Google 源端日期、跨任务 cursor 写入/清除并发恢复和 Task 5 顶层契约；测试不读取真实 API Key 或调用真实论文信源。
 - 增加 `newPapers` 保守身份边界回归，覆盖跨信源相同 ID、同标题异作者、同标题无作者、规范标题同作者、相同 DOI，以及同标题同作者的正式版/预印本分离。
 - 增加任务指纹稳定性与差异、断点写读清理、同任务恢复和禁用信源页码过滤测试；增加 WoS 成功、HTTP/网络失败、日/月/累计聚合、进程内并发连续写、失败后队列恢复、跨数据目录及旧文件兼容测试。
