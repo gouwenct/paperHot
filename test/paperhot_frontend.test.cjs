@@ -69,6 +69,7 @@ test("paper cards show authors and source-specific title metrics with starred ba
   assert.match(html, /class="paper-title-metric"/);
   assert.match(html, /class="paper-authors"/);
   assert.match(html, /paper-card \$\{isStarred \? "starred" : ""\}/);
+  assert.match(html, /scope === "today" && paper\.archivedBeforeFetch === true/);
   assert.match(html, /\.paper-card\.starred\s*\{[\s\S]*background-image:/);
 
   const metricSource = readNamedFunction(html, "paperCitationMetric", "paperAuthorsLabel");
@@ -80,7 +81,8 @@ test("paper cards show authors and source-specific title metrics with starred ba
   assert.deepEqual(api.paperCitationMetric({ retrievalSource: "googlescholar", citationCount: 8 }), { value: "8", label: "Scholar 引用" });
   assert.deepEqual(api.paperCitationMetric({ retrievalSource: "arxiv" }), { value: "arXiv", label: "预印本" });
   assert.deepEqual(api.paperCitationMetric({ retrievalSource: "biorxiv" }), { value: "bioRxiv", label: "预印本" });
-  assert.equal(api.paperCitationMetric({ retrievalSource: "webofscience", citationCount: null }), null);
+  assert.deepEqual(api.paperCitationMetric({ retrievalSource: "webofscience", citationCount: null }), { value: "--", label: "WoS 引用" });
+  assert.deepEqual(api.paperCitationMetric({ retrievalSource: "googlescholar" }), { value: "--", label: "Scholar 引用" });
   assert.equal(api.paperAuthorsLabel({ authors: ["A", "B", "C", "D"] }), "A、B、C 等 4 位作者");
   assert.equal(api.paperVisibleSourceLabel({ retrievalSource: "webofscience", source: "Web of Science" }), "");
   assert.equal(api.paperVisibleSourceLabel({ retrievalSource: "webofscience", journal: "Web of Science", source: "Web of Science" }), "");
@@ -97,6 +99,10 @@ test("today page exposes resumable source failures and per-paper AI retry", asyn
   assert.match(html, /data-refresh-paper-llm/);
   assert.match(html, /function removePaperLlmFailure\(/);
   assert.match(html, /clearPaperLlmFailure\(payload\.paper \|\| paper\)/);
+  const refreshSource = readNamedFunction(html, "refreshOnePaperLlm", "invalidateTodayCanonicalTask");
+  assert.match(refreshSource, /payload\.updated !== true/);
+  assert.match(refreshSource, /payload\.errors\?\.\[0\]\?\.message/);
+  assert.ok(refreshSource.indexOf("payload.updated !== true") < refreshSource.indexOf("clearPaperLlmFailure"));
   assert.match(html, /error\.taskState = status/);
 
   const failureSource = readNamedFunction(html, "todayFailureRows", "todayDiscoveryWorkbench");
@@ -120,6 +126,13 @@ test("today page exposes resumable source failures and per-paper AI retry", asyn
     { source: "webofscience", message: "HTTP 429", paper: { doi: "10.1/target" } }
   ], { doi: "10.1/target" });
   assert.deepEqual(remaining.map(error => error.message), ["other", "HTTP 429"]);
+});
+
+test("today status bar does not repeat failure details shown in the workbench", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const statusSource = readNamedFunction(html, "paperStatusBar", "fetchProgressPanel");
+
+  assert.doesNotMatch(statusSource, /meta\?\.errors|部分信源失败/);
 });
 
 test("per-paper AI failures use conservative paper identity instead of title alone", async () => {
@@ -195,6 +208,72 @@ test("all papers page moves archive actions to the hero and removes type chips f
   assert.doesNotMatch(sideFilterMatch[0], /论文类型/);
 });
 
+test("all papers clear unstarred archive uses one confirmed request and preserves state on failure", async () => {
+  const [html, serverSource] = await Promise.all([
+    fs.readFile(htmlFile, "utf8"),
+    fs.readFile(serverFile, "utf8")
+  ]);
+  assert.match(html, /data-clear-unstarred-archive/);
+  assert.match(html, /清空未标星/);
+  assert.match(serverSource, /pathname === "\/api\/archive\/clear-unstarred"/);
+  assert.match(serverSource, /clearUnstarredPaperArchive\(\)/);
+
+  const source = readNamedFunction(html, "clearUnstarredArchive", "applyArchivePayload");
+  const makeHarness = ({ confirm = true, ok = true } = {}) => {
+    const requests = [];
+    const harness = new Function("location", "fetch", "renderAll", "showToast", "window", "isStarredPaper", "normalizePaperForView", `
+      let recentPapers = [{ id: "starred" }, { id: "plain" }];
+      let recentDataMeta = { count: 2 };
+      let recentDataStatus = "ready";
+      ${source.replace(/^function/, "async function")}
+      return {
+        clearUnstarredArchive,
+        state: () => ({ recentPapers, recentDataMeta, recentDataStatus })
+      };
+    `)(
+      { protocol: "http:" },
+      async (url, options) => {
+        requests.push({ url, options });
+        return {
+          ok,
+          status: ok ? 200 : 500,
+          json: async () => ({
+            beforeCount: 2,
+            afterCount: 1,
+            removedCount: 1,
+            preservedStarredCount: 1,
+            papers: [{ id: "starred" }],
+            archive: { count: 1 }
+          })
+        };
+      },
+      () => {},
+      () => {},
+      { confirm: () => confirm },
+      paper => paper.id === "starred",
+      paper => paper
+    );
+    return { ...harness, requests };
+  };
+
+  const cancelled = makeHarness({ confirm: false });
+  await cancelled.clearUnstarredArchive();
+  assert.equal(cancelled.requests.length, 0);
+  assert.deepEqual(cancelled.state().recentPapers.map(paper => paper.id), ["starred", "plain"]);
+
+  const succeeded = makeHarness();
+  await succeeded.clearUnstarredArchive();
+  assert.deepEqual(succeeded.requests, [{ url: "/api/archive/clear-unstarred", options: { method: "POST" } }]);
+  assert.deepEqual(succeeded.state().recentPapers.map(paper => paper.id), ["starred"]);
+  assert.equal(succeeded.state().recentDataMeta.count, 1);
+  assert.match(succeeded.state().recentDataStatus, /移除 1 篇/);
+
+  const failed = makeHarness({ ok: false });
+  await failed.clearUnstarredArchive();
+  assert.deepEqual(failed.state().recentPapers.map(paper => paper.id), ["starred", "plain"]);
+  assert.match(failed.state().recentDataStatus, /清空失败/);
+});
+
 test("sidebar stays fixed while paper lists scroll", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /\.sidebar\s*\{[\s\S]*position:\s*sticky/);
@@ -241,6 +320,15 @@ test("token stats page exposes fetch-log candidate detail view", async () => {
   assert.match(html, /data-fetch-log-detail/);
   assert.match(html, /renderFetchLogCandidateDetail/);
   assert.match(html, /领域过滤前候选论文/);
+  assert.match(html, /afterDateEnrichment/);
+  assert.match(html, /finalDateMatched/);
+  assert.match(html, /data-candidate-stage/);
+  assert.match(html, /日期补全后/);
+  assert.match(html, /最终日期通过/);
+  assert.match(html, /日期粗筛/);
+  assert.match(html, /日期确认/);
+  assert.match(html, /历史库新增/);
+  assert.match(html, /function renderFetchLogCandidateDetail\(\) \{[\s\S]{0,500}const stage = activeFetchLogCandidateStage\(entry\)[\s\S]{0,300}fetchLogCandidateSnapshot\(entry, stage\.key\)/);
 });
 
 test("token stats cards label LLM usage count as calls", async () => {
@@ -630,6 +718,7 @@ test("all papers page exposes archive LLM refresh actions", async () => {
   assert.match(html, /data-refresh-paper-llm/);
   assert.match(html, /\/api\/archive\/llm/);
   assert.match(html, /\/api\/archive\/llm\/paper/);
+  assert.match(html, /payload\.failedCount/);
 });
 
 test("today papers page exposes single paper LLM refresh actions", async () => {
@@ -652,7 +741,7 @@ test("favorites page uses backend json persistence", async () => {
 test("saved papers are visually muted outside the favorites page", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /\.paper-card\.saved-muted/);
-  assert.match(html, /const isSavedMuted = isSaved && scope !== "favorites"/);
+  assert.match(html, /const isSavedMuted = scope !== "favorites" && \(isSaved \|\| \(scope === "today" && paper\.archivedBeforeFetch === true\)\)/);
   assert.match(html, /isSavedMuted \? "saved-muted" : ""/);
   const savedRuleIndex = html.indexOf(".paper-card.saved-muted {");
   const starredSavedRuleIndex = html.indexOf(".paper-card.starred.saved-muted {");
@@ -961,8 +1050,16 @@ test("today discovery request emits the seven canonical fields from one state", 
   assert.equal(exact.queryExpression, "WOS:000123");
   assert.deepEqual(Object.keys(exact).sort(), ["endDate", "queryExpression", "resumeMode", "searchLogic", "searchMode", "sources", "startDate"]);
 
+  const blockedLabelSource = readNamedFunction(html, "todayFetchBlockedLabel", "todayFetchActionState");
   const actionSource = readNamedFunction(html, "todayFetchActionState", "loadTodayFetchSessions");
-  const todayFetchActionState = new Function(`${actionSource}; return todayFetchActionState;`)();
+  const actionApi = new Function(`${blockedLabelSource}; ${actionSource}; return { todayFetchBlockedLabel, todayFetchActionState };`)();
+  const { todayFetchBlockedLabel, todayFetchActionState } = actionApi;
+  assert.equal(todayFetchBlockedLabel({ searchMode: "direction", sources: ["webofscience"] }, "", { valid: true }), "请先点亮关键词");
+  assert.equal(todayFetchBlockedLabel({ searchMode: "exact", sources: ["webofscience"] }, "", { valid: true }), "请输入论文信息");
+  assert.equal(todayFetchBlockedLabel({ searchMode: "direction", sources: [] }, "SIM", { valid: true }), "请选择抓取信源");
+  assert.equal(todayFetchBlockedLabel({ searchMode: "direction", sources: ["webofscience"] }, "SIM", { valid: false }), "请检查时间范围");
+  assert.equal(todayFetchBlockedLabel({ searchMode: "direction", sources: ["webofscience"] }, "SIM", { valid: true }), "");
+  assert.equal(todayFetchActionState({}, "idle", null, "请先点亮关键词").primaryLabel, "请先点亮关键词");
   assert.deepEqual(todayFetchActionState({ taskFingerprint: "same", resumable: true }, "ready"), {
     primaryLabel: "继续抓取",
     resumeMode: "resume",
@@ -1057,12 +1154,16 @@ test("today results use fixed source tabs and automatic 15-paper batches", async
   assert.deepEqual(api.todayPapersForSource(papers, "all").map(paper => paper.id), ["w", "g", "a", "b", "s"]);
   assert.equal(api.nextTodayLoadedCount(15), 30);
 
+  const lookupSource = readNamedFunction(html, "paperLookupKeys", "paperRetryIdentityMatches");
   const resultSource = readNamedFunction(html, "todayResultPapers", "todayDefaultSourceTab");
   const tabSource = readNamedFunction(html, "todayDefaultSourceTab", "todayVisiblePaperList");
-  const { todayResultPapers, todayDefaultSourceTab } = new Function(`${sourceKeySource}; ${sourceFilterSource}; ${resultSource}; ${tabSource}; return { todayResultPapers, todayDefaultSourceTab };`)();
-  assert.deepEqual(todayResultPapers({ newPapers: [{ id: "new" }], papers: [{ id: "archive" }] }, "direction"), [{ id: "new" }]);
+  const { todayResultPapers, todayDefaultSourceTab } = new Function(`${lookupSource}; ${sourceKeySource}; ${sourceFilterSource}; ${resultSource}; ${tabSource}; return { todayResultPapers, todayDefaultSourceTab };`)();
+  assert.deepEqual(todayResultPapers({ newPapers: [{ id: "new" }], papers: [{ id: "new" }, { id: "archive" }] }, "direction"), [
+    { id: "new", archivedBeforeFetch: false },
+    { id: "archive", archivedBeforeFetch: true }
+  ]);
   assert.deepEqual(todayResultPapers({ exactCandidates: [{ id: "candidate" }], newPapers: [] }, "exact"), [{ id: "candidate" }]);
-  assert.deepEqual(todayResultPapers({ exactCandidates: [], newPapers: [], papers: [{ id: "already-archived" }] }, "exact"), [{ id: "already-archived" }]);
+  assert.deepEqual(todayResultPapers({ exactCandidates: [], newPapers: [], papers: [{ id: "already-archived" }] }, "exact"), [{ id: "already-archived", archivedBeforeFetch: true }]);
   const tabPapers = [
     { id: "a", retrievalSource: "arxiv" },
     { id: "g", retrievalSource: "googlescholar" }
@@ -1070,6 +1171,9 @@ test("today results use fixed source tabs and automatic 15-paper batches", async
   assert.equal(todayDefaultSourceTab(tabPapers, ["arXiv", "Google Scholar"]), "googlescholar");
   assert.equal(todayDefaultSourceTab([{ id: "a", retrievalSource: "arxiv" }], ["arXiv"]), "preprints");
   assert.equal(todayDefaultSourceTab([], ["Web of Science"]), "all");
+  const applySource = readNamedFunction(html, "applyPaperPayload", "refreshJournalMetrics");
+  assert.match(applySource, /本次命中.*其中新增/);
+  assert.doesNotMatch(applySource, /本次找到.*篇新论文|本次没有新增论文/);
 
   const matchSource = readNamedFunction(html, "todayFilterValueMatches", "todayPaperMatchesFilters");
   const todayFilterValueMatches = new Function(`${sourceKeySource}; ${matchSource}; return todayFilterValueMatches;`)();
@@ -1368,6 +1472,16 @@ test("today task failures and LLM retries persist updated session metadata by fi
   assert.equal(merged[1], sessions[1]);
   assert.match(html, /persistTodayFetchSessionTaskMeta\(paperDataMeta\)/);
   assert.match(html, /function clearPaperLlmFailure[\s\S]*todayFetchSessions[\s\S]*saveTodayFetchSessions\(\)/);
+});
+
+test("archive reload hydrates saved today sessions and clears resolved LLM failures", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const loadSource = readNamedFunction(html, "loadArchiveData", "paperRefreshBody");
+  const syncSource = readNamedFunction(html, "syncTodayFetchSessionsFromPaperPool", "saveTodayFetchSession");
+
+  assert.match(loadSource, /syncTodayFetchSessionsFromPaperPool\(recentPapers\)/);
+  assert.match(syncSource, /removePaperLlmFailure/);
+  assert.match(syncSource, /tokenUsage\?\.status === "已调用 AI"/);
 });
 
 test("a first failed today task persists independently of result sessions", async () => {

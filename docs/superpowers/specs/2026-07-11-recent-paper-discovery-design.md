@@ -124,7 +124,7 @@ SIM OR RIM
 
 日期尽量在信源请求端限制：
 
-- WoS 使用 `publishTimeSpan`。
+- WoS 使用 `modifiedTimeSpan` 限制记录最近修改/收录窗口，并按 `LD+D` 排序；该字段不是论文发表日期，发表日期仍由后续元数据补全确认。
 - bioRxiv 使用开始和结束日期接口。
 - arXiv 按最新结果分页，遇到早于开始日期的记录后停止。
 - Google Scholar 使用来源可支持的日期条件，并通过 Crossref 或出版方元数据补全日期。

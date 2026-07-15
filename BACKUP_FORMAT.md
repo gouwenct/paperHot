@@ -85,6 +85,8 @@ data/papers/fetch-log.json
 data/papers/operation-log.jsonl
 ```
 
+`fetch-log.json` 的新记录可包含 `candidateSnapshots.afterDateEnrichment`、`candidateSnapshots.finalDateMatched` 和 `pipelineCounts.dateConfirmed`，用于在统计页对比日期补全前后结果。字段均为可选，旧 v1 抓取日志缺少这些字段时继续兼容读取，因此备份版本保持为 `1`。
+
 近期抓取断点 `data/papers/recent-fetch-cursors.json` 是只对当前设备和完全相同任务有效的短期运行态。Google、WoS、arXiv 等每个启用信源只保存 `nextPage` 和 `complete`；恢复时跳过已完成信源，从未完成信源的 `nextPage` 继续，全部启用信源完成后删除该任务。Google 的近期抓取和指定论文检索不与旧 `google-rolling-cursors.json` 同步。该文件不进入默认或任何可选导出。
 
 `data/papers/web-of-science-usage.json` 只保存 PaperHot 本地聚合请求次数、日/月计数和最后状态，不保存请求 URL、查询表达式、Header 或 API Key。它只在 `includeStats=true` 时进入 ZIP，并通过导入白名单恢复。旧 v1 备份没有该可选文件时继续正常导入，因此备份版本保持 `1`。

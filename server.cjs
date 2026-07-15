@@ -6,6 +6,7 @@ const {
   buildDiscoveryTaskContext,
   buildDiscoveryTaskDescriptor,
   buildTokenStats,
+  clearUnstarredPaperArchive,
   dedupePaperArchive,
   exportLocalDataZip,
   fetchLast7DaysPapers,
@@ -517,6 +518,11 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && pathname === "/api/archive/dedupe") {
     const payload = await dedupePaperArchive();
     sendJson(res, 200, payload);
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/api/archive/clear-unstarred") {
+    sendJson(res, 200, await clearUnstarredPaperArchive());
     return true;
   }
 

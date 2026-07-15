@@ -20,6 +20,7 @@ const {
   buildSearchExpression,
   buildTokenStats,
   enrichPapersWithCrossref,
+  enrichPapersWithPublisherDates,
   enrichPapersWithJournalMetrics,
   enrichPapersWithLlmInsights,
   enrichTruncatedGoogleTitles,
@@ -47,6 +48,7 @@ const {
   appendFetchLog,
   appendOperationLog,
   testLlmConfig,
+  todayString,
   readIntegrationConfigs,
   readIntegrationSecrets,
   readJournalMetricsConfig,
@@ -57,6 +59,7 @@ const {
   readUserState,
   addCandidatePaperToArchive,
   removeCandidatePaperFromArchive,
+  clearUnstarredPaperArchive,
   dedupePaperArchive,
   readArchivePayload,
   refreshJournalMetricsForArchive,
@@ -263,6 +266,17 @@ test("normalizes Web of Science records into the frontend paper schema", () => {
   assert.deepEqual(paper.authors, ["A. Author", "B. Scientist"]);
   assert.ok(paper.tags.includes("Web of Science"));
   assert.match(paper.citation, /A\. Author, B\. Scientist \(2026\)\. Structured illumination microscopy reconstruction with diffusion priors\. Nature Methods\. doi:10\.1038\/s41592-026-00001-1/);
+});
+
+test("normalizes Web of Science English publication months without inventing a day", () => {
+  const paper = normalizeWebOfScienceRecord({
+    uid: "WOS:MONTH",
+    title: "Structured illumination microscopy month metadata",
+    source: { sourceTitle: "Optica", publishYear: 2026, publishMonth: "JUL" }
+  }, ["structured illumination microscopy"]);
+
+  assert.equal(paper.published, "2026-07");
+  assert.equal(paper.publishedPrecision, "month");
 });
 
 test("source normalizers preserve citation database and preprint stage", () => {
@@ -744,6 +758,7 @@ test("fetch log records per-source counts when papers were fetched", async () =>
     keywordMatched: 1,
     domainMatched: 1,
     dateMatched: 1,
+    dateConfirmed: 1,
     ranked: 1
   });
   const arxivSource = entries[0].sources.find(s => s.api === "arxiv");
@@ -1240,6 +1255,55 @@ test("fetch log keeps keyword-matched paper candidates before domain filtering",
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
+test("fetch log preserves Crossref dates before and after final date confirmation", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-fetchlog-confirmed-dates-"));
+  const outsideTitle = "Structured illumination microscopy outside final date range";
+  const insideTitle = "Structured illumination microscopy inside final date range";
+  try {
+    await fetchRecentPapers({
+      dataDir: tempDir,
+      date: "2026-07-15",
+      startDate: "2026-06-15",
+      endDate: "2026-07-15",
+      keywords: ["structured illumination microscopy"],
+      sources: ["Google Scholar"],
+      fetchers: {
+        googlescholar: async () => [
+          { title: outsideTitle, summary: "Structured illumination microscopy.", source: "Google Scholar · Optica", sourceType: "论文搜索", published: "2026", score: 90 },
+          { title: insideTitle, summary: "Structured illumination microscopy.", source: "Google Scholar · Optica", sourceType: "论文搜索", published: "2026", score: 89 }
+        ],
+        crossref: async paper => ({
+          doi: paper.title === outsideTitle ? "10.1000/outside" : "10.1000/inside",
+          title: paper.title,
+          journal: "Optica",
+          published: paper.title === outsideTitle ? "2026-05-20" : "2026-07-01"
+        }),
+        llm: async () => ({
+          abstractZh: "中文摘要",
+          reason: "推荐理由",
+          tokenUsage: { prompt: 1, completion: 1, total: 2, model: "test", status: "已调用 AI" }
+        })
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    const [entry] = await readFetchLog(tempDir);
+    assert.equal(entry.pipelineCounts.dateMatched, 2);
+    assert.equal(entry.pipelineCounts.dateConfirmed, 1);
+    assert.deepEqual(entry.candidateSnapshots.afterDateEnrichment.papers.map(paper => [paper.title, paper.published]), [
+      [outsideTitle, "2026-05-20"],
+      [insideTitle, "2026-07-01"]
+    ]);
+    assert.deepEqual(entry.candidateSnapshots.finalDateMatched.papers.map(paper => [paper.title, paper.published]), [
+      [insideTitle, "2026-07-01"]
+    ]);
+    assert.equal(entry.newFetchedCount, 1);
+    assert.equal(entry.fetchedCount, 1);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("adds candidate paper snapshots to archive without duplicating existing papers", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-candidate-add-"));
   const candidate = {
@@ -1434,8 +1498,15 @@ test("recent paper mode filters papers from configured date range", async () => 
         }
       ],
       biorxiv: async () => [],
-      semanticscholar: async () => []
-    }
+      semanticscholar: async () => [],
+      crossref: async () => null,
+      llm: async ({ paper }) => ({
+        abstractZh: paper.summary,
+        reason: "测试。",
+        tokenUsage: { status: "已调用 AI" }
+      })
+    },
+    journalMetrics: { config: { enabled: false } }
   });
 
   assert.equal(payload.count, 1);
@@ -1515,6 +1586,46 @@ test("recent paper mode does not archive undated Google web papers after enrichm
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
+test("recent refresh keeps and enriches year-only candidates whose year overlaps the range", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-strict-date-"));
+  const calledIds = [];
+  try {
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      date: "2026-06-30",
+      startDate: "2026-06-01",
+      endDate: "2026-06-30",
+      keywords: ["structured illumination microscopy"],
+      searchLogic: { activeKeywords: ["structured illumination microscopy"], andEdges: [] },
+      sources: ["arXiv"],
+      fetchers: {
+        arxiv: async () => [
+          { id: "year-only", title: "Structured illumination microscopy year-only candidate", summary: "Structured illumination microscopy abstract", published: "2026", source: "arXiv", sourceType: "预印本", score: 80 },
+          { id: "dated", title: "Structured illumination microscopy dated candidate", summary: "Structured illumination microscopy abstract", published: "2026-06-15", source: "arXiv", sourceType: "预印本", score: 79 }
+        ],
+        crossref: async () => null,
+        llm: async ({ paper }) => {
+          calledIds.push(paper.id);
+          return {
+            abstractZh: "中文摘要",
+            reason: "推荐理由",
+            shortTitle: "2026@",
+            tokenUsage: { prompt: 1, completion: 1, total: 2, model: "test", status: "已调用 AI" }
+          };
+        }
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    assert.deepEqual(calledIds, ["year-only", "dated"]);
+    assert.deepEqual(payload.papers.map(paper => paper.id), ["dated", "year-only"]);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("recent paper refresh keeps previous cache in archive without displaying it", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-archive-cache-"));
   await fs.writeFile(path.join(tempDir, "2026-06-19-recent.json"), JSON.stringify({
@@ -1551,6 +1662,48 @@ test("recent paper refresh keeps previous cache in archive without displaying it
   assert.match(payload.archiveFile, /archive\.json$/);
   const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
   assert.equal(archive.papers[0].title, "AD-Relight");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("cached replay cannot downgrade completed archive LLM insights", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-cache-llm-status-"));
+  const completed = {
+    id: "completed-llm-paper",
+    title: "Completed structured illumination microscopy paper",
+    summary: "Source abstract.",
+    abstractZh: "中文摘要。",
+    reason: "推荐理由。",
+    shortTitle: "2026@",
+    published: "2026-06-15",
+    source: "Google Scholar",
+    sourceType: "论文数据库",
+    tokenUsage: { prompt: 4, completion: 5, total: 9, model: "test", status: "已调用 AI" }
+  };
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({ mode: "archive", count: 1, papers: [completed] }, null, 2)}\n`, "utf8");
+  await fs.writeFile(path.join(tempDir, "2026-06-20-recent.json"), `${JSON.stringify({
+    mode: "recent",
+    date: "2026-06-20",
+    startDate: "2026-06-01",
+    endDate: "2026-06-30",
+    keywords: [],
+    sources: [],
+    papers: [{ ...completed, abstractZh: "", tokenUsage: { prompt: 0, completion: 0, total: 0, status: "未调用 AI" } }]
+  }, null, 2)}\n`, "utf8");
+
+  await fetchRecentPapers({
+    refresh: false,
+    dataDir: tempDir,
+    date: "2026-06-20",
+    startDate: "2026-06-01",
+    endDate: "2026-06-30",
+    llm: { config: { enabled: false } },
+    journalMetrics: { config: { enabled: false } }
+  });
+  const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+
+  assert.equal(archive.papers[0].tokenUsage.status, "已调用 AI");
+  assert.equal(archive.papers[0].tokenUsage.total, 9);
+  assert.equal(archive.papers[0].abstractZh, "中文摘要。");
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -1698,6 +1851,46 @@ test("manual archive dedupe collapses duplicate DOI records only when requested"
   assert.equal(archive.papers.length, 1);
   assert.equal(archive.papers[0].abstractZh, "重复论文的中文摘要。");
   await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("clear unstarred archive preserves starred papers and favorite snapshots", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-clear-unstarred-"));
+  const starred = { id: "starred", doi: "10.1000/starred", title: "Starred paper", score: 90 };
+  const favorite = { id: "favorite", doi: "10.1000/favorite", title: "Favorite paper", score: 80 };
+  const plain = { id: "plain", doi: "10.1000/plain", title: "Plain paper", score: 70 };
+  const favoritesPayload = {
+    mode: "favorites",
+    favorites: [{ key: favorite.doi, keys: [favorite.doi], paper: favorite, addedAt: "2026-07-15T00:00:00.000Z" }]
+  };
+  const notesPayload = {
+    mode: "paper-notes",
+    notes: [{ key: starred.doi, keys: [starred.doi], paper: starred, shortTitle: "2026@STAR", read: false, starred: true, updatedAt: "2026-07-15T00:00:00.000Z" }]
+  };
+
+  try {
+    await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({ mode: "archive", count: 3, papers: [starred, favorite, plain] }, null, 2)}\n`, "utf8");
+    await fs.writeFile(path.join(tempDir, "favorites.json"), `${JSON.stringify(favoritesPayload, null, 2)}\n`, "utf8");
+    await fs.writeFile(path.join(tempDir, "paper-notes.json"), `${JSON.stringify(notesPayload, null, 2)}\n`, "utf8");
+    const favoritesBefore = await fs.readFile(path.join(tempDir, "favorites.json"), "utf8");
+    const notesBefore = await fs.readFile(path.join(tempDir, "paper-notes.json"), "utf8");
+
+    const result = await clearUnstarredPaperArchive({ dataDir: tempDir });
+    const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+    const favorites = await readFavoritesPayload({ dataDir: tempDir });
+    const operations = await readOperationLog(tempDir);
+
+    assert.deepEqual({ before: result.beforeCount, after: result.afterCount, removed: result.removedCount, starred: result.preservedStarredCount }, {
+      before: 3, after: 1, removed: 2, starred: 1
+    });
+    assert.deepEqual(archive.papers.map(paper => paper.id), ["starred"]);
+    assert.equal(await fs.readFile(path.join(tempDir, "favorites.json"), "utf8"), favoritesBefore);
+    assert.equal(await fs.readFile(path.join(tempDir, "paper-notes.json"), "utf8"), notesBefore);
+    assert.deepEqual(favorites.papers.map(paper => paper.id), ["favorite"]);
+    assert.equal(operations[0].operation, "archive-clear-unstarred");
+    assert.equal(operations[0].action, "delete");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("operation log appends entries without trimming old records", async () => {
@@ -2005,6 +2198,99 @@ test("Crossref date parts preserve year month and day precision", async () => {
   }
 });
 
+test("Crossref chooses the most precise publication date", async () => {
+  const metadata = await fetchCrossrefWorkByDoi("10.1364/oe.603209", {
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        message: {
+          DOI: "10.1364/oe.603209",
+          title: ["Generalized low-pass filtering in structured illumination microscopy"],
+          published: { "date-parts": [[2026]] },
+          "published-print": { "date-parts": [[2026, 7]] },
+          "published-online": { "date-parts": [[2026, 6, 27]] },
+          issued: { "date-parts": [[2026, 7]] }
+        }
+      })
+    })
+  });
+
+  assert.equal(metadata.published, "2026-06-27");
+});
+
+test("Crossref enriches an existing DOI when its publication date is incomplete", async () => {
+  let calls = 0;
+  const title = "Structured illumination microscopy with an existing DOI";
+  const [paper] = await enrichPapersWithCrossref([{
+    title,
+    retrievalSource: "webofscience",
+    doi: "10.1364/oe.603209",
+    journal: "Optics Express",
+    published: "2026"
+  }], {
+    fetcher: async () => {
+      calls += 1;
+      return {
+        doi: "10.1364/oe.603209",
+        title,
+        journal: "Optics Express",
+        published: "2026-06-27"
+      };
+    }
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(paper.published, "2026-06-27");
+  assert.equal(paper.publishedPrecision, "day");
+});
+
+test("publisher DOI metadata fills a day-level date when Crossref remains imprecise", async () => {
+  const [paper] = await enrichPapersWithPublisherDates([{
+    title: "Structured illumination microscopy publisher date",
+    retrievalSource: "webofscience",
+    doi: "10.1364/oe.603209",
+    journal: "Optics Express",
+    published: "2026"
+  }], {
+    fetchImpl: async url => {
+      assert.equal(String(url), "https://doi.org/10.1364/oe.603209");
+      return {
+        ok: true,
+        text: async () => '<meta name="citation_publication_date" content="2026-06-27">'
+      };
+    }
+  });
+
+  assert.equal(paper.published, "2026-06-27");
+  assert.equal(paper.publishedPrecision, "day");
+});
+
+test("publisher DOI metadata does not invent January first from a year-only date", async () => {
+  const [paper] = await enrichPapersWithPublisherDates([{
+    title: "Structured illumination microscopy publisher year",
+    retrievalSource: "webofscience",
+    doi: "10.1364/oe.603209",
+    published: "2026"
+  }], {
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => '<meta name="citation_publication_date" content="2026">'
+    })
+  });
+
+  assert.equal(paper.published, "2026");
+  assert.equal(paper.publishedPrecision, "year");
+});
+
+test("date range keeps month-level metadata when the month overlaps the requested window", () => {
+  const papers = filterPapersByDateRange([
+    { title: "overlapping month", published: "2026-06" },
+    { title: "older month", published: "2026-05" }
+  ], "2026-06-15", "2026-07-15");
+
+  assert.deepEqual(papers.map(paper => paper.title), ["overlapping month"]);
+});
+
 test("uses Nature article URLs to fetch DOI metadata for truncated Google titles", async () => {
   const [paper] = await enrichPapersWithCrossref([
     {
@@ -2294,6 +2580,60 @@ test("calls OpenAI-compatible LLM with chat completions path", async () => {
   assert.equal(papers[0].tokenUsage.model, "qwen-plus");
 });
 
+test("configured LLM allows slow providers up to sixty seconds", async () => {
+  const source = await fs.readFile(path.join(__dirname, "..", "paperhot_backend.cjs"), "utf8");
+  assert.match(source, /AbortSignal\.timeout\(60000\)/);
+});
+
+test("LLM enrichment limits concurrent requests and preserves paper order", async () => {
+  let active = 0;
+  let maxActive = 0;
+  const papers = Array.from({ length: 5 }, (_, index) => ({
+    id: `llm-concurrency-${index}`,
+    title: `SIM paper ${index}`,
+    summary: `Abstract ${index}`
+  }));
+
+  const enriched = await enrichPapersWithLlmInsights(papers, {
+    fetcher: async ({ paper }) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      active -= 1;
+      return {
+        abstractZh: `中文摘要 ${paper.id}`,
+        reason: "推荐理由",
+        tokenUsage: { status: "已调用 AI" }
+      };
+    }
+  });
+
+  assert.equal(maxActive, 2);
+  assert.deepEqual(enriched.map(paper => paper.id), papers.map(paper => paper.id));
+});
+
+test("Crossref enrichment limits concurrent requests and preserves paper order", async () => {
+  let active = 0;
+  let maxActive = 0;
+  const papers = Array.from({ length: 5 }, (_, index) => ({
+    id: `crossref-concurrency-${index}`,
+    title: `Structured illumination microscopy paper ${index}`
+  }));
+
+  const enriched = await enrichPapersWithCrossref(papers, {
+    fetcher: async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      active -= 1;
+      return null;
+    }
+  });
+
+  assert.equal(maxActive, 2);
+  assert.deepEqual(enriched.map(paper => paper.id), papers.map(paper => paper.id));
+});
+
 test("uses LLM output for Chinese summaries and background-aware recommendations", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-archive-"));
   const llmBackgrounds = [];
@@ -2457,6 +2797,34 @@ test("refreshes one archived paper with LLM when requested", async () => {
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
+test("single-paper LLM failure stays failed and does not rewrite the archive", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-archive-llm-failure-"));
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    count: 1,
+    papers: [{
+      id: "still-failed",
+      title: "Structured illumination microscopy timeout",
+      summary: "Source abstract.",
+      reason: "旧理由",
+      tokenUsage: { status: "未调用 AI" }
+    }]
+  }, null, 2)}\n`, "utf8");
+
+  const payload = await refreshArchivePaperLlmInsight({
+    id: "still-failed",
+    fetcher: async () => { throw new Error("LLM timeout"); }
+  }, { dataDir: tempDir });
+  const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+
+  assert.equal(payload.updated, false);
+  assert.equal(payload.existed, true);
+  assert.match(payload.errors[0].message, /timeout/);
+  assert.equal(archive.papers[0].reason, "旧理由");
+  assert.equal(archive.papers[0].llmUpdatedAt, undefined);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
 test("single-paper LLM refresh does not match a different paper with the same title", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-archive-llm-identity-"));
   await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
@@ -2596,6 +2964,37 @@ test("refreshes missing archive LLM insights in bulk and skips completed papers"
   assert.equal(archive.papers.find(paper => paper.id === "missing-abstract").shortTitle, "2026@");
   assert.equal(archive.papers.find(paper => paper.id === "missing-reason").reason, "missing-reason 推荐理由");
   assert.equal(operations[0].operation, "archive-llm-refresh-missing");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("bulk LLM refresh counts only successful papers", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-archive-llm-partial-"));
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    count: 2,
+    papers: [
+      { id: "llm-success", title: "Successful SIM paper", summary: "Source abstract.", reason: "旧理由", tokenUsage: { status: "未调用 AI" } },
+      { id: "llm-failure", title: "Failed SIM paper", summary: "Source abstract.", reason: "保留理由", tokenUsage: { status: "未调用 AI" } }
+    ]
+  }, null, 2)}\n`, "utf8");
+
+  const payload = await refreshArchiveLlmInsights({
+    fetcher: async ({ paper }) => {
+      if (paper.id === "llm-failure") throw new Error("provider timeout");
+      return {
+        abstractZh: "中文摘要",
+        reason: "新理由",
+        tokenUsage: { prompt: 1, completion: 1, total: 2, model: "test", status: "已调用 AI" }
+      };
+    }
+  }, { dataDir: tempDir });
+  const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+
+  assert.equal(payload.updatedCount, 1);
+  assert.equal(payload.errors.length, 1);
+  assert.equal(archive.papers.find(paper => paper.id === "llm-success").reason, "新理由");
+  assert.equal(archive.papers.find(paper => paper.id === "llm-failure").reason, "保留理由");
+  assert.equal(archive.papers.find(paper => paper.id === "llm-failure").llmUpdatedAt, undefined);
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -3073,7 +3472,7 @@ test("fetches Web of Science papers through a configured API source with limited
   assert.deepEqual(seen.map(item => item.page), [1, 2]);
   assert.equal(seen[0].limit, "2");
   assert.equal(seen[0].db, "WOS");
-  assert.match(seen[0].query, /TS=\(structured illumination microscopy\)/);
+  assert.equal(seen[0].query, 'TS=("structured illumination microscopy")');
   assert.equal(seen[0].apiKey, "wos-key");
   assert.equal(papers.length, 3);
   assert.equal(papers[0].source, "Web of Science · Nature Methods");
@@ -3081,7 +3480,25 @@ test("fetches Web of Science papers through a configured API source with limited
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
-test("WoS request sends publishTimeSpan, resumes, and stops after a short page", async () => {
+test("WoS reports a disabled integration separately from missing configuration", async () => {
+  const baseConfig = {
+    endpoint: "https://api.clarivate.test/apis/wos-starter/v1/documents",
+    apiKey: "saved-key",
+    request: {},
+    responseMap: {}
+  };
+
+  await assert.rejects(
+    fetchWebOfSciencePapers(["SIM"], { config: { ...baseConfig, enabled: false } }),
+    /API 已关闭/
+  );
+  await assert.rejects(
+    fetchWebOfSciencePapers(["SIM"], { config: { ...baseConfig, enabled: true, apiKey: "" } }),
+    /信源未配置/
+  );
+});
+
+test("WoS request quotes Boolean keywords, sends a modified-time window, resumes, and stops after a short page", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-wos-resume-"));
   const urls = [];
   const completedPages = [];
@@ -3107,7 +3524,11 @@ test("WoS request sends publishTimeSpan, resumes, and stops after a short page",
         },
         responseMap: { items: "hits" }
       },
-      queryExpression: "SIM OR RIM",
+      queryExpression: "(SIM AND super resolution) OR RIM",
+      searchLogic: {
+        activeKeywords: ["SIM", "super resolution", "RIM"],
+        andEdges: [["SIM", "super resolution"]]
+      },
       startDate: "2026-01-01",
       endDate: "2026-06-30",
       startPage: 4,
@@ -3122,8 +3543,10 @@ test("WoS request sends publishTimeSpan, resumes, and stops after a short page",
     const request = new URL(urls[0]);
     assert.equal(request.origin + request.pathname, "https://api.clarivate.com/apis/wos-starter/v1/documents");
     assert.equal(request.searchParams.get("page"), "4");
-    assert.equal(request.searchParams.get("publishTimeSpan"), "2026-01-01+2026-06-30");
-    assert.match(request.searchParams.get("q"), /SIM OR RIM/);
+    assert.equal(request.searchParams.get("modifiedTimeSpan"), "2026-01-01+2026-06-30");
+    assert.equal(request.searchParams.get("sortField"), "LD+D");
+    assert.equal(request.searchParams.has("publishTimeSpan"), false);
+    assert.equal(request.searchParams.get("q"), 'TS=(("SIM" AND "super resolution") OR "RIM")');
     assert.deepEqual(completedPages, [{ page: 4, nextPage: 5, returned: 0, complete: true }]);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
@@ -3845,6 +4268,58 @@ test("direction fetch pipeline uses the Boolean search graph instead of naive OR
     });
 
     assert.deepEqual(payload.newPapers.map(paper => paper.id), ["sim-rim"]);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("direction fetch trusts WoS query matches while still filtering other sources locally", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-wos-trusted-query-"));
+  try {
+    const payload = await fetchPaperPayload({
+      dataDir: tempDir,
+      refresh: true,
+      mode: "recent",
+      searchMode: "direction",
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      keywords: ["structured illumination microscopy"],
+      searchLogic: { activeKeywords: ["structured illumination microscopy"], andEdges: [] },
+      sources: ["Web of Science", "Google Scholar"],
+      webOfScience: {
+        config: {
+          enabled: true,
+          endpoint: "https://api.clarivate.test/apis/wos-starter/v1/documents",
+          apiKey: "test-key",
+          databaseId: "WOS",
+          maxPages: 1,
+          pageSize: 20,
+          queryTemplate: "TS=({query})",
+          request: { apiKeyHeader: "X-ApiKey", useApiKeyHeader: true },
+          responseMap: { items: "hits", title: "title", year: "source.publishYear" }
+        },
+        fetchImpl: async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({ hits: [{ uid: "WOS:TRUSTED", title: "Sparse Starter record", source: { publishYear: 2026 } }] })
+        })
+      },
+      fetchers: {
+        googlescholar: async () => [
+          { id: "scholar-match", retrievalSource: "googlescholar", title: "Structured illumination microscopy advances", summary: "Microscopy study.", source: "Google Scholar", published: "2026-01-10", tags: [], score: 80 },
+          { id: "scholar-unrelated", retrievalSource: "googlescholar", title: "Unrelated chemistry study", summary: "Catalysis.", source: "Google Scholar", published: "2026-01-10", tags: [], score: 70 }
+        ],
+        crossref: async () => null,
+        llm: async ({ paper }) => ({ abstractZh: paper.summary || "无摘要", reason: "测试。", tokenUsage: { status: "已调用 AI" } })
+      },
+      journalMetrics: { config: { enabled: false } }
+    });
+
+    assert.deepEqual(
+      payload.newPapers.map(paper => paper.id).sort(),
+      ["scholar-match", "webofscience-wos-trusted"],
+      JSON.stringify({ sourceResults: payload.sourceResults, errors: payload.errors, papers: payload.papers.map(paper => paper.id) })
+    );
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
@@ -5821,6 +6296,8 @@ test("uses empty keyword defaults when user config is missing", async () => {
 test("reads Web of Science configuration without embedding secrets in integration state", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-wos-config-"));
   const webOfScienceConfigFile = path.join(tempDir, "web-of-science.json");
+  const currentDay = todayString();
+  const currentMonth = currentDay.slice(0, 7);
   await fs.writeFile(webOfScienceConfigFile, JSON.stringify({
     provider: "web-of-science",
     enabled: true,
@@ -5836,8 +6313,8 @@ test("reads Web of Science configuration without embedding secrets in integratio
   await fs.writeFile(path.join(tempDir, "web-of-science-usage.json"), JSON.stringify({
     trackingStartedAt: "2026-07-01T00:00:00.000Z",
     totalCount: 5,
-    months: { "2026-07": 5 },
-    days: { "2026-07-13": 2 },
+    months: { [currentMonth]: 5 },
+    days: { [currentDay]: 2 },
     lastRequestAt: "2026-07-13T01:00:00.000Z",
     lastStatus: "ok"
   }), "utf8");

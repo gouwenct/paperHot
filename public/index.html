@@ -2195,6 +2195,7 @@
     let fetchLogEntries = [];
     let fetchLogStatus = "";
     let activeFetchLogDetailIndex = null;
+    let candidateDetailStage = "afterDateEnrichment";
     let operationLogEntries = [];
     let operationLogStatus = "";
     let candidateDetailSort = { field: "index", direction: "asc" };
@@ -2463,13 +2464,22 @@
       ));
     }
 
-    function todayFetchActionState(taskState = {}, preflightStatus = "idle", runningTask = null) {
+    function todayFetchBlockedLabel(state = {}, expression = "", rangeValidation = { valid: true }) {
+      if (!String(expression).trim()) return state.searchMode === "exact" ? "请输入论文信息" : "请先点亮关键词";
+      if (!Array.isArray(state.sources) || !state.sources.length) return "请选择抓取信源";
+      if (rangeValidation.valid === false) return "请检查时间范围";
+      return "";
+    }
+
+    function todayFetchActionState(taskState = {}, preflightStatus = "idle", runningTask = null, blockedLabel = "") {
       if (runningTask) {
         return { primaryLabel: "抓取中", resumeMode: "", showRestart: false, disabled: true };
       }
       if (preflightStatus !== "ready") {
         return {
-          primaryLabel: preflightStatus === "loading" ? "检查断点中" : "等待断点确认",
+          primaryLabel: preflightStatus === "loading"
+            ? "检查断点中"
+            : blockedLabel || (preflightStatus === "error" ? "断点检查失败" : "等待断点确认"),
           resumeMode: "",
           showRestart: false,
           disabled: true
@@ -2763,16 +2773,23 @@
       let changed = false;
       todayFetchSessions = todayFetchSessions.map(session => {
         const papers = session.papers.map(paper => hydratePaperFromLookup(paper, lookup));
+        const errors = papers.reduce((currentErrors, paper) => (
+          paper.tokenUsage?.status === "已调用 AI"
+            ? removePaperLlmFailure(currentErrors, paper)
+            : currentErrors
+        ), Array.isArray(session.meta?.errors) ? session.meta.errors : []);
         const sessionChanged = papers.some((paper, index) =>
           paper.abstractZh !== session.papers[index]?.abstractZh ||
-          paper.summary !== session.papers[index]?.summary
-        );
+          paper.summary !== session.papers[index]?.summary ||
+          paper.reason !== session.papers[index]?.reason ||
+          paper.tokenUsage?.status !== session.papers[index]?.tokenUsage?.status
+        ) || errors.length !== (session.meta?.errors || []).length;
         if (!sessionChanged) return session;
         changed = true;
         return {
           ...session,
           papers,
-          meta: session.meta ? { ...session.meta, papers, count: papers.length } : session.meta
+          meta: session.meta ? { ...session.meta, papers, count: papers.length, errors } : session.meta
         };
       });
       if (!changed) return false;
@@ -2978,7 +2995,7 @@
       const paperId = escapeHTML(paper.id);
       const stableKey = paperStableKey(paper) || paper.id || "";
       const isPendingFavoriteRead = scope === "favorites" && favoriteActiveTab === "reading" && pendingFavoriteReadTimers.has(stableKey);
-      const isSavedMuted = isSaved && scope !== "favorites";
+      const isSavedMuted = scope !== "favorites" && (isSaved || (scope === "today" && paper.archivedBeforeFetch === true));
       const labelList = paperCategoryLabels(paper);
       const tokenUsage = paperTokenUsage(paper);
       const journalMetrics = paperJournalMetrics(paper);
@@ -3388,14 +3405,19 @@
       const source = String(paper.retrievalSource || "").toLowerCase().replace(/[^a-z]/g, "");
       if (source === "arxiv") return { value: "arXiv", label: "预印本" };
       if (source === "biorxiv" || source === "bioarxiv") return { value: "bioRxiv", label: "预印本" };
-      if (paper.citationCount === null || paper.citationCount === undefined || paper.citationCount === "") return null;
       const citationSource = String(paper.citationSource || "").toLowerCase();
       const label = source === "webofscience" || citationSource.includes("web of science")
         ? "WoS 引用"
         : source === "semanticscholar" || citationSource.includes("semantic")
           ? "Semantic 引用"
-          : "Scholar 引用";
-      return { value: String(paper.citationCount), label };
+          : source === "googlescholar" || citationSource.includes("google scholar")
+            ? "Scholar 引用"
+            : "";
+      if (!label) return null;
+      const value = paper.citationCount === null || paper.citationCount === undefined || paper.citationCount === ""
+        ? "--"
+        : String(paper.citationCount);
+      return { value, label };
     }
 
     function paperAuthorsLabel(paper) {
@@ -3716,6 +3738,7 @@
           <button class="ghost-btn" data-refresh-archive-llm ${archiveLlmRefreshingAll ? "disabled" : ""}>${archiveLlmRefreshingAll ? "LLM中" : "LLM"}</button>
           <button class="ghost-btn" data-refresh-journals>刷新期刊</button>
           <button class="ghost-btn" data-dedupe-archive>自动去重</button>
+          <button class="ghost-btn" data-clear-unstarred-archive>清空未标星</button>
         </div>
       `;
     }
@@ -4087,10 +4110,11 @@
     function todayQueryControl() {
       const state = todayDiscoveryRequestState();
       const expression = state.searchMode === "exact" ? state.exactInput : buildTodaySearchExpression(state.searchLogic);
-      const action = todayFetchActionState(todayPreflightCanonicalState, todayTaskPreflightStatus, todayRunningTask);
       const rangeValidation = state.searchMode === "direction"
         ? todayFetchRangeValidation(state.fetchRange)
         : { valid: true, error: "" };
+      const blockedLabel = todayFetchBlockedLabel(state, expression, rangeValidation);
+      const action = todayFetchActionState(todayPreflightCanonicalState, todayTaskPreflightStatus, todayRunningTask, blockedLabel);
       const disabled = action.disabled || !state.sources.length || !expression.trim() || !rangeValidation.valid;
       return `
         <div class="today-query-grid">
@@ -4272,9 +4296,13 @@
       if (searchMode === "exact" && Array.isArray(payload.exactCandidates) && payload.exactCandidates.length) {
         return payload.exactCandidates;
       }
-      if (searchMode === "exact") return Array.isArray(payload.papers) ? payload.papers : [];
-      if (Array.isArray(payload.newPapers)) return payload.newPapers;
-      return Array.isArray(payload.papers) ? payload.papers : [];
+      const papers = Array.isArray(payload.papers) ? payload.papers : [];
+      if (!Array.isArray(payload.newPapers)) return papers;
+      const newPaperKeys = new Set(payload.newPapers.flatMap(paperLookupKeys));
+      return papers.map(paper => ({
+        ...paper,
+        archivedBeforeFetch: !paperLookupKeys(paper).some(key => newPaperKeys.has(key))
+      }));
     }
 
     function todayDefaultSourceTab(paperList = [], enabledSources = []) {
@@ -4327,11 +4355,10 @@
       const list = mode === "recent" ? recentPapers : todayPapers;
       const countText = meta ? `${meta.count || list.length} 篇` : `${list.length} 篇示例`;
       const dateText = meta?.date ? `日期：${meta.date}` : "当前为本地示例数据";
-      const errorText = meta?.errors?.length ? `；部分信源失败：${meta.errors.map(item => item.source).join("、")}` : "";
       const journalButton = mode === "recent" ? `<button class="ghost-btn" data-refresh-archive-llm ${archiveLlmRefreshingAll ? "disabled" : ""}>${archiveLlmRefreshingAll ? "LLM中" : "LLM"}</button><button class="ghost-btn" data-refresh-journals>刷新期刊</button><button class="ghost-btn" data-dedupe-archive>自动去重</button>` : "";
       return `
         <div class="status-bar">
-          ${fetchProgress && mode === "today" ? fetchProgressPanel() : `<span>${escapeHTML(status)} · ${escapeHTML(countText)} · ${escapeHTML(dateText + errorText)}</span>`}
+          ${fetchProgress && mode === "today" ? fetchProgressPanel() : `<span>${escapeHTML(status)} · ${escapeHTML(countText)} · ${escapeHTML(dateText)}</span>`}
           <div class="token-row">
             ${journalButton}
           </div>
@@ -4348,7 +4375,8 @@
         ["去重后", counts.deduped],
         ["关键词命中", counts.keywordMatched],
         ["领域过滤", counts.domainMatched],
-        ["日期范围", counts.dateMatched],
+        ["日期粗筛", counts.dateMatched],
+        ["日期确认", counts.dateConfirmed],
         ["候选", counts.ranked],
         ["最终", counts.fetched]
       ].filter(([, value]) => value !== undefined);
@@ -4511,6 +4539,7 @@
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
         recentPapers = Array.isArray(payload.papers) ? payload.papers.map(normalizePaperForView) : [];
+        syncTodayFetchSessionsFromPaperPool(recentPapers);
         recentDataMeta = payload;
         recentDataStatus = `已载入全部论文库 ${recentPapers.length} 篇`;
       } catch (error) {
@@ -4584,15 +4613,16 @@
       if (isRangeFetch) {
         const archivePapers = Array.isArray(payload.papers) ? payload.papers.map(normalizePaperForView) : [];
         const resultPapers = todayResultPapers(payload, discoveryRequest.searchMode).map(normalizePaperForView);
+        const newPaperCount = Array.isArray(payload.newPapers) ? payload.newPapers.length : resultPapers.length;
         todaySourceTab = todaySourceTabForResults(todaySourceTab, resultPapers, discoveryRequest.sources, todaySourceTabUserSelected, true);
         todaySourceTabUserSelected = false;
         recentPapers = mergePaperPool(recentPapers, archivePapers);
         recentDataMeta = payload;
-        recentDataStatus = `本次找到 ${resultPapers.length} 篇新论文`;
+        recentDataStatus = `本次命中 ${resultPapers.length} 篇论文，其中新增 ${newPaperCount} 篇`;
         saveTodayFetchSession(payload, resultPapers);
         todayPapers = resultPapers;
         paperDataMeta = payload;
-        paperDataStatus = resultPapers.length ? `显示 ${activeTodayFetchSession()?.label || rangeText} 抓取结果` : "本次没有新增论文";
+        paperDataStatus = resultPapers.length ? `显示 ${activeTodayFetchSession()?.label || rangeText} 抓取结果` : "本次没有匹配论文";
         resetTodayLoadedCount();
         return;
       }
@@ -4687,6 +4717,37 @@
       renderAll();
     }
 
+    async function clearUnstarredArchive() {
+      if (location.protocol === "file:") {
+        recentDataStatus = "直接打开 HTML 时无法访问后端，无法清空全部论文";
+        renderAll();
+        return;
+      }
+      const preservedStarredCount = recentPapers.filter(isStarredPaper).length;
+      const removedCount = recentPapers.length - preservedStarredCount;
+      if (removedCount <= 0) {
+        showToast("没有未标星论文需要清空");
+        return;
+      }
+      const confirmed = window.confirm(`将从全部论文中删除 ${removedCount} 篇未标星论文，保留 ${preservedStarredCount} 篇标星论文。个人收藏、待读、已读和备注不会删除。确定继续吗？`);
+      if (!confirmed) return;
+
+      recentDataStatus = "正在清空全部论文中的未标星论文...";
+      renderAll();
+      try {
+        const response = await fetch("/api/archive/clear-unstarred", { method: "POST" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        recentPapers = (Array.isArray(payload.papers) ? payload.papers : []).map(normalizePaperForView);
+        recentDataMeta = { ...(recentDataMeta || {}), ...(payload.archive || {}), count: payload.afterCount };
+        recentDataStatus = `已清空未标星论文：移除 ${payload.removedCount || 0} 篇，保留标星 ${payload.preservedStarredCount || 0} 篇`;
+        showToast(`已移除 ${payload.removedCount || 0} 篇未标星论文`);
+      } catch (error) {
+        recentDataStatus = `清空失败：${error.message}`;
+      }
+      renderAll();
+    }
+
     function applyArchivePayload(payload = {}) {
       const archivePapers = Array.isArray(payload.papers)
         ? payload.papers
@@ -4710,8 +4771,9 @@
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
         applyArchivePayload(payload);
-        recentDataStatus = `LLM 完成：更新 ${payload.updatedCount || 0} 篇，跳过 ${payload.skippedCount || 0} 篇`;
-        showToast(`LLM 完成，更新 ${payload.updatedCount || 0} 篇`);
+        const failedCount = Number(payload.failedCount || 0);
+        recentDataStatus = `LLM 完成：更新 ${payload.updatedCount || 0} 篇，失败 ${failedCount} 篇，跳过 ${payload.skippedCount || 0} 篇`;
+        showToast(`LLM 完成，更新 ${payload.updatedCount || 0} 篇${failedCount ? `，失败 ${failedCount} 篇` : ""}`);
       } catch (error) {
         recentDataStatus = `LLM 失败：${error.message}`;
       } finally {
@@ -4770,14 +4832,19 @@
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
+        if (payload.updated !== true) {
+          throw new Error(payload.errors?.[0]?.message || (payload.existed === false
+            ? "没有找到这篇论文的入库记录"
+            : "模型未返回摘要翻译或推荐理由"));
+        }
         applyArchivePayload(payload);
         if (payload.paper) recentPapers = mergePaperPool(recentPapers, [normalizePaperForView(payload.paper)]);
         if (payload.paper) todayPapers = mergePaperPool(todayPapers, [normalizePaperForView(payload.paper)]);
         clearPaperLlmFailure(payload.paper || paper);
-        const statusText = payload.updated ? "已重新生成该论文的摘要翻译和推荐理由" : "没有找到这篇论文的入库记录";
+        const statusText = "已重新生成该论文的摘要翻译和推荐理由";
         recentDataStatus = statusText;
         paperDataStatus = statusText;
-        showToast(payload.updated ? "LLM 已更新该论文" : "没有找到该论文");
+        showToast("LLM 已更新该论文");
       } catch (error) {
         recentDataStatus = `单篇 LLM 失败：${error.message}`;
         paperDataStatus = recentDataStatus;
@@ -5225,6 +5292,9 @@
       document.querySelectorAll("[data-dedupe-archive]").forEach(button => {
         button.addEventListener("click", dedupeArchive);
       });
+      document.querySelectorAll("[data-clear-unstarred-archive]").forEach(button => {
+        button.addEventListener("click", clearUnstarredArchive);
+      });
       document.querySelectorAll("[data-refresh-archive-llm]").forEach(button => {
         button.addEventListener("click", refreshArchiveLlm);
       });
@@ -5450,10 +5520,31 @@
       };
     }
 
+    const fetchLogCandidateStages = [
+      { key: "beforeDomain", title: "领域过滤前候选论文", label: "领域过滤前" },
+      { key: "dateMatched", title: "日期粗筛候选论文", label: "日期粗筛" },
+      { key: "afterDateEnrichment", title: "日期补全后候选论文", label: "日期补全后", confirmedDate: true },
+      { key: "finalDateMatched", title: "最终日期通过论文", label: "最终日期通过", confirmedDate: true }
+    ];
+
+    function fetchLogCandidateStageOptions(entry) {
+      const snapshots = entry?.candidateSnapshots || {};
+      return fetchLogCandidateStages.filter(stage => Object.prototype.hasOwnProperty.call(snapshots, stage.key));
+    }
+
+    function activeFetchLogCandidateStage(entry) {
+      const stages = fetchLogCandidateStageOptions(entry);
+      return stages.find(stage => stage.key === candidateDetailStage)
+        || stages.find(stage => stage.key === "afterDateEnrichment")
+        || stages.find(stage => stage.key === "beforeDomain")
+        || fetchLogCandidateStages[0];
+    }
+
     function fetchLogCandidateButton(entry, index) {
-      const snapshot = fetchLogCandidateSnapshot(entry, "beforeDomain");
+      const stage = activeFetchLogCandidateStage(entry);
+      const snapshot = fetchLogCandidateSnapshot(entry, stage.key);
       if (!snapshot.total) return "";
-      return `<button class="fetch-log-detail-link" type="button" data-fetch-log-detail="${index}">查看领域过滤前候选 ${snapshot.total} 篇</button>`;
+      return `<button class="fetch-log-detail-link" type="button" data-fetch-log-detail="${index}">查看候选阶段 ${snapshot.total} 篇</button>`;
     }
 
     function fetchLogRetryButton(entry, index) {
@@ -5464,7 +5555,9 @@
     }
 
     function fetchLogCandidateLegacyNote(entry) {
-      const snapshot = fetchLogCandidateSnapshot(entry, "beforeDomain");
+      const stage = activeFetchLogCandidateStage(entry);
+      const snapshot = fetchLogCandidateSnapshot(entry, stage.key);
+      const stages = fetchLogCandidateStageOptions(entry);
       if (snapshot.total) return "";
       const keywordMatched = Number(entry?.pipelineCounts?.keywordMatched || 0);
       if (!keywordMatched) return "";
@@ -5537,7 +5630,9 @@
         activeFetchLogDetailIndex = null;
         return "";
       }
-      const snapshot = fetchLogCandidateSnapshot(entry, "beforeDomain");
+      const stages = fetchLogCandidateStageOptions(entry);
+      const stage = activeFetchLogCandidateStage(entry);
+      const snapshot = fetchLogCandidateSnapshot(entry, stage.key);
       const when = entry.at ? new Date(entry.at).toLocaleString("zh-CN") : "";
       const range = entry.range ? `${escapeHTML(entry.range.startDate || "")} → ${escapeHTML(entry.range.endDate || "")}` : "";
       const sortedItems = sortCandidatePapers(snapshot.papers);
@@ -5564,10 +5659,13 @@
         <section class="panel" data-fetch-log-candidate-detail>
           <div class="panel-head">
             <div>
-              <h2>领域过滤前候选论文</h2>
+              <h2>${escapeHTML(stage.title)}</h2>
               <div class="panel-note">${escapeHTML(when)} · 范围 ${range} · 共 ${snapshot.total} 篇${cappedText}</div>
             </div>
             <button class="ghost-btn" type="button" data-fetch-log-back>返回统计</button>
+          </div>
+          <div class="segmented" style="margin-bottom:12px;">
+            ${stages.map(item => `<button class="segment ${item.key === stage.key ? "active" : ""}" type="button" data-candidate-stage="${item.key}" aria-pressed="${item.key === stage.key}">${escapeHTML(item.label)} ${fetchLogCandidateSnapshot(entry, item.key).total}</button>`).join("")}
           </div>
           ${rows ? `
             <div class="candidate-table-wrap">
@@ -5578,7 +5676,7 @@
                     <th>${candidateSortHeader("title", "标题")}</th>
                     <th>${candidateSortHeader("journal", "期刊")}</th>
                     <th>${candidateSortHeader("source", "来源")}</th>
-                    <th>${candidateSortHeader("published", "发表时间")}</th>
+                    <th>${candidateSortHeader("published", stage.confirmedDate ? "最终确认日期" : "信源原始日期")}</th>
                     <th>${candidateSortHeader("score", "分数")}</th>
                     <th>操作</th>
                   </tr>
@@ -5586,7 +5684,7 @@
                 <tbody>${rows}</tbody>
               </table>
             </div>
-          ` : `<div class="empty">这条抓取日志没有保存领域过滤前候选论文明细。重新抓取后会记录。</div>`}
+          ` : `<div class="empty">这个阶段没有候选论文。</div>`}
         </section>
       `;
     }
@@ -5621,8 +5719,9 @@
           ? `；大模型 ${escapeHTML((llm.models || []).map(m => m.model).join("、"))} 共 ${llm.totalTokens} tokens`
           : "";
         const counts = entry.pipelineCounts || {};
+        const dateConfirmedText = counts.dateConfirmed === undefined ? "" : ` → 日期确认 ${counts.dateConfirmed || 0} 篇`;
         const funnel = counts.raw
-          ? `<div class="small-text" style="margin-top:6px;">筛选漏斗：原始返回 ${counts.raw} 篇 → 去重后 ${counts.deduped || 0} 篇 → 关键词命中 ${counts.keywordMatched || 0} 篇 → 领域过滤 ${counts.domainMatched || 0} 篇 → 日期范围 ${counts.dateMatched || 0} 篇 → 本次新增 ${newFetchedCount} 篇 → 最终展示 ${displayCount} 篇</div>`
+          ? `<div class="small-text" style="margin-top:6px;">筛选漏斗：原始返回 ${counts.raw} 篇 → 去重后 ${counts.deduped || 0} 篇 → 关键词命中 ${counts.keywordMatched || 0} 篇 → 领域过滤 ${counts.domainMatched || 0} 篇 → 日期粗筛 ${counts.dateMatched || 0} 篇${dateConfirmedText} → 历史库新增 ${newFetchedCount} 篇 → 最终展示 ${displayCount} 篇</div>`
           : "";
         return `
           <div class="fetch-log-card">
@@ -5646,6 +5745,7 @@
       document.querySelectorAll("[data-fetch-log-detail]").forEach(button => {
         button.addEventListener("click", () => {
           activeFetchLogDetailIndex = Number(button.getAttribute("data-fetch-log-detail"));
+          candidateDetailStage = activeFetchLogCandidateStage(fetchLogEntries[activeFetchLogDetailIndex]).key;
           renderTokenStats();
         });
       });
@@ -5689,6 +5789,12 @@
     }
 
     function bindCandidateDetailActions() {
+      document.querySelectorAll("[data-candidate-stage]").forEach(button => {
+        button.addEventListener("click", () => {
+          candidateDetailStage = button.getAttribute("data-candidate-stage") || "beforeDomain";
+          renderTokenStats();
+        });
+      });
       document.querySelectorAll("[data-candidate-sort]").forEach(button => {
         button.addEventListener("click", () => {
           const field = button.getAttribute("data-candidate-sort") || "index";
@@ -5709,7 +5815,7 @@
 
     async function addCandidateToArchive(index) {
       const entry = fetchLogEntries[activeFetchLogDetailIndex];
-      const paper = fetchLogCandidateSnapshot(entry, "beforeDomain").papers[index];
+      const paper = fetchLogCandidateSnapshot(entry, activeFetchLogCandidateStage(entry).key).papers[index];
       if (!paper) return;
       const key = candidateStableKey(paper);
       candidateArchiveStates.set(key, "adding");
@@ -5735,7 +5841,7 @@
 
     async function removeCandidateFromArchive(index) {
       const entry = fetchLogEntries[activeFetchLogDetailIndex];
-      const paper = fetchLogCandidateSnapshot(entry, "beforeDomain").papers[index];
+      const paper = fetchLogCandidateSnapshot(entry, activeFetchLogCandidateStage(entry).key).papers[index];
       if (!paper) return;
       const key = candidateStableKey(paper);
       candidateArchiveStates.set(key, "removing");
@@ -5762,7 +5868,7 @@
     function renderTokenStats() {
       const stats = tokenStats || {};
       if (activeFetchLogDetailIndex !== null) {
-        mainContent.innerHTML = pageShell("统计", "查看某次抓取在进入领域过滤前的候选论文。", renderFetchLogCandidateDetail());
+        mainContent.innerHTML = pageShell("统计", "对比领域过滤、日期粗筛、日期补全和最终日期确认阶段。", renderFetchLogCandidateDetail());
         bindFetchLogPanel();
         return;
       }

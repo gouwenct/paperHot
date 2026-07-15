@@ -1,5 +1,7 @@
 # Recent Paper Discovery Implementation Plan
 
+> WoS 时间参数部分已由 `docs/superpowers/plans/2026-07-15-wos-date-and-query.md` 取代。本文 Task 4 中的 `publishTimeSpan` 示例仅保留为历史实施记录，当前实现使用 `modifiedTimeSpan` 和 `sortField=LD+D`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the confirmed PaperHot “今日论文” workbench with Boolean keyword discovery, exact-paper lookup, source-specific recent search, durable resume cursors, WoS usage accounting, unified cards, and automatic result loading.

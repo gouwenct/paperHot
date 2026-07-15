@@ -29,7 +29,7 @@ Paper Hot 的主要目的只有两个：
 - bioRxiv。
 - Semantic Scholar。
 - Crossref 和出版方页面元数据补全。
-- 方向检索把保存的 Boolean 搜索图传给信源；WoS、bioRxiv、arXiv、Google Scholar 和 Google Search 使用各自支持的冻结日期约束。近期抓取和指定论文检索统一按任务指纹保存逐信源下一页和完成态，Google 不读取或更新旧滚动位置；`resumeMode=resume` 恢复同指纹断点，`restart` 或 `new` 从第一页开始。refresh state/start/status 接口直接返回后端的任务指纹、可恢复状态、逐信源页码、逐信源结果和错误，只有全部启用信源完成后才清除断点。
+- 方向检索把保存的 Boolean 搜索图传给信源；WoS 逐关键词加引号并保留 AND/OR 分组，使用 `modifiedTimeSpan` 限定 Starter API 的最近修改/收录窗口并按 `LD+D` 排序，bioRxiv、arXiv、Google Scholar 和 Google Search 使用各自支持的冻结日期约束。近期抓取和指定论文检索统一按任务指纹保存逐信源下一页和完成态，Google 不读取或更新旧滚动位置；`resumeMode=resume` 恢复同指纹断点，`restart` 或 `new` 从第一页开始。refresh state/start/status 接口直接返回后端的任务指纹、可恢复状态、逐信源页码、逐信源结果和错误，只有全部启用信源完成后才清除断点。
 - 指定论文检索可识别 DOI、Web of Science UT、arXiv ID/URL、普通 URL 和标题；信源端不附加方向关键词或日期限制。稳定标识结果可进入现有归档，标题出现多个相近结果时只返回候选供用户确认，不写归档、缓存或抓取日志。
 
 ### 论文处理
@@ -75,7 +75,7 @@ http://127.0.0.1:50751
 
 不要直接双击或用 `file://` 打开 `public/index.html`。这个 HTML 文件是前端源码，必须通过 `server.cjs` 提供的本地服务访问；直接打开只能看到静态页面，抓取、保存、导入导出、日志、配置等需要后端 API 的功能不能正常使用。
 
-项目默认固定使用 `50751` 端口。修改前端或后端文件后，应停止旧服务，再用同一个端口重启，然后刷新浏览器页面。
+项目默认固定使用 `50751` 端口。修改前端或后端文件后，应停止旧服务，再用同一个端口重启，然后刷新浏览器页面。维护者重启后还要核对新进程启动时间、HTTP 200 和 `data/papers/recent-fetch-cursors.json` 读写权限；只看到页面能打开，可能仍是旧进程或无法保存断点的受限进程。
 
 ## 首次配置
 
@@ -133,7 +133,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 - 本次信源开关来自“领域配置”，只影响当前抓取，不覆盖全局配置。
 - 页面加载或七个 discovery 字段稳定变化后，前端先调用只读 refresh state 接口检查相同 canonical 指纹的 durable 断点；点击抓取后再通过 refresh start/status 接口创建并轮询本地后端任务。
 - 后端从多个信源抓取候选论文，完成过滤、补全、LLM 处理、期刊指标查询和排序。
-- 本次 canonical `newPapers` 或指定论文候选显示在当前页面，正常入库结果同时写入全部论文归档。
+- 本次 canonical `papers` 或指定论文候选显示在当前页面；抓取开始前已存在于全部论文的结果半透明显示，本轮新增结果正常显示，正常入库结果仍写入全部论文归档。
 - 每次抓取会生成一个带日期范围和抓取时间的会话标签。
 - 清除今日论文显示只清空页面上的临时结果，不删除已入库论文。
 
@@ -178,11 +178,12 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 - 单篇重新运行 LLM 摘要翻译和推荐理由。
 - 批量运行 LLM，只处理缺少翻译或总结的论文。
 - 自动去重需要用户手动点击，不会自动删除归档内容。
+- “清空未标星”一次删除全部论文归档中的未标星条目，执行前明确确认；标星论文和个人收藏、待读、已读、短标题及备注继续保留。
 
 页面重点：
 
-- 已收藏论文在今日论文和全部论文中会弱化显示，帮助用户把注意力放在未处理论文上。
-- 全部论文页不应自动删除论文；删除和去重必须由用户明确触发。
+- 已收藏论文在今日论文和全部论文中会弱化显示；今日论文中抓取前已经存在于全部论文的结果也会弱化，帮助用户把注意力放在本轮新增论文上。
+- 全部论文页不应自动删除论文；清空未标星、删除和去重必须由用户明确触发。
 
 ### 个人收藏
 
@@ -199,6 +200,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 - 默认打开待读论文。
 - 收藏状态写入 `data/papers/favorites.json`。
+- 收藏论文已不在全部论文归档时，收藏页会回退显示 `favorites.json` 中已有的论文快照，待读、已读和备注状态不丢失。
 - 短标题、已读、标星状态写入 `data/papers/paper-notes.json`。
 - 点击“标记已读”后，论文在 3 秒内淡出，并出现“撤销”按钮。
 - 3 秒内点击撤销，论文保留在待读页面。
@@ -251,15 +253,15 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 - 显示今日、近 7 天、近 30 天的 Token 统计。
 - 按模型展示调用情况。
 - 展示最近抓取日志。
-- 抓取日志保留每次抓取的来源、数量、时间范围、候选论文快照和失败信息。
-- 可以打开某次抓取的候选论文详情。
+- 抓取日志保留每次抓取的来源、数量、时间范围、候选论文快照和失败信息；新日志同时记录日期粗筛、Crossref/出版社补全后及最终日期通过数量。
+- 可以打开某次抓取的候选论文详情，在“领域过滤前、日期粗筛、日期补全后、最终日期通过”之间切换；补全后的两个阶段显示最终确认日期。
 - 候选论文详情中可以把论文加入全部论文。
 - 失败的 enrichment 任务可以从失败论文处重试，而不是从头搜索。
 
 页面重点：
 
 - 抓取日志用于诊断为什么某次没有抓到论文。
-- 候选快照应尽量保留过滤前后的状态，方便维护者定位问题。
+- 候选快照保留关键过滤阶段，便于区分“日期没有补全”和“日期补全后超出范围”两种情况；旧日志未保存的历史日期无法反推。
 
 ### 日志
 
@@ -286,12 +288,12 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 点击抓取后，前端不会直接访问外部论文网站，而是向本地后端创建抓取任务。后端流程如下：
 
 1. 读取用户配置：关键词、信源、日期范围、LLM、SerpApi、Web of Science、EasyScholar。
-2. 多来源检索：Google Scholar、Google Search、Web of Science、arXiv、bioRxiv、Semantic Scholar；方向检索传递 Boolean 条件和信源支持的冻结日期。分页恢复会跳过已完成信源，并从未完成信源保存的下一页继续。
+2. 多来源检索：Google Scholar、Google Search、Web of Science、arXiv、bioRxiv、Semantic Scholar；方向检索传递 Boolean 条件和信源支持的冻结日期。WoS 查询把每个关键词加引号，使用 `modifiedTimeSpan` 和 `LD+D` 获取时间窗内最近修改/收录记录；分页恢复会跳过已完成信源，并从未完成信源保存的下一页继续。
 3. 候选归一化：保留信源原始标题，统一显示标题、摘要、作者、DOI、URL、来源、日期精度和引用数据库；同版本精确重复按信源优先级保留，正式版与预印本分别保留并互相关联。
-4. 关键词和领域过滤：方向检索按保存的 Boolean 搜索图和领域上下文过滤候选；指定论文检索跳过方向、领域和日期过滤，标题多候选不自动入库。
-5. 日期筛选：按前端选择范围筛选；不伪造 `YYYY-01-01` 作为真实日期。
+4. 关键词和领域过滤：WoS 的 `TS` 命中直接进入候选池，避免 Starter 响应缺少摘要或命中字段时被本地重复删除；Google、arXiv 等信源继续按保存的 Boolean 搜索图和领域上下文过滤。指定论文检索跳过方向、领域和日期过滤，标题多候选不自动入库。
+5. 日期筛选：按前端选择范围筛选；只有年月或年份时按该月或该年与范围是否重叠决定保留，不伪造 `YYYY-01-01` 作为真实日期。
 6. 初步排序：用本地规则控制进入后续富集的候选数量。
-7. 元数据补全：通过 Crossref、DOI 和出版方页面补全期刊、日期、标题。
+7. 元数据补全：优先读取 WoS 年月；已有 DOI 仍直接查询 Crossref，并在 online、print、published、issued 中选择精度最高的日期；仍不足到日时通过 DOI 出版方页面补全。
 8. LLM 处理：生成中文摘要和推荐理由。
 9. 期刊指标：通过 EasyScholar 查询影响因子和分区，并写入缓存。
 10. 最终重评分：结合摘要、LLM 推荐理由、期刊指标和领域规则。
@@ -358,13 +360,20 @@ flowchart TD
 
 ### 补充文档
 
+`docs/solutions/` 保存已经解决并验证的故障、踩坑经验和可复用修复方案，按问题类别组织；遇到相同症状时应先查对应分类。
+
 | 路径 | 用途 |
 | --- | --- |
 | `docs/easyscholar-config.md` | EasyScholar API 获取和期刊指标配置说明 |
 | `docs/google-scholar-config.md` | SerpApi / Google Scholar 配置说明 |
 | `docs/paperhot-ingestion-flow.html` | 从页面抓取按钮到归档、日志和富集流程的可视化说明 |
 | `docs/superpowers/specs/2026-07-11-recent-paper-discovery-design.md` | 已确认的近期论文发现、多信源检索、断点恢复和今日论文页面设计 |
+| `docs/superpowers/specs/2026-07-15-archive-clear-and-existing-results-design.md` | 全部论文清除未标星条目、保留个人状态及今日论文显示已入库结果的设计 |
+| `docs/superpowers/specs/2026-07-15-wos-date-and-query-design.md` | WoS Boolean 查询、近期收录范围与多级论文日期补全设计 |
 | `docs/superpowers/plans/2026-07-11-recent-paper-discovery.md` | 近期论文发现功能的分步实现、测试和验证计划 |
+| `docs/superpowers/plans/2026-07-15-archive-clear-and-existing-results.md` | 全部论文清理、收藏快照回退和今日论文已入库弱化展示的 TDD 实施计划 |
+| `docs/superpowers/plans/2026-07-15-wos-date-and-query.md` | WoS 查询和论文日期补全的 TDD 实施计划 |
+| `docs/solutions/runtime-errors/paperhot-service-restart-data-permission.md` | 固定端口旧进程与受限 Node 导致旧代码、断点 `EPERM` 的诊断和重启验收 |
 | `.superpowers/sdd/task-2-report.md` | Task 2 多信源元数据与正式版/预印本关联的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-3-report.md` | Task 3 近期抓取游标与 WoS 本地请求用量的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-4-report.md` | Task 4 日期感知、断点恢复、指定论文检索及独立审查修复的 TDD 和验证报告 |

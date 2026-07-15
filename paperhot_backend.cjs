@@ -34,6 +34,7 @@ const API_LABELS = {
   googlesearch: "Google 搜索 (SerpApi)",
   webofscience: "Web of Science",
   crossref: "Crossref 元数据",
+  publisher: "出版社日期",
   easyscholar: "EasyScholar 期刊指标",
   llm: "LLM 摘要 / 推荐"
 };
@@ -305,6 +306,20 @@ function dateRangeOverlapsYear(year, startDate, endDate) {
   return (!startDate || yearEnd >= startDate) && (!endDate || yearStart <= endDate);
 }
 
+function publicationDateRange(value) {
+  const clean = compactText(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return { start: clean, end: clean };
+  if (/^\d{4}-\d{2}$/.test(clean)) {
+    const [year, month] = clean.split("-").map(Number);
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return { start: `${clean}-01`, end: `${clean}-${String(lastDay).padStart(2, "0")}` };
+  }
+  if (/^\d{4}$/.test(clean)) return { start: `${clean}-01-01`, end: `${clean}-12-31` };
+  const date = dateString(clean);
+  if (date) return { start: date, end: date };
+  return null;
+}
+
 function compactText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
@@ -509,9 +524,31 @@ function datePrecision(value) {
   return "unknown";
 }
 
+const DATE_PRECISION_RANK = { unknown: 0, year: 1, month: 2, day: 3 };
+
+function mostPrecisePublishedDate(values) {
+  return values.filter(Boolean).reduce((best, value) => (
+    DATE_PRECISION_RANK[datePrecision(value)] > DATE_PRECISION_RANK[datePrecision(best)] ? value : best
+  ), "");
+}
+
 function normalizeCitationCount(value) {
   const clean = value === null || value === undefined ? "" : compactText(String(value));
   return clean && Number.isFinite(Number(clean)) ? Number(clean) : null;
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 function completePaperRecord(paper) {
@@ -988,6 +1025,7 @@ function buildSearchExpression(searchLogic = {}) {
 }
 
 function paperMatchesSearchLogic(paper, searchLogic) {
+  if (paper.retrievalSource === "webofscience") return true;
   const text = `${paper.title || ""} ${paper.summary || ""} ${(paper.tags || []).join(" ")}`;
   const matches = keyword => keywordMatches(text, [keyword]).length > 0;
   const connected = new Set((searchLogic.andEdges || []).flat());
@@ -2095,6 +2133,7 @@ function filterPapersByKeywords(papers, keywords) {
   const clean = cleanKeywords(keywords);
   if (!clean.length) return papers;
   return papers.filter(paper => {
+    if (paper.retrievalSource === "webofscience") return true;
     const text = `${paper.title || ""} ${paper.summary || ""} ${(paper.tags || []).join(" ")} ${paper.source || ""}`;
     const matches = keywordMatches(text, clean);
     if (!matches.length) return false;
@@ -2107,6 +2146,7 @@ function filterPapersByDomainAnchors(papers, keywords) {
   const expandedKeywords = cleanKeywords(keywords).map(keyword => ACRONYM_EXPANSIONS[keyword.toLowerCase()] || keyword);
   const anchors = cleanKeywords([...DOMAIN_ANCHOR_KEYWORDS, ...expandedKeywords.filter(keyword => DOMAIN_CONTEXT_PATTERN.test(keyword))]);
   return papers.filter(paper => {
+    if (paper.retrievalSource === "webofscience") return true;
     const text = `${paper.title || ""} ${paper.summary || ""} ${(paper.tags || []).join(" ")} ${paper.source || ""}`;
     return keywordMatches(text, anchors).length > 0 || DOMAIN_CONTEXT_PATTERN.test(text);
   });
@@ -2614,7 +2654,10 @@ function webOfSciencePublishedDate(record, responseMap = DEFAULT_WEB_OF_SCIENCE_
   const explicitDate = compactText(record?.published || record?.publicationDate || record?.date);
   if (/^(19|20)\d{2}(?:-\d{2}(?:-\d{2})?)?$/.test(explicitDate)) return explicitDate;
   const year = compactText(getNestedValue(record, responseMap.year) || record?.source?.publishYear || record?.year);
-  const month = compactText(record?.source?.publishMonth || record?.month);
+  const rawMonth = compactText(record?.source?.publishMonth || record?.month);
+  const monthIndex = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+    .indexOf(rawMonth.slice(0, 3).toLowerCase());
+  const month = monthIndex >= 0 ? String(monthIndex + 1) : rawMonth;
   const day = compactText(record?.source?.publishDay || record?.day);
   if (/^(19|20)\d{2}$/.test(year) && /^\d{1,2}$/.test(month) && /^\d{1,2}$/.test(day)) {
     return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
@@ -2921,7 +2964,12 @@ function crossrefMetadataFromItem(item) {
     doi: normalizeDoi(item?.DOI || item?.doi),
     journal: compactText(container),
     authors,
-    published: crossrefDate(item?.published || item?.["published-print"] || item?.["published-online"]),
+    published: mostPrecisePublishedDate([
+      crossrefDate(item?.["published-online"]),
+      crossrefDate(item?.["published-print"]),
+      crossrefDate(item?.published),
+      crossrefDate(item?.issued)
+    ]),
     title
   };
 }
@@ -2961,7 +3009,7 @@ async function fetchCrossrefWorkByTitle(paper, options = {}) {
   const url = new URL(CROSSREF_WORKS_ENDPOINT);
   url.searchParams.set("query.bibliographic", title);
   url.searchParams.set("rows", String(options.rows || 3));
-  url.searchParams.set("select", "DOI,title,container-title,author,published,published-print,published-online");
+  url.searchParams.set("select", "DOI,title,container-title,author,published,published-print,published-online,issued");
   const fetchImpl = options.fetchImpl || fetch;
   const response = await fetchImpl(url, {
     headers: { "User-Agent": "paperHOT/0.1 (mailto:local@example.invalid)" },
@@ -2986,7 +3034,7 @@ function applyCrossrefMetadata(paper, metadata, options = {}) {
   const doi = normalizeDoi(metadata.doi);
   const journal = compactText(metadata.journal) || inferJournal(paper);
   const authors = Array.isArray(metadata.authors) && metadata.authors.length ? metadata.authors : paper.authors;
-  const published = metadata.published || paper.published;
+  const published = mostPrecisePublishedDate([paper.published, metadata.published]);
   const title = /\.\.\.|…/.test(paper.title) ? (compactText(metadata.title) || paper.title) : paper.title;
   const source = /^Google\s+搜索\s*·/i.test(paper.source || "") && journal ? `Google 搜索 · ${journal}` : paper.source;
   return completePaperRecord({
@@ -3011,10 +3059,11 @@ function applyCrossrefMetadata(paper, metadata, options = {}) {
 async function enrichPapersWithCrossref(papers, options = {}) {
   const fetcher = options.fetcher || (paper => fetchCrossrefWorkByTitle(paper, options));
   const errors = Array.isArray(options.errors) ? options.errors : null;
-  return Promise.all(papers.map(async paper => {
+  return mapWithConcurrency(papers, 2, async paper => {
     const inferredDoi = inferDoiFromUrl(paper?.url);
     const record = completePaperRecord({ ...paper, doi: inferredDoi || paper?.doi });
-    if (record.doi && !/\.\.\.|…/.test(record.title) && !inferredDoi) return record;
+    const shouldRefreshKnownDoi = record.retrievalSource === "webofscience" && datePrecision(record.published) !== "day";
+    if (record.doi && !shouldRefreshKnownDoi && !/\.\.\.|…/.test(record.title) && !inferredDoi) return record;
     try {
       if (record.doi && !/\.\.\.|…/.test(record.title)) {
         const metadata = await fetcher(record);
@@ -3026,7 +3075,51 @@ async function enrichPapersWithCrossref(papers, options = {}) {
       if (errors) errors.push({ source: "crossref", message: error.message, paper: summarizePaperForOperationLog(record) });
       return record;
     }
-  }));
+  });
+}
+
+function normalizeExternalPublishedDate(value) {
+  const clean = compactText(value);
+  if (/^(?:19|20)\d{2}(?:-(?:0[1-9]|1[0-2]))?$/.test(clean)) return clean;
+  const iso = clean.match(/\b((?:19|20)\d{2})[-\/]([01]?\d)[-\/]([0-3]?\d)\b/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
+  const parsed = new Date(clean);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+}
+
+function extractHtmlPublishedDate(html) {
+  const text = String(html || "");
+  const metaDate = htmlMetaContent(text, [
+    "citation_publication_date",
+    "citation_online_date",
+    "article:published_time",
+    "prism.publicationDate",
+    "dc.date",
+    "date"
+  ]);
+  const jsonLdDate = text.match(/["']datePublished["']\s*:\s*["']([^"']+)["']/i)?.[1] || "";
+  return normalizeExternalPublishedDate(metaDate || jsonLdDate);
+}
+
+async function enrichPapersWithPublisherDates(papers, options = {}) {
+  const fetchImpl = options.fetchImpl || fetch;
+  const errors = Array.isArray(options.errors) ? options.errors : null;
+  return mapWithConcurrency(papers, 2, async paper => {
+    const record = completePaperRecord(paper);
+    if (record.retrievalSource !== "webofscience" || !record.doi || datePrecision(record.published) === "day") return record;
+    try {
+      const response = await fetchImpl(`https://doi.org/${record.doi}`, {
+        headers: { "User-Agent": "paperHOT/0.1 (mailto:local@example.invalid)", Accept: "text/html,*/*" },
+        signal: AbortSignal.timeout(20000)
+      });
+      if (!response.ok) throw new Error(`出版社日期补全失败：HTTP ${response.status}`);
+      const published = mostPrecisePublishedDate([record.published, extractHtmlPublishedDate(await response.text())]);
+      return completePaperRecord({ ...record, published, publishedPrecision: datePrecision(published) });
+    } catch (error) {
+      if (errors) errors.push({ source: "publisher", message: error.message, paper: summarizePaperForOperationLog(record) });
+      return record;
+    }
+  });
 }
 function buildLlmPaperPrompt(paper, userBackground) {
   return [
@@ -3078,7 +3171,7 @@ async function callConfiguredLlm({ paper, userBackground, config, fetchImpl }) {
       ],
       temperature: 0.2
     }),
-    signal: AbortSignal.timeout(30000)
+    signal: AbortSignal.timeout(60000)
   });
   if (!response.ok) throw new Error(`LLM 摘要失败：HTTP ${response.status}`);
   const payload = await response.json();
@@ -3174,7 +3267,7 @@ async function enrichPapersWithLlmInsights(papers, options = {}) {
   if (!enabled) return papers;
   const userBackground = compactText(options.userBackground || config.userBackground || DEFAULT_USER_BACKGROUND);
   const fetchImpl = options.fetchImpl || fetch;
-  return Promise.all(papers.map(async paper => {
+  return mapWithConcurrency(papers, 2, async paper => {
     try {
       const insight = fetcher
         ? await fetcher({ paper, userBackground })
@@ -3197,7 +3290,7 @@ async function enrichPapersWithLlmInsights(papers, options = {}) {
       if (errors) errors.push({ source: "llm", message: error.message, paper: summarizePaperForOperationLog(paper) });
       return paper;
     }
-  }));
+  });
 }
 async function fetchGoogleScholarPapers(keywords = DEFAULT_KEYWORDS, options = {}) {
   const config = options.config || await readGoogleScholarConfig(options.configFile);
@@ -3338,9 +3431,23 @@ async function fetchGoogleSearchPapers(keywords = DEFAULT_KEYWORDS, options = {}
   return options.searchMode === "exact" ? papers : filterPapersByKeywords(papers, keywords);
 }
 
-function buildWebOfScienceQuery(keywords = DEFAULT_KEYWORDS, template = DEFAULT_WEB_OF_SCIENCE_CONFIG.queryTemplate, queryExpression = "") {
-  const query = compactText(queryExpression) || buildSemanticScholarQuery(keywords).replace(/[()]/g, " ").replace(/\s+/g, " ").trim();
-  return String(template || "{query}").replace("{query}", query || "computational microscopy reconstruction");
+function webOfScienceQueryTerm(keyword) {
+  return `"${compactText(keyword).replace(/"/g, "")}"`;
+}
+
+function buildWebOfScienceQuery(keywords = DEFAULT_KEYWORDS, template = DEFAULT_WEB_OF_SCIENCE_CONFIG.queryTemplate, searchLogic) {
+  const clean = cleanKeywords(keywords);
+  let clauses = clean.map(webOfScienceQueryTerm);
+  if (searchLogic && typeof searchLogic === "object") {
+    const connected = new Set((searchLogic.andEdges || []).flat());
+    clauses = searchLogicGroups(searchLogic)
+      .map(group => `(${group.map(webOfScienceQueryTerm).join(" AND ")})`);
+    for (const keyword of searchLogic.activeKeywords || []) {
+      if (!connected.has(keyword)) clauses.push(webOfScienceQueryTerm(keyword));
+    }
+  }
+  const query = clauses.join(" OR ") || webOfScienceQueryTerm("computational microscopy reconstruction");
+  return String(template || "{query}").replace("{query}", query);
 }
 
 function emitWebOfSciencePageProgress(onProgress, { page, pageSize, maxPages }) {
@@ -3366,7 +3473,10 @@ function emitWebOfSciencePageProgress(onProgress, { page, pageSize, maxPages }) 
 
 async function fetchWebOfSciencePapers(keywords = DEFAULT_KEYWORDS, options = {}) {
   const config = options.config || await readWebOfScienceConfig(options.configFile);
-  if (!config.enabled || !config.endpoint) {
+  if (!config.enabled) {
+    throw new Error("Web of Science API 已关闭：请在领域配置中启用 Web of Science API");
+  }
+  if (!config.endpoint || !config.apiKey) {
     throw new Error("Web of Science 信源未配置：请填写 config/web-of-science.json 后再启用");
   }
 
@@ -3377,7 +3487,7 @@ async function fetchWebOfSciencePapers(keywords = DEFAULT_KEYWORDS, options = {}
     headers[request.apiKeyHeader] = `${request.apiKeyPrefix || ""}${config.apiKey}`;
   }
   const query = compactText(options.rawQuery)
-    || buildWebOfScienceQuery(keywords, config.queryTemplate, options.queryExpression);
+    || buildWebOfScienceQuery(keywords, config.queryTemplate, options.searchLogic);
   const maxPages = clampPositiveInteger(options.maxPages || config.maxPages, DEFAULT_WEB_OF_SCIENCE_CONFIG.maxPages, 1, WEB_OF_SCIENCE_MAX_PAGES_LIMIT);
   const pageSize = clampPositiveInteger(options.pageSize || config.pageSize, DEFAULT_WEB_OF_SCIENCE_CONFIG.pageSize, 1, WEB_OF_SCIENCE_PAGE_SIZE_LIMIT);
   const firstPage = clampPositiveInteger(options.startPage, 1, 1, 1000000);
@@ -3391,7 +3501,8 @@ async function fetchWebOfSciencePapers(keywords = DEFAULT_KEYWORDS, options = {}
     url.searchParams.set(request.pageQueryName || "page", String(page));
     url.searchParams.set(request.limitQueryName || "limit", String(pageSize));
     if (options.searchMode !== "exact" && options.startDate && options.endDate) {
-      url.searchParams.set("publishTimeSpan", `${options.startDate}+${options.endDate}`);
+      url.searchParams.set("modifiedTimeSpan", `${options.startDate}+${options.endDate}`);
+      url.searchParams.set("sortField", "LD+D");
     }
     if (request.apiKeyQueryName && config.apiKey) url.searchParams.set(request.apiKeyQueryName, config.apiKey);
     emitWebOfSciencePageProgress(options.onProgress, { page, pageSize, maxPages });
@@ -3565,14 +3676,13 @@ function filterPapersByDate(papers, date) {
   return papers.filter(paper => dateString(paper.published) === date);
 }
 
-function filterPapersByDateRange(papers, startDate, endDate) {
+function filterPapersByDateRange(papers, startDate, endDate, options = {}) {
   return papers.filter(paper => {
-    const date = dateString(paper.published);
+    const range = publicationDateRange(paper.published);
     // Google web results often omit dates; keep them so Crossref/LLM can still surface Nature/Optica pages.
-    if (!date && paper.sourceType === "网页搜索") return true;
-    if (!date && dateRangeOverlapsYear(yearOnlyString(paper.published), startDate, endDate)) return true;
-    if (!date) return false;
-    return (!startDate || date >= startDate) && (!endDate || date <= endDate);
+    if (!range && paper.sourceType === "网页搜索" && options.keepUndatedWeb !== false) return true;
+    if (!range) return false;
+    return (!startDate || range.end >= startDate) && (!endDate || range.start <= endDate);
   });
 }
 
@@ -3930,7 +4040,8 @@ async function readFavoritesPayload(options = {}) {
   const payload = await readFavoritesFile(dataDir);
   const archive = await readPaperArchive(dataDir);
   const papers = payload.favorites
-    .map(favorite => archive.papers.find(paper => favoriteMatchesPaper(favorite, paper)))
+    .map(favorite => archive.papers.find(paper => favoriteMatchesPaper(favorite, paper))
+      || (favorite.paper && Object.keys(favorite.paper).length ? favorite.paper : null))
     .filter(Boolean)
     .map(completePaperRecord);
   return {
@@ -4143,10 +4254,9 @@ function mergePaperLists(existingPapers, nextPapers) {
         reason: paper.reason || previous.reason,
         shortTitle: paper.shortTitle || previous.shortTitle
       } : {}),
-      tokenUsage: {
-        ...(previous.tokenUsage || {}),
-        ...(paper.tokenUsage || {})
-      },
+      tokenUsage: hasNewLlmInsight
+        ? { ...(previous.tokenUsage || {}), ...(paper.tokenUsage || {}) }
+        : (previous.tokenUsage || paper.tokenUsage || defaultTokenUsage()),
       journalMetrics: hasResolvedJournalMetrics(paper.journalMetrics)
         ? { ...(previous.journalMetrics || {}), ...(paper.journalMetrics || {}) }
         : (previous.journalMetrics || paper.journalMetrics || defaultJournalMetrics())
@@ -4186,10 +4296,9 @@ function mergePaperListsAppendOnly(existingPapers, nextPapers) {
       fetchedAt: paper.fetchedAt || previous.fetchedAt,
       score: paper.score || previous.score,
       scoreBreakdown: paper.scoreBreakdown || previous.scoreBreakdown,
-      tokenUsage: {
-        ...(previous.tokenUsage || {}),
-        ...(paper.tokenUsage || {})
-      },
+      tokenUsage: hasNewLlmInsight
+        ? { ...(previous.tokenUsage || {}), ...(paper.tokenUsage || {}) }
+        : (previous.tokenUsage || paper.tokenUsage || defaultTokenUsage()),
       journalMetrics: hasResolvedJournalMetrics(paper.journalMetrics)
         ? { ...(previous.journalMetrics || {}), ...(paper.journalMetrics || {}) }
         : (previous.journalMetrics || paper.journalMetrics || defaultJournalMetrics())
@@ -4350,6 +4459,41 @@ async function dedupePaperArchive(options = {}) {
     archive: nextArchive,
     papers
   };
+}
+
+async function clearUnstarredPaperArchive(options = {}) {
+  const dataDir = options.dataDir || DATA_DIR;
+  const archive = await readPaperArchive(dataDir);
+  const notes = await readPaperNotesFile(dataDir);
+  const papers = archive.papers.filter(paper => notes.notes.some(note => (
+    note.starred === true && paperNoteMatchesPaper(note, paper)
+  )));
+  const nextArchive = {
+    ...archive,
+    mode: "archive",
+    updatedAt: new Date().toISOString(),
+    count: papers.length,
+    papers
+  };
+  nextArchive.archiveFile = await writePaperArchive(nextArchive, dataDir);
+  const result = {
+    ok: true,
+    beforeCount: archive.papers.length,
+    afterCount: papers.length,
+    removedCount: archive.papers.length - papers.length,
+    preservedStarredCount: papers.length,
+    archive: nextArchive,
+    papers
+  };
+  await appendOperationLogSafe({
+    action: "delete",
+    operation: "archive-clear-unstarred",
+    beforeCount: result.beforeCount,
+    afterCount: result.afterCount,
+    removedCount: result.removedCount,
+    preservedStarredCount: result.preservedStarredCount
+  }, dataDir);
+  return result;
 }
 
 async function addCandidatePaperToArchive(candidate, options = {}) {
@@ -4537,6 +4681,18 @@ async function refreshArchivePaperLlmInsight(target = {}, options = {}) {
     fetchers: options.fetchers || target.fetchers
   };
   const { enriched, errors, llmLog } = await enrichArchivePapersWithLlm([original], llmOptions);
+  const llm = summarizeLlmLog(llmLog);
+  if (!llm.calls) {
+    return {
+      ok: true,
+      updated: false,
+      existed: true,
+      paper: original,
+      archive,
+      errors,
+      llm
+    };
+  }
   const nextPaper = {
     ...rescorePaperAfterEnrichment(enriched[0] || original, options.keywords || []),
     fetchedAt: original.fetchedAt || new Date().toISOString(),
@@ -4559,7 +4715,6 @@ async function refreshArchivePaperLlmInsight(target = {}, options = {}) {
     paper: summarizePaperForOperationLog(nextPaper),
     llm: summarizeLlmLog(llmLog)
   }, dataDir);
-  const llm = summarizeLlmLog(llmLog);
   return {
     ok: true,
     updated: true,
@@ -4590,12 +4745,15 @@ async function refreshArchiveLlmInsights(options = {}, runtimeOptions = {}) {
   }
   const { enriched, errors, llmLog } = await enrichArchivePapersWithLlm(pending.map(entry => entry.paper), options);
   const papers = archive.papers.slice();
+  let updatedCount = 0;
   pending.forEach((entry, offset) => {
+    if (!paperHasLlmInsight(enriched[offset])) return;
     papers[entry.index] = {
       ...rescorePaperAfterEnrichment(enriched[offset] || entry.paper, options.keywords || []),
       fetchedAt: entry.paper.fetchedAt || new Date().toISOString(),
       llmUpdatedAt: new Date().toISOString()
     };
+    updatedCount += 1;
   });
   const nextArchive = {
     ...archive,
@@ -4604,22 +4762,28 @@ async function refreshArchiveLlmInsights(options = {}, runtimeOptions = {}) {
     count: papers.length,
     papers
   };
-  nextArchive.archiveFile = await writePaperArchive(nextArchive, dataDir);
-  await appendOperationLogSafe({
-    action: "modify",
-    operation: "archive-llm-refresh-missing",
-    updatedCount: pending.length,
-    skippedCount: archive.papers.length - pending.length,
-    paperCount: papers.length,
-    papers: pending.slice(0, 20).map(entry => summarizePaperForOperationLog(papers[entry.index])),
-    llm: summarizeLlmLog(llmLog)
-  }, dataDir);
+  if (updatedCount) {
+    nextArchive.archiveFile = await writePaperArchive(nextArchive, dataDir);
+    await appendOperationLogSafe({
+      action: "modify",
+      operation: "archive-llm-refresh-missing",
+      updatedCount,
+      skippedCount: archive.papers.length - pending.length,
+      paperCount: papers.length,
+      papers: pending
+        .filter(entry => paperHasLlmInsight(papers[entry.index]))
+        .slice(0, 20)
+        .map(entry => summarizePaperForOperationLog(papers[entry.index])),
+      llm: summarizeLlmLog(llmLog)
+    }, dataDir);
+  }
   const llm = summarizeLlmLog(llmLog);
   return {
     ok: true,
-    updatedCount: pending.length,
+    updatedCount,
+    failedCount: pending.length - updatedCount,
     skippedCount: archive.papers.length - pending.length,
-    archive: nextArchive,
+    archive: updatedCount ? nextArchive : archive,
     papers,
     errors,
     llm
@@ -5536,15 +5700,27 @@ async function fetchPaperPayloadQueued(options, context) {
     fetcher: options.fetchers?.crossref,
     errors
   });
+  const publisherDatedPapers = await enrichPapersWithPublisherDates(crossrefPapers, {
+    fetchImpl: options.fetchers?.html,
+    errors
+  });
+  const datedCrossrefPapers = searchMode === "exact"
+    ? publisherDatedPapers
+    : (mode === "today"
+      ? filterPapersByDate(publisherDatedPapers, date)
+      : filterPapersByDateRange(publisherDatedPapers, startDate, endDate, { keepUndatedWeb: false }));
+  pipelineCounts.dateConfirmed = datedCrossrefPapers.length;
+  candidateSnapshots.afterDateEnrichment = buildPaperCandidateSnapshot(publisherDatedPapers);
+  candidateSnapshots.finalDateMatched = buildPaperCandidateSnapshot(datedCrossrefPapers);
   emitFetchProgress(options, {
     stage: "llm",
     percent: 84,
-    message: `元数据补全后 ${crossrefPapers.length} 篇，正在生成摘要翻译和推荐理由`,
+    message: `元数据补全并确认日期后 ${datedCrossrefPapers.length} 篇，正在生成摘要翻译和推荐理由`,
     counts: pipelineCounts,
     sources: apiCalls.filter(call => call.kind === "source"),
     errors
   });
-  const llmPapers = await enrichMissingLlmInsights(crossrefPapers, {
+  const llmPapers = await enrichMissingLlmInsights(datedCrossrefPapers, {
     ...(options.llm || {}),
     userBackground: options.userBackground,
     fetcher: options.fetchers?.llm,
@@ -5559,10 +5735,7 @@ async function fetchPaperPayloadQueued(options, context) {
     sources: apiCalls.filter(call => call.kind === "source"),
     errors
   });
-  const datedLlmPapers = searchMode === "exact"
-    ? llmPapers
-    : (mode === "today" ? filterPapersByDate(llmPapers, date) : filterPapersByStrictDateRange(llmPapers, startDate, endDate));
-  const fetchedPapers = sortPapersForDisplay((await enrichPapersWithJournalMetrics(datedLlmPapers, {
+  const fetchedPapers = sortPapersForDisplay((await enrichPapersWithJournalMetrics(llmPapers, {
     dataDir,
     ...(options.journalMetrics || {})
   }))
@@ -5645,7 +5818,7 @@ async function fetchPaperPayloadQueued(options, context) {
       range: fetchReport.range,
       keywords,
       fetchedCount: payload.count,
-      newFetchedCount: fetchReport.fetchedCount,
+      newFetchedCount: archive.addedPapers.length,
       pipelineCounts,
       // 仅保留数据源类 API 的逐源抓取数量（arXiv / bioRxiv / Google 等抓到多少篇）。
       sources: fetchReport.apis
@@ -5699,6 +5872,7 @@ if (require.main === module) {
 module.exports = {
   DEFAULT_KEYWORDS,
   addCandidatePaperToArchive,
+  clearUnstarredPaperArchive,
   removeCandidatePaperFromArchive,
   dedupePapers,
   dedupePaperArchive,
@@ -5713,6 +5887,7 @@ module.exports = {
   cleanSearchLogic,
   cleanKeywords,
   enrichPapersWithCrossref,
+  enrichPapersWithPublisherDates,
   enrichPapersWithJournalMetrics,
   enrichPapersWithLlmInsights,
   enrichTruncatedGoogleTitles,
