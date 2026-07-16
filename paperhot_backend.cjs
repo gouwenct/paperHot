@@ -22,6 +22,9 @@ const USER_PROFILE_FILE = path.join(USER_DATA_DIR, "profile.json");
 const JOURNAL_METRICS_CONFIG_FILE = path.join(__dirname, "config", "journal-metrics.json");
 const GOOGLE_SCHOLAR_CONFIG_FILE = path.join(__dirname, "config", "google-scholar.json");
 const WEB_OF_SCIENCE_CONFIG_FILE = path.join(__dirname, "config", "web-of-science.json");
+const FIRECRAWL_CONFIG_FILE = path.join(__dirname, "config", "firecrawl.json");
+const ACADEMIC_APIS_CONFIG_FILE = path.join(__dirname, "config", "academic-apis.json");
+const OPENALEX_CONFIG_FILE = path.join(__dirname, "config", "openalex.json");
 const LLM_CONFIG_FILE = path.join(__dirname, "config", "llm.json");
 // “最近”抓取模式的默认起始日期（含当日）。从该日期一直抓取到今天。
 const RECENT_RANGE_START = "2026-05-01";
@@ -30,6 +33,7 @@ const API_LABELS = {
   arxiv: "arXiv",
   biorxiv: "bioRxiv",
   semanticscholar: "Semantic Scholar",
+  openalex: "OpenAlex",
   googlescholar: "Google Scholar (SerpApi)",
   googlesearch: "Google 搜索 (SerpApi)",
   webofscience: "Web of Science",
@@ -80,7 +84,18 @@ const DOMAIN_ANCHOR_KEYWORDS = [
 const ARXIV_ENDPOINT = "https://export.arxiv.org/api/query";
 const BIORXIV_ENDPOINT = "https://api.biorxiv.org/details/biorxiv";
 const SEMANTIC_SCHOLAR_ENDPOINT = "https://api.semanticscholar.org/graph/v1/paper/search";
+const SEMANTIC_SCHOLAR_PAPER_ENDPOINT = "https://api.semanticscholar.org/graph/v1/paper";
+const SEMANTIC_SCHOLAR_BATCH_ENDPOINT = `${SEMANTIC_SCHOLAR_PAPER_ENDPOINT}/batch`;
 const CROSSREF_WORKS_ENDPOINT = "https://api.crossref.org/works";
+const DEFAULT_ACADEMIC_APIS_CONFIG = { contactEmail: "" };
+const DEFAULT_OPENALEX_CONFIG = {
+  provider: "openalex",
+  enabled: false,
+  endpoint: "https://api.openalex.org/works",
+  apiKey: "",
+  maxPages: 3,
+  perPage: 100
+};
 const DEFAULT_JOURNAL_METRICS_MIN_INTERVAL_MS = 500;
 const DEFAULT_JOURNAL_METRICS_CONFIG = {
   provider: "easyscholar",
@@ -171,6 +186,12 @@ const DEFAULT_USER_PROFILE = {
   locale: "zh-CN",
   background: DEFAULT_USER_BACKGROUND
 };
+const DEFAULT_FIRECRAWL_CONFIG = {
+  provider: "firecrawl",
+  enabled: false,
+  endpoint: "https://api.firecrawl.dev/v2/scrape",
+  apiKey: ""
+};
 const DEFAULT_WEB_OF_SCIENCE_CONFIG = {
   provider: "web-of-science",
   enabled: false,
@@ -248,6 +269,12 @@ const DEFAULT_USER_CONFIG = {
       desc: "通过 Semantic Scholar Paper Search API 补充论文、引用和开放 PDF；当前不需要填写密钥。",
       tags: ["论文数据库", "无需配置", "开放 PDF"],
       enabled: true
+    },
+    {
+      title: "OpenAlex",
+      desc: "通过 OpenAlex Works API 检索论文并补充开放元数据；需要免费的 API Key。",
+      tags: ["论文数据库", "需配置 API", "开放元数据"],
+      enabled: false
     }
   ]
 };
@@ -255,6 +282,8 @@ const GOOGLE_SCHOLAR_MAX_PAGES_LIMIT = 10;
 const GOOGLE_SCHOLAR_NUM_LIMIT = 20;
 const WEB_OF_SCIENCE_MAX_PAGES_LIMIT = 5;
 const WEB_OF_SCIENCE_PAGE_SIZE_LIMIT = 50;
+const OPENALEX_MAX_PAGES_LIMIT = 10;
+const OPENALEX_PER_PAGE_LIMIT = 100;
 const JOURNAL_METRICS_RATE_LIMITER = {
   lastRequestAt: 0,
   chain: Promise.resolve()
@@ -344,6 +373,94 @@ function looksLikeTruncatedText(value) {
   return /(?:\.\.\.|…)/.test(compactText(value));
 }
 
+function cleanAbstractText(value) {
+  return compactText(stripTags(String(value || "")
+    .replace(/([\p{L}\p{N}])-\s*\r?\n\s*([\p{L}\p{N}])/gu, "$1$2")))
+    .replace(/\b(?:abstract|background|objective|purpose|methods?|results?|conclusions?)\s*[:：]\s*/gi, "")
+    .normalize("NFKC")
+    .trim();
+}
+
+function abstractMatchText(value) {
+  return cleanAbstractText(value)
+    .toLowerCase()
+    .replace(/[\p{P}\p{Z}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isCompleteAbstract(value) {
+  const text = cleanAbstractText(value);
+  return Boolean(text)
+    && !looksLikeTruncatedText(text)
+    && !looksLikeGeneratedChineseSummary(text)
+    && !isRobotChallengeText(text);
+}
+
+function abstractSourceLabel(value) {
+  const label = compactText(value).toLowerCase();
+  const key = label.replace(/[^a-z]/g, "");
+  if (label.includes("semantic scholar") || key.startsWith("semanticscholar")) return "semantic-scholar";
+  if (label.includes("openalex") || key.startsWith("openalex")) return "openalex";
+  if (label.includes("web of science") || key.startsWith("webofscience") || key === "wos") return "wos";
+  if (key.startsWith("crossref")) return "crossref";
+  if (key.startsWith("arxiv")) return "arxiv";
+  if (key.startsWith("biorxiv")) return "biorxiv";
+  return label;
+}
+
+function abstractCandidateMatchesPaper(candidate, paper) {
+  const candidateDoi = normalizeDoi(candidate?.doi);
+  const paperDoi = normalizeDoi(paper?.doi);
+  if (candidateDoi && paperDoi) return candidateDoi === paperDoi;
+  const candidateTitle = normalizedTitleKey(candidate?.title);
+  const paperTitle = normalizedTitleKey(paper?.title);
+  if (!candidateTitle || candidateTitle !== paperTitle) return false;
+  const candidateAuthors = Array.isArray(candidate?.authors) ? candidate.authors : [];
+  const paperAuthors = Array.isArray(paper?.authors) ? paper.authors : [];
+  return !candidateAuthors.length || !paperAuthors.length || hasMeaningfulAuthorOverlap(candidateAuthors, paperAuthors);
+}
+
+function normalizeAbstractCandidate(source, value, paper) {
+  if (!value) return null;
+  const isExactText = typeof value === "string";
+  const record = isExactText ? { abstract: value } : value;
+  const cleanAbstract = cleanAbstractText(record.cleanAbstract || record.rawAbstract || record.abstract || record.summary);
+  const candidate = {
+    source: abstractSourceLabel(source),
+    doi: normalizeDoi(record.doi || (isExactText ? paper?.doi : "")),
+    title: compactText(record.title || (isExactText ? paper?.title : "")),
+    authors: Array.isArray(record.authors) ? record.authors.map(compactText).filter(Boolean) : (paper?.authors || []),
+    rawAbstract: compactText(record.rawAbstract || record.abstract || record.summary),
+    cleanAbstract,
+    matchText: abstractMatchText(cleanAbstract),
+    isComplete: isCompleteAbstract(cleanAbstract),
+    error: ""
+  };
+  return candidate.isComplete && abstractCandidateMatchesPaper(candidate, paper) ? candidate : null;
+}
+
+function selectMatchingAbstractCandidate(candidates) {
+  for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
+    const left = candidates[leftIndex];
+    if (!left?.isComplete && !isCompleteAbstract(left?.cleanAbstract)) continue;
+    const leftText = left.matchText || abstractMatchText(left.cleanAbstract);
+    for (let rightIndex = leftIndex + 1; rightIndex < candidates.length; rightIndex += 1) {
+      const right = candidates[rightIndex];
+      if (abstractSourceLabel(left.source) === abstractSourceLabel(right?.source)) continue;
+      if (!right?.isComplete && !isCompleteAbstract(right?.cleanAbstract)) continue;
+      const rightText = right.matchText || abstractMatchText(right.cleanAbstract);
+      if (!leftText || leftText !== rightText) continue;
+      const preferred = cleanAbstractText(left.cleanAbstract).length >= cleanAbstractText(right.cleanAbstract).length ? left : right;
+      return {
+        abstract: cleanAbstractText(preferred.cleanAbstract),
+        sources: [abstractSourceLabel(left.source), abstractSourceLabel(right.source)]
+      };
+    }
+  }
+  return null;
+}
+
 function inferPaperShortTitle(paper = {}) {
   const existing = compactText(paper.shortTitle);
   if (/^(19|20)\d{2}@[\w.-]*$/i.test(existing)) return existing;
@@ -428,22 +545,347 @@ async function fetchOriginalAbstractForPaper(paper, options = {}) {
   return "";
 }
 
-async function recoverGeneratedSummaryPapers(papers, options = {}) {
-  const errors = Array.isArray(options.errors) ? options.errors : null;
-  return Promise.all(papers.map(async paper => {
-    const summary = compactText(paper?.summary);
-    const hasTruncatedText = paperHasTruncatedAbstractText(paper);
-    const hasUsableSummary = summary && !looksLikeGeneratedChineseSummary(summary) && !looksLikeTruncatedText(summary);
-    if (compactText(paper?.abstractZh) && !hasTruncatedText) return paper;
-    if (!compactText(paper?.abstractZh) && hasUsableSummary) return paper;
-    try {
-      const summary = await fetchOriginalAbstractForPaper(paper, options);
-      return summary ? { ...paper, summary } : paper;
-    } catch (error) {
-      if (errors) errors.push({ source: "abstract", message: error.message });
-      return paper;
+async function fetchSemanticScholarAbstractByDoi(paper, options = {}) {
+  const doi = normalizeDoi(paper?.doi);
+  if (!doi) return null;
+  const fetchImpl = options.abstractFetchImpl || options.fetchImpl || fetch;
+  const fields = "paperId,title,abstract,externalIds,authors";
+  const response = await fetchImpl(`${SEMANTIC_SCHOLAR_PAPER_ENDPOINT}/DOI:${encodeURIComponent(doi)}?fields=${fields}`, {
+    headers: { "User-Agent": "paperHOT/0.1 (local research prototype)", Accept: "application/json" },
+    signal: AbortSignal.timeout(20000)
+  });
+  if (!response.ok) return null;
+  const item = await response.json();
+  return {
+    doi: normalizeDoi(item?.externalIds?.DOI || doi),
+    title: item?.title,
+    authors: Array.isArray(item?.authors) ? item.authors.map(author => author?.name).filter(Boolean) : [],
+    abstract: item?.abstract
+  };
+}
+
+async function fetchSemanticScholarAbstractBatch(papers, options = {}) {
+  const dois = [...new Set(papers.map(preferredPaperDoi).filter(Boolean))];
+  if (!dois.length) return new Map();
+  const fetchImpl = options.abstractFetchImpl || options.fetchImpl || fetch;
+  const request = () => fetchImpl(`${SEMANTIC_SCHOLAR_BATCH_ENDPOINT}?fields=paperId,title,abstract,externalIds,authors`, {
+    method: "POST",
+    headers: { "User-Agent": "paperHOT/0.1 (local research prototype)", Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ ids: dois.map(doi => `DOI:${doi}`) }),
+    signal: AbortSignal.timeout(20000)
+  });
+  let response = await request();
+  for (let attempt = 0; response.status === 429 && attempt < 2; attempt += 1) {
+    const retryAfterSeconds = Number(response.headers?.get?.("retry-after") || 0);
+    await sleep(retryAfterSeconds > 0 ? Math.min(retryAfterSeconds * 1000, 30000) : 1500);
+    response = await request();
+  }
+  if (!response.ok) throw new Error(`Semantic Scholar 摘要批量补全失败：HTTP ${response.status}`);
+  const items = await response.json();
+  const byDoi = new Map();
+  dois.forEach((doi, index) => {
+    const item = Array.isArray(items) ? items[index] : null;
+    if (!item) return;
+    byDoi.set(doi, {
+      doi: normalizeDoi(item?.externalIds?.DOI || doi),
+      title: item?.title,
+      authors: Array.isArray(item?.authors) ? item.authors.map(author => author?.name).filter(Boolean) : [],
+      abstract: item?.abstract
+    });
+  });
+  return byDoi;
+}
+
+function restoreOpenAlexAbstract(index) {
+  if (!index || typeof index !== "object") return "";
+  const words = [];
+  Object.entries(index).forEach(([word, positions]) => {
+    if (!Array.isArray(positions)) return;
+    positions.forEach(position => {
+      if (Number.isInteger(position) && position >= 0) words[position] = word;
+    });
+  });
+  return compactText(words.filter(Boolean).join(" "));
+}
+
+async function openAlexRequestOptions(options = {}) {
+  const config = options.config || await readOpenAlexConfig(options.configFile || options.openAlexConfigFile);
+  const academicApis = options.academicApis || await readAcademicApisConfig(options.academicApisConfigFile);
+  return {
+    config,
+    fetchImpl: options.fetchImpl || options.abstractFetchImpl || fetch,
+    headers: {
+      Accept: "application/json",
+      "User-Agent": academicApis.contactEmail
+        ? `paperHOT/0.1 (mailto:${academicApis.contactEmail})`
+        : "paperHOT/0.1 (local research prototype)"
     }
+  };
+}
+
+function openAlexWorkUrl(endpoint, doi) {
+  return `${String(endpoint || DEFAULT_OPENALEX_CONFIG.endpoint).replace(/\/$/, "")}/doi:${normalizeDoi(doi)}`;
+}
+
+async function fetchOpenAlexWorkByDoi(paper, options = {}) {
+  const doi = normalizeDoi(paper?.doi);
+  if (!doi) return null;
+  const { config, fetchImpl, headers } = await openAlexRequestOptions(options);
+  if (!config.enabled || !config.apiKey) return null;
+  const url = new URL(openAlexWorkUrl(config.endpoint, doi));
+  url.searchParams.set("api_key", config.apiKey);
+  const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(20000) });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`OpenAlex 字段补全失败：HTTP ${response.status}`);
+  return response.json();
+}
+
+async function fetchOpenAlexAbstractByDoi(paper, options = {}) {
+  const item = await fetchOpenAlexWorkByDoi(paper, options);
+  if (!item) return null;
+  return {
+    doi: normalizeDoi(item.doi || item.ids?.doi || paper.doi),
+    title: item.title || item.display_name,
+    authors: Array.isArray(item.authorships)
+      ? item.authorships.map(entry => compactText(entry?.author?.display_name)).filter(Boolean)
+      : [],
+    abstract: restoreOpenAlexAbstract(item.abstract_inverted_index)
+  };
+}
+
+async function fetchCrossrefAbstractByDoi(paper, options = {}) {
+  const metadata = await fetchCrossrefWorkByDoi(paper?.doi, {
+    fetchImpl: options.abstractFetchImpl || options.fetchImpl || fetch,
+    academicApis: options.academicApis,
+    academicApisConfigFile: options.academicApisConfigFile
+  });
+  return metadata?.abstract ? { ...metadata, abstract: metadata.abstract } : null;
+}
+
+async function fetchWebOfScienceAbstractByDoi(paper, options = {}) {
+  const doi = normalizeDoi(paper?.doi);
+  if (!doi) return null;
+  const config = options.webOfScience?.config || await readWebOfScienceConfig(options.webOfScience?.configFile);
+  if (!config.enabled || !config.endpoint || !config.apiKey) return null;
+  const papers = await fetchWebOfSciencePapers([], {
+    ...(options.webOfScience || {}),
+    config,
+    dataDir: options.dataDir,
+    rawQuery: `DO=(${doi})`,
+    searchMode: "exact",
+    maxPages: 1,
+    startPage: 1,
+    fetchImpl: options.webOfScience?.fetchImpl || options.abstractFetchImpl
+  });
+  return papers.find(candidate => normalizeDoi(candidate.doi) === doi) || null;
+}
+
+function markdownAbstract(markdown) {
+  const match = String(markdown || "").match(/(?:^|\n)#{1,6}\s*abstract\s*\n+([\s\S]*?)(?=\n#{1,6}\s+|$)/i);
+  if (!match) return "";
+  const blocks = match[1].split(/\n\s*\n/).map(cleanMultilineText).filter(Boolean);
+  const abstractBlocks = [];
+  for (const block of blocks) {
+    if (/^(?:click to copy|this is a preview|acs publications|copyright\b|©|access this article)/i.test(block)) {
+      if (abstractBlocks.length) break;
+      continue;
+    }
+    if (/^(?:!\[|[-*]\s|\[.+\]\()/.test(block)) {
+      if (abstractBlocks.length) break;
+      continue;
+    }
+    if (!abstractBlocks.length && block.length < 40) continue;
+    abstractBlocks.push(block);
+  }
+  return abstractBlocks.join(" ");
+}
+
+async function fetchFirecrawlAbstractForPaper(paper, options = {}) {
+  const doi = normalizeDoi(paper?.doi);
+  if (!doi) return null;
+  const config = options.config || await readFirecrawlConfig(options.configFile);
+  if (!config.enabled || !config.endpoint || !config.apiKey) return null;
+  const fetchImpl = options.fetchImpl || fetch;
+  const headers = {
+    Authorization: `Bearer ${config.apiKey}`,
+    Accept: "application/json",
+    "Content-Type": "application/json"
+  };
+  const scrape = async url => {
+    const response = await fetchImpl(config.endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        url,
+        formats: ["markdown", "rawHtml"],
+        onlyMainContent: true,
+        proxy: "auto",
+        timeout: 25000
+      }),
+      signal: AbortSignal.timeout(30000)
+    });
+    if (!response.ok) throw new Error(`Firecrawl 摘要抓取失败：HTTP ${response.status}`);
+    const payload = await response.json();
+    if (payload?.success === false) throw new Error(payload.error || "Firecrawl 摘要抓取失败");
+    const data = payload?.data || {};
+    const metadataAbstract = cleanAbstractText(htmlMetaContent(data.rawHtml, ["citation_abstract", "dc.description"]));
+    const abstract = isCompleteAbstract(metadataAbstract)
+      ? metadataAbstract
+      : cleanAbstractText(markdownAbstract(data.markdown));
+    if (!isCompleteAbstract(abstract)) return null;
+    return {
+      doi,
+      title: data.metadata?.title || paper.title,
+      authors: paper.authors || [],
+      abstract
+    };
+  };
+  const knownUrls = [...new Set([
+    `https://doi.org/${doi}`,
+    compactText(paper?.url)
+  ].filter(url => /^https?:\/\//i.test(url)))];
+  const searchEndpoint = String(config.endpoint).replace(/\/scrape\/?$/i, "/search");
+  const searchCandidates = async () => {
+    if (searchEndpoint === config.endpoint) return null;
+    const response = await fetchImpl(searchEndpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        query: `"${doi}" "${compactText(paper?.title)}"`,
+        limit: 5,
+        sources: ["web"],
+        categories: ["research", "pdf"],
+        timeout: 15000,
+        ignoreInvalidURLs: true
+      }),
+      signal: AbortSignal.timeout(20000)
+    });
+    if (!response.ok) throw new Error(`Firecrawl 摘要搜索失败：HTTP ${response.status}`);
+    const payload = await response.json();
+    if (payload?.success === false) throw new Error(payload.error || "Firecrawl 摘要搜索失败");
+    const urls = [...new Set((payload?.data?.web || [])
+      .map(item => compactText(item?.url))
+      .filter(url => /^https?:\/\//i.test(url) && !knownUrls.includes(url)))]
+      .slice(0, 3);
+    if (!urls.length) return null;
+    try {
+      return await Promise.any(urls.map(url => scrape(url).then(result => result || Promise.reject(null))));
+    } catch (error) {
+      const cause = error?.errors?.find(item => item instanceof Error);
+      if (cause) throw cause;
+      return null;
+    }
+  };
+  try {
+    return await Promise.any([
+      ...knownUrls.map(url => scrape(url)),
+      searchCandidates()
+    ].map(request => request.then(result => result || Promise.reject(null))));
+  } catch (error) {
+    const cause = error?.errors?.find(item => item instanceof Error);
+    if (cause) throw cause;
+    return null;
+  }
+}
+
+function defaultAbstractSources(paper, options) {
+  const directSource = arxivIdFromPaper(paper)
+    ? "arxiv"
+    : (doiFromBioRxivUrl(paper?.url) || /biorxiv\.org/i.test(paper?.url || "") ? "biorxiv" : "publisher");
+  return {
+    wos: () => fetchWebOfScienceAbstractByDoi(paper, options),
+    semanticScholar: async () => options.semanticScholarBatchPromise
+      ? (await options.semanticScholarBatchPromise).get(normalizeDoi(paper?.doi)) || null
+      : fetchSemanticScholarAbstractByDoi(paper, options),
+    openAlex: () => fetchOpenAlexAbstractByDoi(paper, options.openAlex || options),
+    crossref: () => fetchCrossrefAbstractByDoi(paper, options),
+    firecrawl: () => fetchFirecrawlAbstractForPaper(paper, options.firecrawl || {}),
+    [directSource]: () => fetchOriginalAbstractForPaper(paper, options)
+  };
+}
+
+async function recoverAbstractConsensus(paper, options = {}) {
+  const errors = Array.isArray(options.errors) ? options.errors : null;
+  const lookupPaper = { ...paper, doi: preferredPaperDoi(paper) };
+  const currentSource = abstractSourceLabel(lookupPaper?.retrievalSource || lookupPaper?.source || "existing");
+  const current = normalizeAbstractCandidate(currentSource, {
+    doi: lookupPaper?.doi,
+    title: lookupPaper?.title,
+    authors: lookupPaper?.authors,
+    abstract: lookupPaper?.summary
+  }, lookupPaper);
+  if (current) {
+    return { abstract: current.cleanAbstract, sources: [current.source], doi: lookupPaper.doi };
+  }
+  const sources = options.abstractSources || defaultAbstractSources(lookupPaper, options);
+  const pending = Object.entries(sources).map(([source, loader], index) => ({
+    index,
+    promise: Promise.resolve()
+      .then(() => loader(lookupPaper))
+      .then(value => ({ index, source, value }))
+      .catch(error => ({ index, source, error }))
   }));
+
+  while (pending.length) {
+    const result = await Promise.race(pending.map(item => item.promise));
+    pending.splice(pending.findIndex(item => item.index === result.index), 1);
+    if (result.error) {
+      if (errors) errors.push({ source: "abstract", message: `${abstractSourceLabel(result.source)}: ${result.error.message}` });
+      continue;
+    }
+    const candidate = normalizeAbstractCandidate(result.source, result.value, lookupPaper);
+    if (!candidate) continue;
+    return {
+      abstract: candidate.cleanAbstract,
+      sources: [candidate.source],
+      doi: lookupPaper.doi
+    };
+  }
+  return null;
+}
+
+async function recoverGeneratedSummaryPapers(papers, options = {}) {
+  const academicApis = options.academicApis
+    || (options.abstractSources
+      ? DEFAULT_ACADEMIC_APIS_CONFIG
+      : await readAcademicApisConfig(options.academicApisConfigFile));
+  const semanticScholarBatchPromise = options.abstractSources ? null : fetchSemanticScholarAbstractBatch(papers, options)
+    .catch(error => {
+      if (Array.isArray(options.errors)) options.errors.push({ source: "abstract", message: error.message });
+      return new Map();
+    });
+  const recoveryOptions = {
+    ...options,
+    academicApis,
+    ...(semanticScholarBatchPromise ? { semanticScholarBatchPromise } : {})
+  };
+  return mapWithConcurrency(papers, 2, async paper => {
+    if (compactText(paper?.abstractZh)
+      && !paperHasTruncatedAbstractText(paper)
+      && paper?.tokenUsage?.status === "已调用 AI") return paper;
+    if (Array.isArray(paper?.abstractConsensusSources)
+      && paper.abstractConsensusSources.length >= 1
+      && isCompleteAbstract(paper?.summary)) {
+      return { ...paper, abstractStatus: "confirmed" };
+    }
+    const match = await recoverAbstractConsensus(paper, recoveryOptions);
+    if (!match) {
+      return {
+        ...paper,
+        doi: preferredPaperDoi(paper),
+        abstractZh: paperHasTruncatedAbstractText(paper) ? "" : paper.abstractZh,
+        abstractStatus: "unconfirmed",
+        abstractConsensusSources: []
+      };
+    }
+    return {
+      ...paper,
+      doi: match.doi || paper.doi,
+      summary: match.abstract,
+      abstractStatus: "confirmed",
+      abstractConsensusSources: match.sources
+    };
+  });
 }
 
 function decodeXml(value) {
@@ -461,11 +903,12 @@ function decodeXml(value) {
 }
 
 function normalizeDoi(value) {
-  return decodeXml(value)
+  const doi = decodeXml(value)
     .replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "")
     .replace(/^doi:\s*/i, "")
     .trim()
     .toLowerCase();
+  return doi.replace(/^(10\.1117\/[^?#\s]+?)\.(?:short|full)$/i, "$1");
 }
 
 function detectExactPaperInput(value) {
@@ -527,9 +970,11 @@ function datePrecision(value) {
 const DATE_PRECISION_RANK = { unknown: 0, year: 1, month: 2, day: 3 };
 
 function mostPrecisePublishedDate(values) {
-  return values.filter(Boolean).reduce((best, value) => (
-    DATE_PRECISION_RANK[datePrecision(value)] > DATE_PRECISION_RANK[datePrecision(best)] ? value : best
-  ), "");
+  return values.filter(Boolean).reduce((best, value) => {
+    const rank = DATE_PRECISION_RANK[datePrecision(value)];
+    const bestRank = DATE_PRECISION_RANK[datePrecision(best)];
+    return rank > bestRank || (rank === bestRank && value < best) ? value : best;
+  }, "");
 }
 
 function normalizeCitationCount(value) {
@@ -1157,6 +1602,75 @@ async function readWebOfScienceConfig(file = WEB_OF_SCIENCE_CONFIG_FILE) {
   return cleanWebOfScienceConfig(await readJsonFile(file, DEFAULT_WEB_OF_SCIENCE_CONFIG));
 }
 
+function cleanFirecrawlConfig(value) {
+  const input = value && typeof value === "object" ? value : {};
+  const apiKey = String(input.apiKey || "").trim();
+  return {
+    provider: String(input.provider || DEFAULT_FIRECRAWL_CONFIG.provider),
+    enabled: input.enabled === true,
+    endpoint: String(input.endpoint || DEFAULT_FIRECRAWL_CONFIG.endpoint),
+    apiKey: apiKey === "********" ? "" : apiKey
+  };
+}
+
+async function readFirecrawlConfig(file = FIRECRAWL_CONFIG_FILE) {
+  return cleanFirecrawlConfig(await readJsonFile(file, DEFAULT_FIRECRAWL_CONFIG));
+}
+
+function cleanAcademicApisConfig(value) {
+  const contactEmail = String(value?.contactEmail || "").trim();
+  if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+    throw new Error("学术 API 联系邮箱格式不正确");
+  }
+  return { contactEmail };
+}
+
+async function readAcademicApisConfig(file = ACADEMIC_APIS_CONFIG_FILE) {
+  return cleanAcademicApisConfig(await readJsonFile(file, DEFAULT_ACADEMIC_APIS_CONFIG));
+}
+
+function cleanOpenAlexConfig(value) {
+  const input = value && typeof value === "object" ? value : {};
+  const apiKey = String(input.apiKey || "").trim();
+  return {
+    provider: String(input.provider || DEFAULT_OPENALEX_CONFIG.provider),
+    enabled: input.enabled === true,
+    endpoint: String(input.endpoint || DEFAULT_OPENALEX_CONFIG.endpoint),
+    apiKey: apiKey === "********" ? "" : apiKey,
+    maxPages: clampPositiveInteger(input.maxPages, DEFAULT_OPENALEX_CONFIG.maxPages, 1, OPENALEX_MAX_PAGES_LIMIT),
+    perPage: clampPositiveInteger(input.perPage, DEFAULT_OPENALEX_CONFIG.perPage, 1, OPENALEX_PER_PAGE_LIMIT)
+  };
+}
+
+async function readOpenAlexConfig(file = OPENALEX_CONFIG_FILE) {
+  return cleanOpenAlexConfig(await readJsonFile(file, DEFAULT_OPENALEX_CONFIG));
+}
+
+async function readFirecrawlCreditUsage(config, fetchImpl = fetch) {
+  if (!config.apiKey) return { status: "unconfigured" };
+  try {
+    const endpoint = new URL("/v2/team/credit-usage", config.endpoint).toString();
+    const response = await fetchImpl(endpoint, {
+      headers: { Authorization: `Bearer ${config.apiKey}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(10000)
+    });
+    if (!response.ok) return { status: "error", httpStatus: response.status };
+    const payload = await response.json();
+    const remainingCredits = Number(payload?.data?.remainingCredits);
+    const planCredits = Number(payload?.data?.planCredits);
+    if (!Number.isFinite(remainingCredits) || !Number.isFinite(planCredits)) return { status: "error" };
+    return {
+      status: "ok",
+      remainingCredits,
+      planCredits,
+      billingPeriodStart: String(payload.data.billingPeriodStart || ""),
+      billingPeriodEnd: String(payload.data.billingPeriodEnd || "")
+    };
+  } catch {
+    return { status: "error" };
+  }
+}
+
 function cleanLlmProvider(value, fallback = {}) {
   const input = value && typeof value === "object" ? value : {};
   const id = String(input.id || fallback.id || input.provider || fallback.provider || "custom").trim();
@@ -1257,6 +1771,9 @@ async function readIntegrationConfigs(options = {}) {
   const googleScholar = await readGoogleScholarConfig(options.googleScholarConfigFile);
   const journalMetrics = await readJournalMetricsConfig(options.journalMetricsConfigFile);
   const webOfScience = await readWebOfScienceConfig(options.webOfScienceConfigFile);
+  const firecrawl = await readFirecrawlConfig(options.firecrawlConfigFile);
+  const academicApis = await readAcademicApisConfig(options.academicApisConfigFile);
+  const openAlex = await readOpenAlexConfig(options.openAlexConfigFile);
   return {
     llm: maskSecretConfig(llm),
     googleScholar: maskSecretConfig(googleScholar),
@@ -1264,7 +1781,13 @@ async function readIntegrationConfigs(options = {}) {
     webOfScience: {
       ...maskSecretConfig(webOfScience),
       usage: await readWebOfScienceUsage(options.dataDir || DATA_DIR)
-    }
+    },
+    firecrawl: {
+      ...maskSecretConfig(firecrawl),
+      usage: await readFirecrawlCreditUsage(firecrawl, options.firecrawlFetchImpl)
+    },
+    openAlex: maskSecretConfig(openAlex),
+    academicApis
   };
 }
 
@@ -1273,6 +1796,8 @@ async function readIntegrationSecrets(options = {}) {
   const googleScholar = await readGoogleScholarConfig(options.googleScholarConfigFile);
   const journalMetrics = await readJournalMetricsConfig(options.journalMetricsConfigFile);
   const webOfScience = await readWebOfScienceConfig(options.webOfScienceConfigFile);
+  const firecrawl = await readFirecrawlConfig(options.firecrawlConfigFile);
+  const openAlex = await readOpenAlexConfig(options.openAlexConfigFile);
   return {
     llm: {
       apiKey: llm.apiKey || "",
@@ -1283,7 +1808,9 @@ async function readIntegrationSecrets(options = {}) {
     },
     googleScholar: { apiKey: googleScholar.apiKey || "" },
     journalMetrics: { apiKey: journalMetrics.apiKey || "" },
-    webOfScience: { apiKey: webOfScience.apiKey || "" }
+    webOfScience: { apiKey: webOfScience.apiKey || "" },
+    firecrawl: { apiKey: firecrawl.apiKey || "" },
+    openAlex: { apiKey: openAlex.apiKey || "" }
   };
 }
 
@@ -1292,7 +1819,8 @@ function mergeSecretConfig(previous, next, cleaner) {
     ...previous,
     ...(next && typeof next === "object" ? next : {})
   });
-  if (!String(next?.apiKey || "").trim()) {
+  const nextApiKey = String(next?.apiKey || "").trim();
+  if (!nextApiKey || nextApiKey === "********") {
     merged.apiKey = previous.apiKey || "";
   }
   return merged;
@@ -1335,20 +1863,35 @@ async function writeIntegrationConfigs(payload = {}, options = {}) {
   const googleFile = options.googleScholarConfigFile || GOOGLE_SCHOLAR_CONFIG_FILE;
   const journalFile = options.journalMetricsConfigFile || JOURNAL_METRICS_CONFIG_FILE;
   const webOfScienceFile = options.webOfScienceConfigFile || WEB_OF_SCIENCE_CONFIG_FILE;
+  const firecrawlFile = options.firecrawlConfigFile || FIRECRAWL_CONFIG_FILE;
+  const academicApisFile = options.academicApisConfigFile || ACADEMIC_APIS_CONFIG_FILE;
+  const openAlexFile = options.openAlexConfigFile || OPENALEX_CONFIG_FILE;
   const previousLlm = await readLlmConfig(llmFile);
   const previousGoogle = await readGoogleScholarConfig(googleFile);
   const previousJournal = await readJournalMetricsConfig(journalFile);
   const previousWebOfScience = await readWebOfScienceConfig(webOfScienceFile);
+  const previousFirecrawl = await readFirecrawlConfig(firecrawlFile);
+  const previousAcademicApis = await readAcademicApisConfig(academicApisFile);
+  const previousOpenAlex = await readOpenAlexConfig(openAlexFile);
   const llm = mergeLlmConfig(previousLlm, payload.llm);
   const googleScholar = mergeSecretConfig(previousGoogle, payload.googleScholar, cleanGoogleScholarConfig);
   const journalMetrics = mergeSecretConfig(previousJournal, payload.journalMetrics, cleanJournalMetricsConfig);
   const webOfScience = mergeSecretConfig(previousWebOfScience, payload.webOfScience, cleanWebOfScienceConfig);
+  const firecrawl = mergeSecretConfig(previousFirecrawl, payload.firecrawl, cleanFirecrawlConfig);
+  const openAlex = mergeSecretConfig(previousOpenAlex, payload.openAlex, cleanOpenAlexConfig);
+  const academicApis = cleanAcademicApisConfig({
+    ...previousAcademicApis,
+    ...(payload.academicApis && typeof payload.academicApis === "object" ? payload.academicApis : {})
+  });
 
   await Promise.all([
     writeJsonFile(llmFile, llm),
     writeJsonFile(googleFile, googleScholar),
     writeJsonFile(journalFile, journalMetrics),
-    writeJsonFile(webOfScienceFile, webOfScience)
+    writeJsonFile(webOfScienceFile, webOfScience),
+    writeJsonFile(firecrawlFile, firecrawl),
+    writeJsonFile(openAlexFile, openAlex),
+    writeJsonFile(academicApisFile, academicApis)
   ]);
   return {
     llm: maskSecretConfig(llm),
@@ -1357,7 +1900,13 @@ async function writeIntegrationConfigs(payload = {}, options = {}) {
     webOfScience: {
       ...maskSecretConfig(webOfScience),
       usage: await readWebOfScienceUsage(options.dataDir || DATA_DIR)
-    }
+    },
+    firecrawl: {
+      ...maskSecretConfig(firecrawl),
+      usage: await readFirecrawlCreditUsage(firecrawl, options.firecrawlFetchImpl)
+    },
+    openAlex: maskSecretConfig(openAlex),
+    academicApis
   };
 }
 
@@ -1899,7 +2448,10 @@ async function exportLocalData(options = {}) {
       llm: await readLlmConfig(options.llmConfigFile),
       googleScholar: await readGoogleScholarConfig(options.googleScholarConfigFile),
       journalMetrics: await readJournalMetricsConfig(options.journalMetricsConfigFile),
-      webOfScience: await readWebOfScienceConfig(options.webOfScienceConfigFile)
+      webOfScience: await readWebOfScienceConfig(options.webOfScienceConfigFile),
+      firecrawl: await readFirecrawlConfig(options.firecrawlConfigFile),
+      openAlex: await readOpenAlexConfig(options.openAlexConfigFile),
+      academicApis: await readAcademicApisConfig(options.academicApisConfigFile)
     };
   }
   return includeSecrets ? payload : sanitizeLocalExportValue(payload);
@@ -1961,7 +2513,10 @@ async function buildLocalDataExportFiles(options = {}) {
       { path: "config/llm.json", content: jsonText(data.integrations.llm || {}) },
       { path: "config/google-scholar.json", content: jsonText(data.integrations.googleScholar || {}) },
       { path: "config/journal-metrics.json", content: jsonText(data.integrations.journalMetrics || {}) },
-      { path: "config/web-of-science.json", content: jsonText(data.integrations.webOfScience || {}) }
+      { path: "config/web-of-science.json", content: jsonText(data.integrations.webOfScience || {}) },
+      { path: "config/firecrawl.json", content: jsonText(data.integrations.firecrawl || {}) },
+      { path: "config/openalex.json", content: jsonText(data.integrations.openAlex || {}) },
+      { path: "config/academic-apis.json", content: jsonText(data.integrations.academicApis || {}) }
     );
   }
   return files;
@@ -2100,6 +2655,9 @@ async function importLocalDataZip(input, options = {}) {
   const googleScholar = parseZipJsonEntry(entries, "config/google-scholar.json");
   const journalMetrics = parseZipJsonEntry(entries, "config/journal-metrics.json");
   const webOfScience = parseZipJsonEntry(entries, "config/web-of-science.json");
+  const firecrawl = parseZipJsonEntry(entries, "config/firecrawl.json");
+  const openAlex = parseZipJsonEntry(entries, "config/openalex.json");
+  const academicApis = parseZipJsonEntry(entries, "config/academic-apis.json");
   const paperCacheFiles = {};
   Object.keys(entries).forEach(entryName => {
     const match = entryName.match(/^data\/papers\/(\d{4}-\d{2}-\d{2}(?:-recent)?\.json)$/);
@@ -2118,12 +2676,15 @@ async function importLocalDataZip(input, options = {}) {
   if (googleRollingCursors) payload.papers.googleRollingCursors = googleRollingCursors;
   if (webOfScienceUsage) payload.papers.webOfScienceUsage = webOfScienceUsage;
   if (Object.keys(paperCacheFiles).length) payload.papers.paperCacheFiles = paperCacheFiles;
-  if (llm || googleScholar || journalMetrics || webOfScience) {
+  if (llm || googleScholar || journalMetrics || webOfScience || firecrawl || openAlex || academicApis) {
     payload.integrations = {};
     if (llm) payload.integrations.llm = llm;
     if (googleScholar) payload.integrations.googleScholar = googleScholar;
     if (journalMetrics) payload.integrations.journalMetrics = journalMetrics;
     if (webOfScience) payload.integrations.webOfScience = webOfScience;
+    if (firecrawl) payload.integrations.firecrawl = firecrawl;
+    if (openAlex) payload.integrations.openAlex = openAlex;
+    if (academicApis) payload.integrations.academicApis = academicApis;
   }
 
   return importLocalData(payload, options);
@@ -2238,6 +2799,7 @@ function parseEnabledSources(sourceNames) {
   if (names.some(name => name.includes("arxiv"))) sources.push("arxiv");
   if (names.some(name => name.includes("biorxiv") || name.includes("bioarxiv"))) sources.push("biorxiv");
   if (names.some(name => name.includes("semantic scholar") || name.includes("semanticscholar"))) sources.push("semanticscholar");
+  if (names.some(name => name.includes("openalex") || name.includes("open alex"))) sources.push("openalex");
   if (names.some(name => name.includes("google scholar") || name.includes("googlescholar") || name.includes("谷歌学术"))) sources.push("googlescholar");
   if (names.some(name => (name.includes("google") || name.includes("谷歌")) && !name.includes("scholar") && !name.includes("学术"))) sources.push("googlesearch");
   if (names.some(name => name.includes("web of science") || name.includes("webofscience") || name.includes("wos"))) sources.push("webofscience");
@@ -2377,6 +2939,60 @@ function normalizeSemanticScholarPaper(item, keywords = DEFAULT_KEYWORDS) {
     journalMetrics: defaultJournalMetrics(),
     url: item.url || "",
     pdfUrl: item.openAccessPdf?.url || "",
+    authors,
+    published
+  });
+}
+
+function normalizeOpenAlexWork(item, keywords = DEFAULT_KEYWORDS) {
+  const title = compactText(item?.title || item?.display_name);
+  const summary = restoreOpenAlexAbstract(item?.abstract_inverted_index);
+  const authors = Array.isArray(item?.authorships)
+    ? item.authorships.map(entry => compactText(entry?.author?.display_name)).filter(Boolean)
+    : [];
+  const primaryLocation = item?.primary_location || {};
+  const bestOpenLocation = item?.best_oa_location || {};
+  const journal = compactText(primaryLocation?.source?.display_name || "OpenAlex");
+  const published = compactText(item?.publication_date || (item?.publication_year ? String(item.publication_year) : ""));
+  const doi = normalizeDoi(item?.doi || item?.ids?.doi);
+  const tags = [
+    ...(Array.isArray(item?.topics) ? item.topics.map(topic => topic?.display_name) : []),
+    ...(Array.isArray(item?.keywords) ? item.keywords.map(keyword => keyword?.display_name) : [])
+  ].map(compactText).filter(Boolean);
+  const text = `${title} ${summary} ${journal} ${tags.join(" ")}`;
+  const classified = classifyPaper(text);
+  const openAlexId = compactText(item?.id);
+  const publicationStage = compactText(item?.type).toLowerCase() === "preprint"
+    || compactText(primaryLocation?.version).toLowerCase() === "submittedversion"
+    ? "preprint"
+    : "formal";
+  const citationCount = normalizeCitationCount(item?.cited_by_count);
+  return completePaperRecord({
+    id: `openalex-${openAlexId.split("/").pop() || hashText(title)}`,
+    retrievalSource: "openalex",
+    sourceId: openAlexId,
+    publicationStage,
+    citationCount,
+    citationSource: citationCount === null ? "" : "OpenAlex",
+    doi,
+    journal,
+    citation: formatCitation({ authors, year: paperYear(published), title, journal, doi }),
+    time: timeString(published),
+    sourceType: "论文数据库",
+    category: classified.category,
+    categoryLabel: classified.categoryLabel,
+    categories: classified.categories,
+    categoryLabels: classified.categoryLabels,
+    source: `OpenAlex · ${journal}`,
+    title,
+    summary,
+    tags: tags.slice(0, 5),
+    score: scorePaper(text, keywords),
+    reason: makeReason(text, keywords),
+    tokenUsage: defaultTokenUsage(),
+    journalMetrics: defaultJournalMetrics(),
+    url: compactText(primaryLocation?.landing_page_url || item?.doi || openAlexId),
+    pdfUrl: compactText(bestOpenLocation?.pdf_url || primaryLocation?.pdf_url),
     authors,
     published
   });
@@ -2783,7 +3399,8 @@ function normalizeGoogleScholarPaper(item, keywords = DEFAULT_KEYWORDS, response
   const parsedYear = parseScholarPublicationSummary(mappedYear).year;
   const year = compactText(parsedYear || parsedPublication.year || item.year || item.publication_year);
   const published = scholarPublishedDate(item, year);
-  const doi = normalizeDoi(getNestedValue(item, responseMap.doi) || item.doi);
+  const url = getNestedValue(item, responseMap.url) || item.link || item.url || "";
+  const doi = preferredPaperDoi({ doi: getNestedValue(item, responseMap.doi) || item.doi, url });
   const authors = normalizeScholarAuthors(getNestedValue(item, responseMap.authors) || item.authors || item.publication_info?.authors);
   const authorList = authors.length ? authors : parsedPublication.authors;
   const text = `${title} ${summary} ${journal}`;
@@ -2812,7 +3429,7 @@ function normalizeGoogleScholarPaper(item, keywords = DEFAULT_KEYWORDS, response
     reason: makeReason(text, keywords),
     tokenUsage: defaultTokenUsage(),
     journalMetrics: defaultJournalMetrics(),
-    url: getNestedValue(item, responseMap.url) || item.link || item.url || "",
+    url,
     authors: authorList,
     published
   });
@@ -2964,6 +3581,7 @@ function crossrefMetadataFromItem(item) {
     doi: normalizeDoi(item?.DOI || item?.doi),
     journal: compactText(container),
     authors,
+    abstract: cleanAbstractText(item?.abstract),
     published: mostPrecisePublishedDate([
       crossrefDate(item?.["published-online"]),
       crossrefDate(item?.["published-print"]),
@@ -2982,18 +3600,46 @@ function normalizeCrossrefWork(item, sourceTitle = "") {
 }
 
 function inferDoiFromUrl(value) {
-  const url = String(value || "");
+  let url = String(value || "");
+  try { url = decodeURIComponent(url); } catch {}
   const nature = url.match(/nature\.com\/articles\/([^/?#]+)/i);
   if (nature) return normalizeDoi(`10.1038/${nature[1]}`);
+  const doi = url.match(/(?:doi\.org\/|\/doi\/(?:abs\/|full\/)?)(10\.\d{4,9}\/[^?#\s]+)\/?$/i);
+  if (doi) return normalizeDoi(doi[1].replace(/\/+$/, ""));
+  const pathDoi = url.match(/\/(10\.\d{4,9}\/[^?#\s]+)\/?$/i);
+  if (pathDoi) return normalizeDoi(pathDoi[1].replace(/\/+$/, ""));
   return "";
+}
+
+function preferredPaperDoi(paper = {}) {
+  const storedDoi = normalizeDoi(paper?.doi);
+  const urlDoi = inferDoiFromUrl(paper?.url);
+  return /\.s\d+$/i.test(storedDoi) && urlDoi ? urlDoi : (storedDoi || urlDoi);
+}
+
+async function crossrefRequestIdentity(url, options = {}) {
+  const academicApis = options.academicApis
+    ? cleanAcademicApisConfig(options.academicApis)
+    : await readAcademicApisConfig(options.academicApisConfigFile);
+  const requestUrl = url instanceof URL ? url : new URL(url);
+  if (academicApis.contactEmail) requestUrl.searchParams.set("mailto", academicApis.contactEmail);
+  return {
+    url: requestUrl,
+    headers: {
+      "User-Agent": academicApis.contactEmail
+        ? `paperHOT/0.1 (mailto:${academicApis.contactEmail})`
+        : "paperHOT/0.1"
+    }
+  };
 }
 
 async function fetchCrossrefWorkByDoi(doi, options = {}) {
   const cleanDoi = normalizeDoi(doi);
   if (!cleanDoi) return null;
   const fetchImpl = options.fetchImpl || fetch;
-  const response = await fetchImpl(`${CROSSREF_WORKS_ENDPOINT}/${encodeURIComponent(cleanDoi)}`, {
-    headers: { "User-Agent": "paperHOT/0.1 (mailto:local@example.invalid)" },
+  const identity = await crossrefRequestIdentity(`${CROSSREF_WORKS_ENDPOINT}/${encodeURIComponent(cleanDoi)}`, options);
+  const response = await fetchImpl(identity.url, {
+    headers: identity.headers,
     signal: AbortSignal.timeout(20000)
   });
   if (!response.ok) throw new Error(`Crossref DOI 元数据补全失败：HTTP ${response.status}`);
@@ -3002,7 +3648,7 @@ async function fetchCrossrefWorkByDoi(doi, options = {}) {
 }
 
 async function fetchCrossrefWorkByTitle(paper, options = {}) {
-  const doi = normalizeDoi(paper?.doi) || inferDoiFromUrl(paper?.url);
+  const doi = preferredPaperDoi(paper);
   if (doi) return fetchCrossrefWorkByDoi(doi, options);
   const title = compactText(paper?.title);
   if (!title) return null;
@@ -3011,8 +3657,9 @@ async function fetchCrossrefWorkByTitle(paper, options = {}) {
   url.searchParams.set("rows", String(options.rows || 3));
   url.searchParams.set("select", "DOI,title,container-title,author,published,published-print,published-online,issued");
   const fetchImpl = options.fetchImpl || fetch;
-  const response = await fetchImpl(url, {
-    headers: { "User-Agent": "paperHOT/0.1 (mailto:local@example.invalid)" },
+  const identity = await crossrefRequestIdentity(url, options);
+  const response = await fetchImpl(identity.url, {
+    headers: identity.headers,
     signal: AbortSignal.timeout(20000)
   });
   if (!response.ok) throw new Error(`Crossref DOI 补全失败：HTTP ${response.status}`);
@@ -3060,10 +3707,11 @@ async function enrichPapersWithCrossref(papers, options = {}) {
   const fetcher = options.fetcher || (paper => fetchCrossrefWorkByTitle(paper, options));
   const errors = Array.isArray(options.errors) ? options.errors : null;
   return mapWithConcurrency(papers, 2, async paper => {
-    const inferredDoi = inferDoiFromUrl(paper?.url);
-    const record = completePaperRecord({ ...paper, doi: inferredDoi || paper?.doi });
+    const preferredDoi = preferredPaperDoi(paper);
+    const doiChanged = preferredDoi !== normalizeDoi(paper?.doi);
+    const record = completePaperRecord({ ...paper, doi: preferredDoi });
     const shouldRefreshKnownDoi = record.retrievalSource === "webofscience" && datePrecision(record.published) !== "day";
-    if (record.doi && !shouldRefreshKnownDoi && !/\.\.\.|…/.test(record.title) && !inferredDoi) return record;
+    if (record.doi && !shouldRefreshKnownDoi && !/\.\.\.|…/.test(record.title) && !doiChanged) return record;
     try {
       if (record.doi && !/\.\.\.|…/.test(record.title)) {
         const metadata = await fetcher(record);
@@ -3155,7 +3803,8 @@ function llmChatCompletionsUrl(endpoint) {
 }
 
 async function callConfiguredLlm({ paper, userBackground, config, fetchImpl }) {
-  if (!config.enabled || !config.endpoint || !config.model) return null;  if (config.apiMode === "local") throw new Error("本地 CLI 模型暂不支持网页连通性测试");
+  if (!config.enabled || !config.endpoint || !config.model) return null;
+  if (config.apiMode === "local") throw new Error("本地 CLI 模型暂不支持网页连通性测试");
 
   const response = await fetchImpl(llmChatCompletionsUrl(config.endpoint), {
     method: "POST",
@@ -3234,6 +3883,20 @@ async function testLlmConfig(payload = {}, options = {}) {
     tokenUsage: usage
   };
 }
+
+async function testFirecrawlConfig(payload = {}, options = {}) {
+  const previous = await readFirecrawlConfig(options.configFile);
+  const config = mergeSecretConfig(previous, payload.firecrawl || payload, cleanFirecrawlConfig);
+  if (!config.endpoint) throw new Error("Firecrawl Endpoint 未填写");
+  if (!config.apiKey) throw new Error("Firecrawl API Key 未填写，请重新粘贴有效 Key");
+  const usage = await readFirecrawlCreditUsage(config, options.fetchImpl || fetch);
+  if (usage.status !== "ok") {
+    if (usage.httpStatus === 401) throw new Error("Firecrawl API Key 无效或已失效（HTTP 401）");
+    if (usage.httpStatus === 429) throw new Error("Firecrawl 请求过于频繁（HTTP 429），请稍后重试");
+    throw new Error(`Firecrawl 连接失败${usage.httpStatus ? `（HTTP ${usage.httpStatus}）` : ""}`);
+  }
+  return { ok: true, usage };
+}
 function applyLlmPaperInsight(paper, insight) {
   const legacySummary = compactText(insight?.summary);
   const abstractZh = compactText(insight?.abstractZh || insight?.abstractTranslation || insight?.translatedAbstract || legacySummary);
@@ -3268,6 +3931,7 @@ async function enrichPapersWithLlmInsights(papers, options = {}) {
   const userBackground = compactText(options.userBackground || config.userBackground || DEFAULT_USER_BACKGROUND);
   const fetchImpl = options.fetchImpl || fetch;
   return mapWithConcurrency(papers, 2, async paper => {
+    if (options.requireAbstractConsensus && !paperHasConfirmedAbstract(paper)) return paper;
     try {
       const insight = fetcher
         ? await fetcher({ paper, userBackground })
@@ -3554,7 +4218,76 @@ async function fetchSemanticScholarPapers(keywords = DEFAULT_KEYWORDS, options =
   });
 }
 
-const SOURCE_PRIORITY = { webofscience: 4, googlescholar: 3, arxiv: 2, biorxiv: 2 };
+async function fetchOpenAlexPapers(keywords = DEFAULT_KEYWORDS, options = {}) {
+  const { config, fetchImpl, headers } = await openAlexRequestOptions(options);
+  if (!config.enabled || !config.endpoint || !config.apiKey) {
+    throw new Error("OpenAlex 信源未配置：请在领域配置中填写 API Key 后再启用");
+  }
+  const firstPage = clampPositiveInteger(options.startPage, 1, 1, 1000000);
+  const maxPages = clampPositiveInteger(options.maxPages || config.maxPages, DEFAULT_OPENALEX_CONFIG.maxPages, 1, OPENALEX_MAX_PAGES_LIMIT);
+  const perPage = clampPositiveInteger(options.perPage || config.perPage, DEFAULT_OPENALEX_CONFIG.perPage, 1, OPENALEX_PER_PAGE_LIMIT);
+  const papers = [];
+  for (let page = firstPage; page < firstPage + maxPages; page += 1) {
+    const url = new URL(options.doi ? openAlexWorkUrl(config.endpoint, options.doi) : config.endpoint);
+    url.searchParams.set("api_key", config.apiKey);
+    if (!options.doi) {
+      url.searchParams.set("search", compactText(options.queryExpression) || buildSearchExpression(options.searchLogic) || buildSemanticScholarQuery(keywords));
+      url.searchParams.set("per_page", String(perPage));
+      url.searchParams.set("page", String(page));
+      if (options.searchMode !== "exact" && options.startDate && options.endDate) {
+        url.searchParams.set("filter", `from_publication_date:${options.startDate},to_publication_date:${options.endDate}`);
+      }
+    }
+    const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(20000) });
+    if (!response.ok) throw new Error(`OpenAlex 信源失败：HTTP ${response.status}`);
+    const payload = await response.json();
+    const items = options.doi ? [payload] : (Array.isArray(payload?.results) ? payload.results : []);
+    papers.push(...items.map(item => normalizeOpenAlexWork(item, keywords)));
+    const complete = options.doi || items.length < perPage;
+    await options.onPageComplete?.({ page, nextPage: page + 1, returned: items.length, complete });
+    if (complete) break;
+  }
+  return options.searchMode === "exact" ? papers : filterPapersByKeywords(papers, keywords);
+}
+
+function applyOpenAlexMetadata(paper, item) {
+  if (!item) return completePaperRecord(paper);
+  const metadata = normalizeOpenAlexWork(item, []);
+  const tags = Array.from(new Set([...(paper.tags || []), ...(metadata.tags || [])])).slice(0, 5);
+  const useOpenAlexTitle = !compactText(paper.title) || titleLooksTruncated(paper.title);
+  const genericJournal = /^(?:openalex|论文数据库|google 搜索|google scholar|web of science)$/i.test(compactText(paper.journal));
+  return completePaperRecord({
+    ...paper,
+    title: useOpenAlexTitle ? metadata.title : paper.title,
+    doi: paper.doi || metadata.doi,
+    authors: paper.authors?.length ? paper.authors : metadata.authors,
+    journal: !paper.journal || genericJournal ? metadata.journal : paper.journal,
+    published: mostPrecisePublishedDate([paper.published, metadata.published]),
+    publishedPrecision: datePrecision(mostPrecisePublishedDate([paper.published, metadata.published])),
+    summary: isCompleteAbstract(paper.summary) ? paper.summary : (metadata.summary || paper.summary),
+    citationCount: paper.citationCount ?? metadata.citationCount,
+    citationSource: paper.citationCount === null || paper.citationCount === undefined ? metadata.citationSource : paper.citationSource,
+    url: paper.url || metadata.url,
+    pdfUrl: paper.pdfUrl || metadata.pdfUrl,
+    tags
+  });
+}
+
+async function enrichPapersWithOpenAlex(papers, options = {}) {
+  const config = options.config || await readOpenAlexConfig(options.configFile || options.openAlexConfigFile);
+  if (!config.enabled || !config.apiKey) return papers.map(completePaperRecord);
+  return mapWithConcurrency(papers, 4, async paper => {
+    if (!normalizeDoi(paper?.doi)) return completePaperRecord(paper);
+    try {
+      return applyOpenAlexMetadata(paper, await fetchOpenAlexWorkByDoi(paper, { ...options, config }));
+    } catch (error) {
+      options.errors?.push({ source: "openalex", message: error.message, title: paper.title });
+      return completePaperRecord(paper);
+    }
+  });
+}
+
+const SOURCE_PRIORITY = { webofscience: 4, googlescholar: 3, openalex: 2, arxiv: 2, biorxiv: 2 };
 
 function hasSameStableIdentity(left, right) {
   const leftDoi = normalizeDoi(left?.doi);
@@ -3833,10 +4566,15 @@ async function retryFailedFetchLogEnrichment(index, options = {}) {
     fetcher: options.fetchers?.crossref,
     errors
   });
-  const llmPapers = await enrichPapersWithLlmInsights(crossrefPapers, {
+  const recoveredPapers = await recoverGeneratedSummaryPapers(crossrefPapers, {
+    ...options,
+    errors
+  });
+  const llmPapers = await enrichPapersWithLlmInsights(recoveredPapers, {
     ...(options.llm || {}),
     userBackground: options.userBackground,
     fetcher: options.fetchers?.llm,
+    requireAbstractConsensus: true,
     errors,
     llmLog
   });
@@ -4308,7 +5046,15 @@ function mergePaperListsAppendOnly(existingPapers, nextPapers) {
   return sortPapersForDisplay(papers);
 }
 
+function paperHasConfirmedAbstract(paper) {
+  return paper?.abstractStatus === "confirmed"
+    && Array.isArray(paper?.abstractConsensusSources)
+    && paper.abstractConsensusSources.length >= 1
+    && isCompleteAbstract(paper?.summary);
+}
+
 function paperNeedsLlmInsight(paper) {
+  if (!paperHasConfirmedAbstract(paper)) return false;
   const needsFirstLlmCall = paper?.tokenUsage?.status !== "已调用 AI";
   const needsShortTitle = !compactText(paper?.shortTitle);
   const needsAbstractTranslation = (
@@ -4322,7 +5068,7 @@ async function enrichMissingLlmInsights(papers, options = {}) {
   const recoveredPapers = await recoverGeneratedSummaryPapers(papers, options);
   const pendingPapers = recoveredPapers.filter(paperNeedsLlmInsight);
   if (!pendingPapers.length) return recoveredPapers;
-  const enrichedPapers = await enrichPapersWithLlmInsights(pendingPapers, options);
+  const enrichedPapers = await enrichPapersWithLlmInsights(pendingPapers, { ...options, requireAbstractConsensus: true });
   const enrichedByKey = new Map();
   enrichedPapers.forEach(paper => {
     const key = paperArchiveKey(paper);
@@ -4370,6 +5116,42 @@ async function writePaperArchive(payload, dataDir = DATA_DIR) {
   const file = path.join(dataDir, PAPER_ARCHIVE_NAME);
   await fs.writeFile(file, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
   return file;
+}
+
+// ponytail: serialized only within this process; use an atomic datastore if archive writers become multi-process.
+const paperArchiveWriteQueues = new Map();
+
+function queuePaperArchiveUpdate(dataDir, operation) {
+  const key = path.resolve(dataDir, PAPER_ARCHIVE_NAME);
+  const update = (paperArchiveWriteQueues.get(key) || Promise.resolve())
+    .catch(() => {})
+    .then(operation);
+  paperArchiveWriteQueues.set(key, update);
+  update.then(() => {
+    if (paperArchiveWriteQueues.get(key) === update) paperArchiveWriteQueues.delete(key);
+  }, () => {
+    if (paperArchiveWriteQueues.get(key) === update) paperArchiveWriteQueues.delete(key);
+  });
+  return update;
+}
+
+function replacePaperInArchive(target, replacement, dataDir = DATA_DIR) {
+  return queuePaperArchiveUpdate(dataDir, async () => {
+    const archive = await readPaperArchive(dataDir);
+    const index = archive.papers.findIndex(paper => archivePaperMatchesTarget(paper, target));
+    if (index < 0) return archive;
+    const papers = archive.papers.slice();
+    papers[index] = replacement;
+    const nextArchive = {
+      ...archive,
+      mode: "archive",
+      updatedAt: new Date().toISOString(),
+      count: papers.length,
+      papers
+    };
+    nextArchive.archiveFile = await writePaperArchive(nextArchive, dataDir);
+    return nextArchive;
+  });
 }
 
 async function mergePapersIntoArchive(papers, options = {}) {
@@ -4524,11 +5306,15 @@ async function addCandidatePaperToArchive(candidate, options = {}) {
     abstractFetcher: options.fetchers?.abstract,
     abstractFetchImpl: options.fetchers?.abstractFetch,
     fetchImpl: options.fetchImpl,
+    abstractSources: options.abstractSources,
+    webOfScience: options.webOfScience,
+    dataDir,
     errors
   });
   const [llmPaper] = await enrichPapersWithLlmInsights([paperWithAbstract], {
     ...(options.llm || {}),
     fetcher: options.fetchers?.llm,
+    requireAbstractConsensus: true,
     errors,
     llmLog
   });
@@ -4661,6 +5447,7 @@ async function enrichArchivePapersWithLlm(papers, options = {}) {
     config: options.config,
     configFile: options.configFile,
     userBackground: options.userBackground,
+    requireAbstractConsensus: true,
     errors,
     llmLog
   });
@@ -4675,39 +5462,106 @@ async function refreshArchivePaperLlmInsight(target = {}, options = {}) {
     return { ok: true, updated: false, existed: false, paper: null, archive };
   }
   const original = completePaperRecord(archive.papers[index]);
+  let paperForLlm = original;
+  let activeArchive = archive;
+  let abstractUpdated = false;
+  let replacementAbstract = "";
+  let replacementSource = "";
+
+  if (Object.prototype.hasOwnProperty.call(target, "manualAbstract")) {
+    replacementAbstract = cleanAbstractText(target.manualAbstract);
+    if (!replacementAbstract || looksLikeTruncatedText(replacementAbstract) || isRobotChallengeText(replacementAbstract)) {
+      return {
+        ok: true,
+        updated: false,
+        aiUpdated: false,
+        existed: true,
+        paper: original,
+        archive,
+        errors: [{ source: "abstract", message: "手动摘要为空、仍被截断或是机器人验证页面" }],
+        llm: summarizeLlmLog([])
+      };
+    }
+    replacementSource = "manual";
+  } else if (target.abstractMode === "firecrawl") {
+    try {
+      const rawCandidate = await fetchFirecrawlAbstractForPaper(original, options.firecrawl || {});
+      const candidate = normalizeAbstractCandidate("firecrawl", rawCandidate, original);
+      if (candidate) {
+        replacementAbstract = candidate.cleanAbstract;
+        replacementSource = "firecrawl";
+      }
+    } catch (error) {
+      return {
+        ok: true,
+        updated: false,
+        aiUpdated: false,
+        existed: true,
+        paper: original,
+        archive,
+        errors: [{ source: "abstract", message: error.message }],
+        llm: summarizeLlmLog([])
+      };
+    }
+    if (!replacementAbstract) {
+      return {
+        ok: true,
+        updated: false,
+        aiUpdated: false,
+        existed: true,
+        paper: original,
+        archive,
+        errors: [{ source: "abstract", message: "Firecrawl 未获取到通过身份与完整性校验的摘要" }],
+        llm: summarizeLlmLog([])
+      };
+    }
+  }
+
+  if (replacementAbstract) {
+    paperForLlm = {
+      ...original,
+      summary: replacementAbstract,
+      abstractZh: "",
+      llmSummary: "",
+      reason: "",
+      abstractStatus: "confirmed",
+      abstractConsensusSources: [replacementSource],
+      tokenUsage: defaultTokenUsage()
+    };
+    activeArchive = await replacePaperInArchive(original, paperForLlm, dataDir);
+    abstractUpdated = true;
+    await appendOperationLogSafe({
+      action: "modify",
+      operation: "archive-abstract-update",
+      source: replacementSource,
+      paper: summarizePaperForOperationLog(paperForLlm)
+    }, dataDir);
+  }
   const llmOptions = {
     ...options,
     fetcher: options.fetcher || target.fetcher,
     fetchers: options.fetchers || target.fetchers
   };
-  const { enriched, errors, llmLog } = await enrichArchivePapersWithLlm([original], llmOptions);
+  const { enriched, errors, llmLog } = await enrichArchivePapersWithLlm([paperForLlm], llmOptions);
   const llm = summarizeLlmLog(llmLog);
   if (!llm.calls) {
     return {
       ok: true,
-      updated: false,
+      updated: abstractUpdated,
+      aiUpdated: false,
       existed: true,
-      paper: original,
-      archive,
+      paper: paperForLlm,
+      archive: activeArchive,
       errors,
       llm
     };
   }
   const nextPaper = {
-    ...rescorePaperAfterEnrichment(enriched[0] || original, options.keywords || []),
+    ...rescorePaperAfterEnrichment(enriched[0] || paperForLlm, options.keywords || []),
     fetchedAt: original.fetchedAt || new Date().toISOString(),
     llmUpdatedAt: new Date().toISOString()
   };
-  const papers = archive.papers.slice();
-  papers[index] = nextPaper;
-  const nextArchive = {
-    ...archive,
-    mode: "archive",
-    updatedAt: new Date().toISOString(),
-    count: papers.length,
-    papers
-  };
-  nextArchive.archiveFile = await writePaperArchive(nextArchive, dataDir);
+  const nextArchive = await replacePaperInArchive(original, nextPaper, dataDir);
   await appendOperationLogSafe({
     action: "modify",
     operation: "archive-llm-refresh-one",
@@ -4718,6 +5572,7 @@ async function refreshArchivePaperLlmInsight(target = {}, options = {}) {
   return {
     ok: true,
     updated: true,
+    aiUpdated: true,
     existed: true,
     paper: nextPaper,
     archive: nextArchive,
@@ -4747,12 +5602,17 @@ async function refreshArchiveLlmInsights(options = {}, runtimeOptions = {}) {
   const papers = archive.papers.slice();
   let updatedCount = 0;
   pending.forEach((entry, offset) => {
-    if (!paperHasLlmInsight(enriched[offset])) return;
-    papers[entry.index] = {
-      ...rescorePaperAfterEnrichment(enriched[offset] || entry.paper, options.keywords || []),
-      fetchedAt: entry.paper.fetchedAt || new Date().toISOString(),
-      llmUpdatedAt: new Date().toISOString()
-    };
+    const recovered = enriched[offset] || entry.paper;
+    const hasLlmInsight = paperHasLlmInsight(recovered);
+    const doiChanged = normalizeDoi(recovered.doi) !== normalizeDoi(entry.paper.doi);
+    if (!hasLlmInsight && !doiChanged) return;
+    papers[entry.index] = hasLlmInsight
+      ? {
+          ...rescorePaperAfterEnrichment(recovered, options.keywords || []),
+          fetchedAt: entry.paper.fetchedAt || new Date().toISOString(),
+          llmUpdatedAt: new Date().toISOString()
+        }
+      : { ...entry.paper, doi: recovered.doi };
     updatedCount += 1;
   });
   const nextArchive = {
@@ -4771,7 +5631,7 @@ async function refreshArchiveLlmInsights(options = {}, runtimeOptions = {}) {
       skippedCount: archive.papers.length - pending.length,
       paperCount: papers.length,
       papers: pending
-        .filter(entry => paperHasLlmInsight(papers[entry.index]))
+        .filter(entry => papers[entry.index] !== archive.papers[entry.index])
         .slice(0, 20)
         .map(entry => summarizePaperForOperationLog(papers[entry.index])),
       llm: summarizeLlmLog(llmLog)
@@ -5263,11 +6123,11 @@ function buildDiscoveryTaskContext(options = {}) {
   let sources = requestedSources.length ? requestedSources : ["arxiv", "biorxiv", "semanticscholar"];
   if (exactInput) {
     const allowedSources = {
-      doi: ["webofscience", "googlescholar", "googlesearch"],
+      doi: ["webofscience", "googlescholar", "googlesearch", "openalex"],
       "wos-ut": ["webofscience"],
       arxiv: ["arxiv"],
-      url: ["googlescholar", "googlesearch"],
-      title: ["googlescholar", "googlesearch"]
+      url: ["googlescholar", "googlesearch", "openalex"],
+      title: ["googlescholar", "googlesearch", "openalex"]
     }[exactInput.type] || [];
     sources = sources.filter(source => allowedSources.includes(source));
   }
@@ -5403,6 +6263,9 @@ async function fetchPaperPayloadQueued(options, context) {
         fetcher: options.fetchers?.llm,
         abstractFetcher: options.fetchers?.abstract,
         abstractFetchImpl: options.fetchers?.abstractFetch,
+        abstractSources: options.abstractSources,
+        webOfScience: options.webOfScience,
+        dataDir,
         errors: []
       });
       const nextArchive = await mergePapersIntoArchive(papers, { dataDir, date, mode, keywords: cachedPayload.keywords || [], sources: cachedPayload.sources || [] });
@@ -5507,6 +6370,13 @@ async function fetchPaperPayloadQueued(options, context) {
       else if (source === "semanticscholar") result = options.fetchers?.semanticscholar
         ? await options.fetchers.semanticscholar(sourceOptions)
         : await fetchSemanticScholarPapers(keywords, { ...sourceOptions, limit: 100 });
+      else if (source === "openalex") result = options.fetchers?.openalex
+        ? await options.fetchers.openalex(sourceOptions)
+        : await fetchOpenAlexPapers(keywords, {
+            ...(options.openAlex || {}),
+            ...sourceOptions,
+            ...(exactInput?.type === "doi" ? { doi: exactInput.value } : {})
+          });
       else if (source === "googlescholar") result = options.fetchers?.googlescholar
         ? await options.fetchers.googlescholar(sourceOptions)
         : await fetchGoogleScholarPapers(keywords, { ...(options.googleScholar || {}), ...sourceOptions });
@@ -5700,7 +6570,11 @@ async function fetchPaperPayloadQueued(options, context) {
     fetcher: options.fetchers?.crossref,
     errors
   });
-  const publisherDatedPapers = await enrichPapersWithPublisherDates(crossrefPapers, {
+  const openAlexPapers = await enrichPapersWithOpenAlex(crossrefPapers, {
+    ...(options.openAlex || {}),
+    errors
+  });
+  const publisherDatedPapers = await enrichPapersWithPublisherDates(openAlexPapers, {
     fetchImpl: options.fetchers?.html,
     errors
   });
@@ -5724,6 +6598,11 @@ async function fetchPaperPayloadQueued(options, context) {
     ...(options.llm || {}),
     userBackground: options.userBackground,
     fetcher: options.fetchers?.llm,
+    abstractFetcher: options.fetchers?.abstract,
+    abstractFetchImpl: options.fetchers?.abstractFetch,
+    abstractSources: options.abstractSources,
+    webOfScience: options.webOfScience,
+    dataDir,
     errors,
     llmLog
   });
@@ -5752,6 +6631,9 @@ async function fetchPaperPayloadQueued(options, context) {
     fetcher: options.fetchers?.llm,
     abstractFetcher: options.fetchers?.abstract,
     abstractFetchImpl: options.fetchers?.abstractFetch,
+    abstractSources: options.abstractSources,
+    webOfScience: options.webOfScience,
+    dataDir,
     errors,
     llmLog
   })).map(paper => rescorePaperAfterEnrichment(paper, keywords));
@@ -5762,6 +6644,9 @@ async function fetchPaperPayloadQueued(options, context) {
     fetcher: options.fetchers?.llm,
     abstractFetcher: options.fetchers?.abstract,
     abstractFetchImpl: options.fetchers?.abstractFetch,
+    abstractSources: options.abstractSources,
+    webOfScience: options.webOfScience,
+    dataDir,
     errors,
     llmLog
   })).map(paper => rescorePaperAfterEnrichment(paper, keywords)));
@@ -5883,6 +6768,7 @@ module.exports = {
   buildDiscoveryTaskDescriptor,
   buildDiscoveryTaskContext,
   buildSearchExpression,
+  abstractMatchText,
   classifyPaper,
   cleanSearchLogic,
   cleanKeywords,
@@ -5896,33 +6782,39 @@ module.exports = {
   fetchArxivPapers,
   fetchCrossrefWorkByDoi,
   fetchCrossrefWorkByTitle,
+  fetchFirecrawlAbstractForPaper,
   fetchBioRxivPapers,
   fetchGoogleScholarPapers,
   fetchGoogleSearchPapers,
   fetchJournalMetrics,
   fetchLast7DaysPapers,
+  fetchOpenAlexPapers,
   fetchPaperPayload,
   fetchRecentPapers,
   fetchSemanticScholarPapers,
   fetchTodayPapers,
   fetchWebOfSciencePapers,
+  recoverGeneratedSummaryPapers,
   googleScholarCitationCount,
   inferPaperShortTitle,
   importLocalData,
   importLocalDataZip,
   parseZipEntries,
   testLlmConfig,
+  testFirecrawlConfig,
   filterPapersByDate,
   filterPapersByDateRange,
   filterPapersByKeywords,
   normalizeArxivEntry,
   normalizeBioRxivItem,
+  normalizeOpenAlexWork,
   normalizeSemanticScholarPaper,
   normalizeWebOfScienceRecord,
   parseArxivEntries,
   parseEnabledSources,
   paperMatchesSearchLogic,
   readFetchLog,
+  readFirecrawlConfig,
   readFavoritesPayload,
   readGoogleRollingCursorStatus,
   readDiscoveryTaskState,
@@ -5935,13 +6827,17 @@ module.exports = {
   appendOperationLog,
   readIntegrationConfigs,
   readIntegrationSecrets,
+  readAcademicApisConfig,
   readJournalMetricsConfig,
   readJournalMetricsCache,
   readLlmConfig,
+  readOpenAlexConfig,
   readUserState,
   readWebOfScienceConfig,
   refinePaperPool,
   rescorePaperAfterEnrichment,
+  selectMatchingAbstractCandidate,
+  restoreOpenAlexAbstract,
   refreshJournalMetricsForArchive,
   refreshArchiveLlmInsights,
   refreshArchivePaperLlmInsight,

@@ -11,6 +11,7 @@ const {
   normalizeArxivEntry,
   normalizeBioRxivItem,
   normalizeSemanticScholarPaper,
+  normalizeOpenAlexWork,
   normalizeWebOfScienceRecord,
   parseEnabledSources,
   paperMatchesSearchLogic,
@@ -18,6 +19,7 @@ const {
   buildArxivQuery,
   buildDiscoveryTaskFingerprint,
   buildSearchExpression,
+  abstractMatchText,
   buildTokenStats,
   enrichPapersWithCrossref,
   enrichPapersWithPublisherDates,
@@ -31,7 +33,9 @@ const {
   fetchGoogleScholarPapers,
   fetchGoogleSearchPapers,
   fetchCrossrefWorkByTitle,
+  fetchFirecrawlAbstractForPaper,
   fetchPaperPayload,
+  fetchOpenAlexPapers,
   fetchWebOfSciencePapers,
   googleScholarCitationCount,
   readGoogleRollingCursorStatus,
@@ -48,10 +52,14 @@ const {
   appendFetchLog,
   appendOperationLog,
   testLlmConfig,
+  testFirecrawlConfig,
   todayString,
   readIntegrationConfigs,
   readIntegrationSecrets,
+  readAcademicApisConfig,
+  readOpenAlexConfig,
   readJournalMetricsConfig,
+  readFirecrawlConfig,
   readWebOfScienceConfig,
   readJournalMetricsCache,
   readFavoritesPayload,
@@ -78,13 +86,29 @@ const {
   importLocalData,
   parseZipEntries,
   scorePaper,
+  selectMatchingAbstractCandidate,
   rescorePaperAfterEnrichment,
   writeRecentFetchCursor,
   clearRecentFetchCursor,
   readDiscoveryTaskState,
   detectExactPaperInput,
-  fetchCrossrefWorkByDoi
+  fetchCrossrefWorkByDoi,
+  recoverGeneratedSummaryPapers,
+  restoreOpenAlexAbstract
 } = require("../paperhot_backend.cjs");
+
+function matchingAbstractSources(value, onCall = () => {}) {
+  const load = async paper => {
+    onCall(paper);
+    return {
+      doi: paper.doi,
+      title: paper.title,
+      authors: paper.authors,
+      abstract: typeof value === "function" ? value(paper) : value
+    };
+  };
+  return { wos: load, semanticScholar: load };
+}
 
 function buildStoredZip(entries) {
   const localParts = [];
@@ -243,6 +267,94 @@ test("normalizes year-only Semantic Scholar dates without inventing January firs
   });
 
   assert.equal(paper.published, "2025");
+});
+
+test("normalizes OpenAlex works and restores inverted abstracts", () => {
+  const abstract = restoreOpenAlexAbstract({ Structured: [0], illumination: [1], microscopy: [2], improves: [3], reconstruction: [4] });
+  const paper = normalizeOpenAlexWork({
+    id: "https://openalex.org/W123",
+    title: "OpenAlex structured illumination microscopy",
+    doi: "https://doi.org/10.1000/openalex",
+    publication_date: "2026-07-15",
+    type: "article",
+    cited_by_count: 17,
+    abstract_inverted_index: { Structured: [0], illumination: [1], microscopy: [2], improves: [3], reconstruction: [4] },
+    authorships: [{ author: { display_name: "A. Researcher" } }],
+    primary_location: {
+      landing_page_url: "https://example.org/openalex",
+      pdf_url: "https://example.org/openalex.pdf",
+      source: { display_name: "Nature Methods" }
+    },
+    topics: [{ display_name: "Computational microscopy" }]
+  });
+
+  assert.equal(abstract, "Structured illumination microscopy improves reconstruction");
+  assert.equal(paper.id, "openalex-W123");
+  assert.equal(paper.doi, "10.1000/openalex");
+  assert.deepEqual(paper.authors, ["A. Researcher"]);
+  assert.equal(paper.journal, "Nature Methods");
+  assert.equal(paper.published, "2026-07-15");
+  assert.equal(paper.citationCount, 17);
+  assert.equal(paper.citationSource, "OpenAlex");
+  assert.equal(paper.pdfUrl, "https://example.org/openalex.pdf");
+  assert.deepEqual(paper.tags, ["Computational microscopy"]);
+});
+
+test("fetches OpenAlex works with API key, contact email, dates and pagination", async () => {
+  const requests = [];
+  const papers = await fetchOpenAlexPapers(["structured illumination microscopy"], {
+    config: { enabled: true, endpoint: "https://api.openalex.org/works", apiKey: "oa-test", maxPages: 1, perPage: 100 },
+    academicApis: { contactEmail: "researcher@example.org" },
+    queryExpression: "structured illumination microscopy",
+    searchMode: "direction",
+    startDate: "2026-06-01",
+    endDate: "2026-07-16",
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ results: [{
+          id: "https://openalex.org/W456",
+          title: "Structured illumination microscopy from OpenAlex",
+          publication_year: 2026,
+          abstract_inverted_index: { Structured: [0], illumination: [1], microscopy: [2] }
+        }] })
+      };
+    }
+  });
+
+  assert.equal(requests[0].url.searchParams.get("api_key"), "oa-test");
+  assert.equal(requests[0].url.searchParams.get("search"), "structured illumination microscopy");
+  assert.equal(requests[0].url.searchParams.get("filter"), "from_publication_date:2026-06-01,to_publication_date:2026-07-16");
+  assert.match(requests[0].options.headers["User-Agent"], /researcher@example\.org/);
+  assert.equal(papers[0].source, "OpenAlex · OpenAlex");
+});
+
+test("reads and masks OpenAlex integration config while preserving a saved key", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-openalex-config-"));
+  const openAlexConfigFile = path.join(tempDir, "openalex.json");
+  const options = {
+    openAlexConfigFile,
+    llmConfigFile: path.join(tempDir, "llm.json"),
+    googleScholarConfigFile: path.join(tempDir, "google-scholar.json"),
+    journalMetricsConfigFile: path.join(tempDir, "journal-metrics.json"),
+    webOfScienceConfigFile: path.join(tempDir, "web-of-science.json"),
+    firecrawlConfigFile: path.join(tempDir, "firecrawl.json"),
+    academicApisConfigFile: path.join(tempDir, "academic-apis.json"),
+    firecrawlFetchImpl: async () => ({ ok: false, status: 401 })
+  };
+  try {
+    await fs.writeFile(openAlexConfigFile, JSON.stringify({ enabled: true, apiKey: "oa-secret", maxPages: 2, perPage: 50 }), "utf8");
+    assert.equal((await readOpenAlexConfig(openAlexConfigFile)).apiKey, "oa-secret");
+    const integrations = await readIntegrationConfigs(options);
+    assert.equal(integrations.openAlex.apiKey, "");
+    assert.equal(integrations.openAlex.hasApiKey, true);
+    await writeIntegrationConfigs({ openAlex: { enabled: true, apiKey: "" } }, options);
+    assert.equal((await readOpenAlexConfig(openAlexConfigFile)).apiKey, "oa-secret");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("normalizes Web of Science records into the frontend paper schema", () => {
@@ -651,6 +763,7 @@ test("fetch report records APIs called, LLM usage, and fetched papers", async ()
     date: "2026-06-19",
     startDate: "2026-05-01",
     keywords: ["structured illumination"],
+    abstractSources: matchingAbstractSources(paper => paper.summary),
     fetchers: {
       arxiv: async () => [
         {
@@ -1345,12 +1458,14 @@ test("enriches candidate paper snapshots with abstract translation and recommend
 
   const result = await addCandidatePaperToArchive(candidate, {
     dataDir: tempDir,
-    fetchers: {
-      abstract: async paper => {
+    abstractSources: matchingAbstractSources(
+      "This review explains structured illumination microscopy and its resolution improvement principles.",
+      paper => {
         abstractCalls += 1;
         assert.equal(paper.title, candidate.title);
-        return "This review explains structured illumination microscopy and its resolution improvement principles.";
-      },
+      }
+    ),
+    fetchers: {
       llm: async ({ paper }) => {
         llmSummary = paper.summary;
         return {
@@ -1362,7 +1477,7 @@ test("enriches candidate paper snapshots with abstract translation and recommend
     }
   });
 
-  assert.equal(abstractCalls, 1);
+  assert.equal(abstractCalls, 2);
   assert.equal(llmSummary, "This review explains structured illumination microscopy and its resolution improvement principles.");
   assert.equal(result.added, true);
   assert.equal(result.paper.summary, llmSummary);
@@ -1600,6 +1715,7 @@ test("recent refresh keeps and enriches year-only candidates whose year overlaps
       keywords: ["structured illumination microscopy"],
       searchLogic: { activeKeywords: ["structured illumination microscopy"], andEdges: [] },
       sources: ["arXiv"],
+      abstractSources: matchingAbstractSources(paper => paper.summary),
       fetchers: {
         arxiv: async () => [
           { id: "year-only", title: "Structured illumination microscopy year-only candidate", summary: "Structured illumination microscopy abstract", published: "2026", source: "arXiv", sourceType: "预印本", score: 80 },
@@ -2090,6 +2206,7 @@ test("retrying failed fetch log enrichment reprocesses saved papers without sear
   let llmCalls = 0;
   const payload = await retryFailedFetchLogEnrichment(0, {
     dataDir: tempDir,
+    abstractSources: matchingAbstractSources(paper => paper.summary),
     fetchers: {
       llm: async ({ paper }) => {
         llmCalls += 1;
@@ -2216,6 +2333,24 @@ test("Crossref chooses the most precise publication date", async () => {
   });
 
   assert.equal(metadata.published, "2026-06-27");
+});
+
+test("Crossref enrichment prefers an earlier online date over a future issue date", async () => {
+  const title = "Structured illumination microscopy online publication";
+  const [paper] = await enrichPapersWithCrossref([{
+    title,
+    retrievalSource: "webofscience",
+    doi: "10.1000/online-date",
+    published: "2026-11"
+  }], {
+    fetcher: async () => ({
+      doi: "10.1000/online-date",
+      title,
+      published: "2026-06"
+    })
+  });
+
+  assert.equal(paper.published, "2026-06");
 });
 
 test("Crossref enriches an existing DOI when its publication date is incomplete", async () => {
@@ -2368,10 +2503,31 @@ test("uses publisher HTML metadata to expand truncated Google Search titles", as
 
 test("writes integration configs and returns masked API keys", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-integrations-"));
+  let firecrawlUsageCalls = 0;
   const files = {
     llmConfigFile: path.join(tempDir, "llm.json"),
     googleScholarConfigFile: path.join(tempDir, "google-scholar.json"),
-    journalMetricsConfigFile: path.join(tempDir, "journal-metrics.json")
+    journalMetricsConfigFile: path.join(tempDir, "journal-metrics.json"),
+    academicApisConfigFile: path.join(tempDir, "academic-apis.json"),
+    firecrawlConfigFile: path.join(tempDir, "firecrawl.json"),
+    firecrawlFetchImpl: async (url, options) => {
+      firecrawlUsageCalls += 1;
+      assert.equal(String(url), "https://api.firecrawl.dev/v2/team/credit-usage");
+      assert.equal(options.headers.Authorization, "Bearer firecrawl-secret");
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          data: {
+            remainingCredits: 873,
+            planCredits: 1000,
+            billingPeriodStart: "2026-07-01T00:00:00Z",
+            billingPeriodEnd: "2026-07-31T23:59:59Z"
+          }
+        })
+      };
+    }
   };
 
   const saved = await writeIntegrationConfigs({
@@ -2395,11 +2551,19 @@ test("writes integration configs and returns masked API keys", async () => {
       enabled: true,
       endpoint: "https://easyscholar.cc/open/getPublicationRank",
       apiKey: "easy-secret"
-    }
+    },
+    firecrawl: {
+      enabled: true,
+      endpoint: "https://api.firecrawl.dev/v2/scrape",
+      apiKey: "firecrawl-secret"
+    },
+    academicApis: { contactEmail: "researcher@example.org" }
   }, files);
   const rawLlm = JSON.parse(await fs.readFile(files.llmConfigFile, "utf8"));
   const rawGoogle = JSON.parse(await fs.readFile(files.googleScholarConfigFile, "utf8"));
   const rawEasy = JSON.parse(await fs.readFile(files.journalMetricsConfigFile, "utf8"));
+  const rawFirecrawl = JSON.parse(await fs.readFile(files.firecrawlConfigFile, "utf8"));
+  const rawAcademicApis = JSON.parse(await fs.readFile(files.academicApisConfigFile, "utf8"));
 
   assert.equal(rawLlm.apiKey, "llm-secret");
   assert.equal(rawLlm.userBackground, "用户背景：PRIM 伪随机结构光照明显微镜算法\n关注问题：频谱分离、像差鲁棒性");
@@ -2408,6 +2572,8 @@ test("writes integration configs and returns masked API keys", async () => {
   assert.equal(rawGoogle.num, 20);
   assert.equal(rawGoogle.rollingFetch, true);
   assert.equal(rawEasy.apiKey, "easy-secret");
+  assert.equal(rawFirecrawl.apiKey, "firecrawl-secret");
+  assert.equal(rawAcademicApis.contactEmail, "researcher@example.org");
   assert.equal(saved.llm.apiKey, "");
   assert.equal(saved.llm.hasApiKey, true);
   assert.equal(saved.googleScholar.apiKey, "");
@@ -2417,16 +2583,94 @@ test("writes integration configs and returns masked API keys", async () => {
   assert.equal(saved.googleScholar.rollingFetch, true);
   assert.equal(saved.journalMetrics.apiKey, "");
   assert.equal(saved.journalMetrics.hasApiKey, true);
+  assert.equal(saved.firecrawl.apiKey, "");
+  assert.equal(saved.firecrawl.hasApiKey, true);
+  assert.equal(saved.firecrawl.usage.remainingCredits, 873);
+  assert.equal(saved.firecrawl.usage.planCredits, 1000);
+  assert.equal(saved.academicApis.contactEmail, "researcher@example.org");
 
   const readBack = await readIntegrationConfigs(files);
   assert.equal(readBack.llm.endpoint, "https://dashscope.aliyuncs.com/compatible-mode/v1");
   assert.equal(readBack.llm.userBackground, "用户背景：PRIM 伪随机结构光照明显微镜算法\n关注问题：频谱分离、像差鲁棒性");
   assert.equal(readBack.llm.apiKey, "");
   assert.equal(readBack.llm.hasApiKey, true);
+  assert.equal(readBack.firecrawl.usage.status, "ok");
+  assert.deepEqual(await readAcademicApisConfig(files.academicApisConfigFile), {
+    contactEmail: "researcher@example.org"
+  });
+  assert.equal(firecrawlUsageCalls, 2);
   const secrets = await readIntegrationSecrets(files);
   assert.equal(secrets.llm.apiKey, "llm-secret");
   assert.equal(secrets.googleScholar.apiKey, "serp-secret");
   assert.equal(secrets.journalMetrics.apiKey, "easy-secret");
+  assert.equal(secrets.firecrawl.apiKey, "firecrawl-secret");
+
+  await writeIntegrationConfigs({ firecrawl: { enabled: true, endpoint: "https://firecrawl.test/v2/scrape", apiKey: "" } }, files);
+  assert.equal((await readFirecrawlConfig(files.firecrawlConfigFile)).apiKey, "firecrawl-secret");
+  await assert.rejects(
+    writeIntegrationConfigs({ academicApis: { contactEmail: "not-an-email" } }, files),
+    /学术 API 联系邮箱格式不正确/
+  );
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("Firecrawl credit usage is skipped without a key and degrades on API failure", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-firecrawl-usage-"));
+  const firecrawlConfigFile = path.join(tempDir, "firecrawl.json");
+  let calls = 0;
+  const firecrawlFetchImpl = async () => {
+    calls += 1;
+    return { ok: false, status: 429 };
+  };
+
+  let integrations = await readIntegrationConfigs({ firecrawlConfigFile, firecrawlFetchImpl });
+  assert.equal(calls, 0);
+  assert.equal(integrations.firecrawl.usage.status, "unconfigured");
+
+  await fs.writeFile(firecrawlConfigFile, JSON.stringify({ enabled: true, apiKey: "fc-test" }), "utf8");
+  integrations = await readIntegrationConfigs({ firecrawlConfigFile, firecrawlFetchImpl });
+  assert.equal(calls, 1);
+  assert.equal(integrations.firecrawl.usage.status, "error");
+  assert.equal(integrations.firecrawl.apiKey, "");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("Firecrawl test validates a submitted key without scraping a page", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-firecrawl-test-"));
+  const configFile = path.join(tempDir, "firecrawl.json");
+  const requests = [];
+  const result = await testFirecrawlConfig({
+    firecrawl: { enabled: true, endpoint: "https://api.firecrawl.dev/v2/scrape", apiKey: "fc-valid" }
+  }, {
+    configFile,
+    fetchImpl: async (url, options) => {
+      requests.push({ url: String(url), options });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, data: { remainingCredits: 990, planCredits: 1000 } })
+      };
+    }
+  });
+
+  assert.equal(requests[0].url, "https://api.firecrawl.dev/v2/team/credit-usage");
+  assert.equal(requests[0].options.headers.Authorization, "Bearer fc-valid");
+  assert.equal(result.usage.remainingCredits, 990);
+  assert.equal(requests.some(request => request.url.endsWith("/scrape")), false);
+
+  await assert.rejects(() => testFirecrawlConfig({ firecrawl: { apiKey: "fc-rejected" } }, {
+    configFile,
+    fetchImpl: async () => ({ ok: false, status: 401 })
+  }), /API Key.*401/);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("Firecrawl config discards a saved secret mask instead of treating it as a key", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-firecrawl-mask-"));
+  const configFile = path.join(tempDir, "firecrawl.json");
+  await fs.writeFile(configFile, JSON.stringify({ enabled: true, apiKey: "********" }), "utf8");
+
+  assert.equal((await readFirecrawlConfig(configFile)).apiKey, "");
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -2643,6 +2887,7 @@ test("uses LLM output for Chinese summaries and background-aware recommendations
     keywords: ["structured illumination microscopy"],
     sources: ["Google Scholar"],
     userBackground: "用户背景：3D-SIM、多层聚焦结构光照明 MPSIM、RIM、PRIM 伪随机结构光照明显微镜算法。",
+    abstractSources: matchingAbstractSources(paper => paper.summary),
     fetchers: {
       googlescholar: async () => [
         {
@@ -2719,6 +2964,7 @@ test("refresh enriches archived papers that have not called LLM yet", async () =
     date: "2026-06-20",
     keywords: ["structured illumination microscopy"],
     sources: ["arXiv"],
+    abstractSources: matchingAbstractSources(paper => paper.summary),
     fetchers: {
       arxiv: async () => [],
       llm: async ({ paper }) => ({
@@ -2777,7 +3023,7 @@ test("refreshes one archived paper with LLM when requested", async () => {
         tokenUsage: { prompt: 12, completion: 8, total: 20, model: "test-llm", status: "已调用 AI" }
       };
     }
-  }, { dataDir: tempDir });
+  }, { dataDir: tempDir, abstractSources: matchingAbstractSources(paper => paper.summary) });
   const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
   const operations = await readOperationLog(tempDir);
 
@@ -2814,7 +3060,7 @@ test("single-paper LLM failure stays failed and does not rewrite the archive", a
   const payload = await refreshArchivePaperLlmInsight({
     id: "still-failed",
     fetcher: async () => { throw new Error("LLM timeout"); }
-  }, { dataDir: tempDir });
+  }, { dataDir: tempDir, abstractSources: matchingAbstractSources(paper => paper.summary) });
   const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
 
   assert.equal(payload.updated, false);
@@ -2865,7 +3111,7 @@ test("single-paper LLM refresh does not match a different paper with the same ti
         tokenUsage: { prompt: 6, completion: 4, total: 10, model: "test-llm", status: "已调用 AI" }
       };
     }
-  }, { dataDir: tempDir });
+  }, { dataDir: tempDir, abstractSources: matchingAbstractSources(paper => paper.summary) });
   const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
 
   assert.equal(payload.paper.id, "same-title-target");
@@ -2898,11 +3144,145 @@ test("single-paper LLM refresh accepts a stable id when only the archive has a D
       reason: "稳定 ID 匹配。",
       tokenUsage: { prompt: 4, completion: 3, total: 7, model: "test-llm", status: "已调用 AI" }
     })
-  }, { dataDir: tempDir });
+  }, { dataDir: tempDir, abstractSources: matchingAbstractSources(paper => paper.summary) });
 
   assert.equal(payload.updated, true);
   assert.equal(payload.paper.id, "stable-paper-id");
   assert.equal(payload.paper.reason, "稳定 ID 匹配。");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("single-paper LLM refresh saves a manual abstract before sending it to AI", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-manual-abstract-"));
+  const manualAbstract = "This manually verified complete abstract describes structured illumination microscopy reconstruction with robust experimental validation.";
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    papers: [{ id: "manual-abstract", title: "Manual abstract paper", summary: "Search snippet…", abstractStatus: "unconfirmed", tokenUsage: { status: "未调用 AI" } }]
+  }, null, 2)}\n`, "utf8");
+
+  const payload = await refreshArchivePaperLlmInsight({ id: "manual-abstract", manualAbstract }, {
+    dataDir: tempDir,
+    fetcher: async ({ paper }) => {
+      assert.equal(paper.summary, manualAbstract);
+      return { abstractZh: "人工摘要翻译。", reason: "人工摘要推荐。", tokenUsage: { status: "已调用 AI", total: 8 } };
+    }
+  });
+  const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+
+  assert.equal(payload.updated, true);
+  assert.equal(payload.aiUpdated, true);
+  assert.equal(archive.papers[0].summary, manualAbstract);
+  assert.deepEqual(archive.papers[0].abstractConsensusSources, ["manual"]);
+  assert.equal(archive.papers[0].abstractZh, "人工摘要翻译。");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("manual abstract remains saved when the following AI call fails", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-manual-abstract-ai-fail-"));
+  const manualAbstract = "This complete manually supplied abstract remains available when the language model request fails.";
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    papers: [{ id: "manual-ai-fail", title: "Manual abstract persistence", summary: "Snippet…", abstractStatus: "unconfirmed" }]
+  }, null, 2)}\n`, "utf8");
+
+  const payload = await refreshArchivePaperLlmInsight({ id: "manual-ai-fail", manualAbstract }, {
+    dataDir: tempDir,
+    fetcher: async () => { throw new Error("LLM timeout"); }
+  });
+  const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+
+  assert.equal(payload.updated, true);
+  assert.equal(payload.aiUpdated, false);
+  assert.equal(archive.papers[0].summary, manualAbstract);
+  assert.equal(archive.papers[0].abstractStatus, "confirmed");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("manual abstract rejects truncated text before archive or AI changes", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-manual-abstract-invalid-"));
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    papers: [{ id: "manual-invalid", title: "Manual invalid abstract", summary: "Original snippet…", abstractStatus: "unconfirmed" }]
+  }, null, 2)}\n`, "utf8");
+  let llmCalls = 0;
+
+  const payload = await refreshArchivePaperLlmInsight({ id: "manual-invalid", manualAbstract: "Still truncated…" }, {
+    dataDir: tempDir,
+    fetcher: async () => { llmCalls += 1; }
+  });
+  const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+
+  assert.equal(payload.updated, false);
+  assert.equal(llmCalls, 0);
+  assert.equal(archive.papers[0].summary, "Original snippet…");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("single-paper Firecrawl retry uses only the publisher scrape before AI", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-firecrawl-retry-"));
+  const abstract = "This complete Firecrawl publisher abstract describes a structured illumination microscopy method and its validation.";
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    papers: [{ id: "firecrawl-retry", doi: "10.1000/firecrawl-retry", title: "Firecrawl retry paper", summary: "Snippet…", abstractStatus: "unconfirmed" }]
+  }, null, 2)}\n`, "utf8");
+
+  const payload = await refreshArchivePaperLlmInsight({ id: "firecrawl-retry", abstractMode: "firecrawl" }, {
+    dataDir: tempDir,
+    firecrawl: {
+      config: { enabled: true, endpoint: "https://firecrawl.test/v2/scrape", apiKey: "fc-test" },
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ success: true, data: { markdown: `## Abstract\n\n${abstract}\n\n## Introduction`, metadata: { title: "Firecrawl retry paper" } } })
+      })
+    },
+    abstractSources: { wos: async () => { throw new Error("WoS must not run"); } },
+    fetcher: async ({ paper }) => {
+      assert.equal(paper.summary, abstract);
+      return { abstractZh: "Firecrawl 摘要翻译。", reason: "Firecrawl 推荐。", tokenUsage: { status: "已调用 AI", total: 9 } };
+    }
+  });
+
+  assert.equal(payload.updated, true);
+  assert.deepEqual(payload.paper.abstractConsensusSources, ["firecrawl"]);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("concurrent single-paper Firecrawl retries preserve both archive updates", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-firecrawl-concurrent-"));
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    papers: [
+      { id: "firecrawl-one", doi: "10.1000/firecrawl-one", title: "Firecrawl paper one", summary: "Snippet one…", abstractStatus: "unconfirmed" },
+      { id: "firecrawl-two", doi: "10.1000/firecrawl-two", title: "Firecrawl paper two", summary: "Snippet two…", abstractStatus: "unconfirmed" }
+    ]
+  }, null, 2)}\n`, "utf8");
+  let started = 0;
+  let releaseBoth;
+  const bothStarted = new Promise(resolve => { releaseBoth = resolve; });
+  const firecrawl = {
+    config: { enabled: true, endpoint: "https://firecrawl.test/v2/scrape", apiKey: "fc-test" },
+    fetchImpl: async (_url, request) => {
+      started += 1;
+      if (started === 2) releaseBoth();
+      await bothStarted;
+      const doi = new URL(JSON.parse(request.body).url).pathname.slice(1);
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: { rawHtml: `<meta name="citation_abstract" content="Complete abstract for ${doi}.">` }
+        })
+      };
+    }
+  };
+
+  await Promise.all([
+    refreshArchivePaperLlmInsight({ id: "firecrawl-one", abstractMode: "firecrawl" }, { dataDir: tempDir, firecrawl, fetcher: async () => null }),
+    refreshArchivePaperLlmInsight({ id: "firecrawl-two", abstractMode: "firecrawl" }, { dataDir: tempDir, firecrawl, fetcher: async () => null })
+  ]);
+  const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+
+  assert.deepEqual(archive.papers.map(paper => paper.abstractStatus), ["confirmed", "confirmed"]);
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -2943,6 +3323,7 @@ test("refreshes missing archive LLM insights in bulk and skips completed papers"
   const calledIds = [];
 
   const payload = await refreshArchiveLlmInsights({
+    abstractSources: matchingAbstractSources(paper => paper.summary),
     fetcher: async ({ paper }) => {
       calledIds.push(paper.id);
       return {
@@ -2979,6 +3360,7 @@ test("bulk LLM refresh counts only successful papers", async () => {
   }, null, 2)}\n`, "utf8");
 
   const payload = await refreshArchiveLlmInsights({
+    abstractSources: matchingAbstractSources(paper => paper.summary),
     fetcher: async ({ paper }) => {
       if (paper.id === "llm-failure") throw new Error("provider timeout");
       return {
@@ -3028,10 +3410,10 @@ test("refreshes truncated archive abstract translations instead of treating them
   const calledIds = [];
 
   const payload = await refreshArchiveLlmInsights({
-    abstractFetcher: async paper => {
-      assert.equal(paper.id, "truncated-scholar");
-      return "This is the complete source abstract for structured illumination microscopy.";
-    },
+    abstractSources: matchingAbstractSources(
+      "This is the complete source abstract for structured illumination microscopy.",
+      paper => assert.equal(paper.id, "truncated-scholar")
+    ),
     fetcher: async ({ paper }) => {
       calledIds.push(paper.id);
       assert.equal(paper.summary, "This is the complete source abstract for structured illumination microscopy.");
@@ -3053,6 +3435,617 @@ test("refreshes truncated archive abstract translations instead of treating them
   assert.equal(archive.papers.find(paper => paper.id === "truncated-scholar").shortTitle, "2026@");
   assert.equal(archive.papers.find(paper => paper.id === "done-paper").abstractZh, "完整中文摘要。");
   await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("abstract consensus ignores formatting differences but rejects content changes", () => {
+  const formatted = "<jats:p><strong>BACKGROUND:</strong> Structured-\nillumination reaches 0.5 μm; reconstruction = stable.</jats:p>";
+  const plain = "Structuredillumination reaches 0.5 μm, reconstruction = stable.";
+  const changed = "Structuredillumination reaches 0.6 μm, reconstruction = stable.";
+
+  assert.equal(abstractMatchText(formatted), abstractMatchText(plain));
+  assert.notEqual(abstractMatchText(formatted), abstractMatchText(changed));
+  assert.deepEqual(
+    selectMatchingAbstractCandidate([
+      { source: "wos", cleanAbstract: formatted },
+      { source: "semantic-scholar", cleanAbstract: plain },
+      { source: "crossref", cleanAbstract: changed }
+    ]).sources,
+    ["wos", "semantic-scholar"]
+  );
+});
+
+test("abstract consensus does not count decorated labels from the same source twice", () => {
+  const abstract = "The same complete abstract returned twice by one provider.";
+
+  assert.equal(selectMatchingAbstractCandidate([
+    { source: "Semantic Scholar · Nature Methods", cleanAbstract: abstract },
+    { source: "semanticScholar", cleanAbstract: abstract }
+  ]), null);
+  assert.equal(selectMatchingAbstractCandidate([
+    { source: "arXiv cs.CV", cleanAbstract: abstract },
+    { source: "arxiv", cleanAbstract: abstract }
+  ]), null);
+});
+
+test("abstract recovery replaces a supplement DOI with the article DOI from its URL", async () => {
+  const articleDoi = "10.1021/acs.analchem.5c01929";
+  const seenDois = [];
+  const source = async paper => {
+    seenDois.push(paper.doi);
+    return { doi: paper.doi, title: paper.title, abstract: "Complete article abstract." };
+  };
+  const [paper] = await recoverGeneratedSummaryPapers([{
+    title: "Pixel-Wise Diffusion Imaging",
+    doi: `${articleDoi}.s001`,
+    url: `https://pubs.acs.org/doi/abs/${articleDoi}`,
+    summary: "… search snippet …"
+  }], {
+    abstractSources: { crossref: source, semanticScholar: source }
+  });
+
+  assert.deepEqual(seenDois, [articleDoi, articleDoi]);
+  assert.equal(paper.doi, articleDoi);
+  assert.equal(paper.abstractStatus, "confirmed");
+});
+
+test("abstract recovery keeps a corrected article DOI without consensus", async () => {
+  const articleDoi = "10.1021/acsnano.6c00486";
+  const [paper] = await recoverGeneratedSummaryPapers([{
+    title: "Super-Resolution Structured Illumination Microscopy",
+    doi: `${articleDoi}.s001`,
+    url: `https://pubs.acs.org/doi/abs/${articleDoi}`,
+    summary: "… search snippet …"
+  }], {
+    abstractSources: { crossref: async () => null, semanticScholar: async () => null }
+  });
+
+  assert.equal(paper.doi, articleDoi);
+  assert.equal(paper.abstractStatus, "unconfirmed");
+});
+
+test("abstract recovery reads an article DOI from a publisher URL path", async () => {
+  const articleDoi = "10.1007/978-1-0716-5268-8_1";
+  const [paper] = await recoverGeneratedSummaryPapers([{
+    title: "Structured Illumination Microscopy",
+    doi: "10.1021/acsphotonics.0c01360.s001",
+    url: `https://link.springer.com/protocol/${articleDoi}`,
+    summary: "… search snippet …"
+  }], {
+    abstractSources: { crossref: async () => null, semanticScholar: async () => null }
+  });
+
+  assert.equal(paper.doi, articleDoi);
+});
+
+test("abstract recovery batches Semantic Scholar DOI lookups", async () => {
+  const papers = ["10.1000/batch-one", "10.1000/batch-two"].map((doi, index) => ({
+    title: `Structured illumination batch paper ${index + 1}`,
+    doi,
+    summary: "… search snippet …"
+  }));
+  let semanticCalls = 0;
+  const recovered = await recoverGeneratedSummaryPapers(papers, {
+    webOfScience: { config: { enabled: false } },
+    abstractFetchImpl: async (url, request = {}) => {
+      const value = String(url);
+      if (value.includes("semanticscholar")) {
+        semanticCalls += 1;
+        assert.equal(request.method, "POST");
+        return {
+          ok: true,
+          status: 200,
+          json: async () => papers.map(paper => ({ title: paper.title, abstract: `Complete abstract for ${paper.doi}.`, externalIds: { DOI: paper.doi }, authors: [] }))
+        };
+      }
+      const doi = decodeURIComponent(value.split("/").at(-1));
+      const paper = papers.find(item => item.doi === doi);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ message: { DOI: paper.doi, title: [paper.title], abstract: `Complete abstract for ${paper.doi}.` } })
+      };
+    }
+  });
+
+  assert.equal(semanticCalls, 1);
+  assert.deepEqual(recovered.map(paper => paper.abstractStatus), ["confirmed", "confirmed"]);
+});
+
+test("Semantic Scholar retries HTTP 429 before forming abstract consensus", async () => {
+  const doi = "10.1000/retry-abstract";
+  const abstract = "Complete structured illumination microscopy abstract.";
+  let semanticCalls = 0;
+  const [paper] = await recoverGeneratedSummaryPapers([{
+    title: "Structured illumination retry paper",
+    doi,
+    summary: "… search snippet …"
+  }], {
+    webOfScience: { config: { enabled: false } },
+    abstractFetchImpl: async url => {
+      const value = String(url);
+      if (value.includes("semanticscholar")) {
+        semanticCalls += 1;
+        if (semanticCalls === 1) return { ok: false, status: 429, headers: { get: () => "0" } };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [{ title: "Structured illumination retry paper", abstract, externalIds: { DOI: doi }, authors: [] }]
+        };
+      }
+      if (value.includes("api.crossref.org")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ message: { DOI: doi, title: ["Structured illumination retry paper"] } })
+        };
+      }
+      throw new Error(`Unexpected URL: ${value}`);
+    }
+  });
+
+  assert.equal(semanticCalls, 2);
+  assert.deepEqual(paper.abstractConsensusSources, ["semantic-scholar"]);
+});
+
+test("abstract recovery starts all sources and accepts the first complete result", async () => {
+  const resolvers = new Map();
+  const calls = [];
+  const source = name => async () => {
+    calls.push(name);
+    return new Promise(resolve => resolvers.set(name, resolve));
+  };
+  const paper = {
+    id: "consensus-paper",
+    doi: "10.1000/consensus",
+    title: "Structured illumination consensus",
+    authors: ["A. Author"],
+    summary: "… search snippet …"
+  };
+  const pending = recoverGeneratedSummaryPapers([paper], {
+    abstractSources: {
+      wos: source("wos"),
+      semanticScholar: source("semantic-scholar"),
+      crossref: source("crossref"),
+      publisher: source("publisher")
+    }
+  });
+
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls.sort(), ["crossref", "publisher", "semantic-scholar", "wos"]);
+  resolvers.get("wos")({ doi: paper.doi, title: paper.title, authors: paper.authors, abstract: "Complete abstract A." });
+
+  const [recovered] = await pending;
+  assert.equal(recovered.summary, "Complete abstract A.");
+  assert.deepEqual(recovered.abstractConsensusSources, ["wos"]);
+  assert.equal(recovered.abstractStatus, "confirmed");
+});
+
+test("archive LLM refresh accepts a complete abstract returned by one source", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-abstract-single-source-"));
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    count: 1,
+    papers: [{
+      id: "single-source",
+      doi: "10.1000/single",
+      title: "Single source structured illumination paper",
+      authors: ["A. Author"],
+      summary: "… search snippet …",
+      tokenUsage: { status: "未调用 AI" }
+    }]
+  }, null, 2)}\n`, "utf8");
+  let llmCalls = 0;
+
+  const payload = await refreshArchiveLlmInsights({
+    dataDir: tempDir,
+    abstractSources: {
+      wos: async paper => ({
+        doi: paper.doi,
+        title: paper.title,
+        authors: paper.authors,
+        abstract: "This complete abstract is available from only one source."
+      }),
+      semanticScholar: async () => "",
+      crossref: async () => "",
+      publisher: async () => ""
+    },
+    fetcher: async () => {
+      llmCalls += 1;
+      return { abstractZh: "完整中文摘要。", reason: "推荐理由。", tokenUsage: { status: "已调用 AI" } };
+    }
+  });
+
+  assert.equal(llmCalls, 1);
+  assert.equal(payload.updatedCount, 1);
+  assert.equal(payload.papers[0].abstractZh, "完整中文摘要。");
+  assert.deepEqual(payload.papers[0].abstractConsensusSources, ["wos"]);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("archive LLM refresh persists a corrected article DOI without calling AI", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-abstract-corrected-doi-"));
+  const articleDoi = "10.1021/acsnano.6c00486";
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    count: 1,
+    papers: [{
+      id: "supplement-doi",
+      title: "Super-Resolution Structured Illumination Microscopy",
+      doi: `${articleDoi}.s001`,
+      url: `https://pubs.acs.org/doi/abs/${articleDoi}`,
+      summary: "… search snippet …",
+      tokenUsage: { status: "未调用 AI" }
+    }]
+  }, null, 2)}\n`, "utf8");
+  let llmCalls = 0;
+
+  const payload = await refreshArchiveLlmInsights({
+    abstractSources: { crossref: async () => null, semanticScholar: async () => null },
+    fetcher: async () => { llmCalls += 1; }
+  }, { dataDir: tempDir });
+  const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+
+  assert.equal(llmCalls, 0);
+  assert.equal(payload.updatedCount, 1);
+  assert.equal(archive.papers[0].doi, articleDoi);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("archive LLM refresh uses the first complete abstract without waiting for agreement", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-abstract-conflict-"));
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    count: 1,
+    papers: [{
+      id: "conflicting-sources",
+      doi: "10.1000/conflict",
+      title: "Conflicting structured illumination paper",
+      authors: ["A. Author"],
+      summary: "… search snippet …",
+      tokenUsage: { status: "未调用 AI" }
+    }]
+  }, null, 2)}\n`, "utf8");
+  let llmCalls = 0;
+  const candidate = abstract => async paper => ({
+    doi: paper.doi,
+    title: paper.title,
+    authors: paper.authors,
+    abstract
+  });
+
+  const payload = await refreshArchiveLlmInsights({
+    dataDir: tempDir,
+    abstractSources: {
+      wos: candidate("Complete abstract from source A."),
+      semanticScholar: candidate("Complete abstract from source B."),
+      crossref: candidate("Complete abstract from source C."),
+      publisher: candidate("Complete abstract from source D.")
+    },
+    fetcher: async () => {
+      llmCalls += 1;
+      return { abstractZh: "完整中文摘要。", reason: "推荐理由。", tokenUsage: { status: "已调用 AI" } };
+    }
+  });
+
+  assert.equal(llmCalls, 1);
+  assert.equal(payload.updatedCount, 1);
+  assert.equal(payload.papers[0].summary, "Complete abstract from source A.");
+  assert.deepEqual(payload.papers[0].abstractConsensusSources, ["wos"]);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("Firecrawl fetches a publisher page without using AI extraction", async () => {
+  const paper = {
+    doi: "10.1186/s43074-025-00171-w",
+    title: "Ensemble deep learning-enabled single-shot composite structured illumination microscopy (eDL-cSIM)",
+    authors: ["J. Qian"]
+  };
+  const abstract = "Structured illumination microscopy provides a complete publisher abstract without using generated extraction.";
+  const requests = [];
+  const config = {
+    enabled: true,
+    endpoint: "https://api.firecrawl.dev/v2/scrape",
+    apiKey: "firecrawl-secret"
+  };
+  const fromHtml = await fetchFirecrawlAbstractForPaper(paper, {
+    config,
+    fetchImpl: async (url, options) => {
+      requests.push({ url: String(url), options, body: JSON.parse(options.body) });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          data: {
+            rawHtml: `<meta name="citation_abstract" content="${abstract}">`,
+            markdown: "",
+            metadata: { title: paper.title, url: "https://publisher.test/article" }
+          }
+        })
+      };
+    }
+  });
+  const fromMarkdown = await fetchFirecrawlAbstractForPaper(paper, {
+    config,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: { rawHtml: "", markdown: `## Abstract\n\n${abstract}\n\n## Introduction`, metadata: { title: paper.title } } })
+    })
+  });
+
+  assert.equal(fromHtml.abstract, abstract);
+  assert.equal(fromMarkdown.abstract, abstract);
+  assert.equal(requests[0].url, config.endpoint);
+  assert.equal(requests[0].options.headers.Authorization, "Bearer firecrawl-secret");
+  assert.equal(requests[0].body.url, `https://doi.org/${paper.doi}`);
+  assert.deepEqual(requests[0].body.formats, ["markdown", "rawHtml"]);
+  assert.equal(JSON.stringify(requests[0].body).includes("agent"), false);
+  assert.equal(JSON.stringify(requests[0].body).includes("question"), false);
+});
+
+test("Firecrawl prefers a complete Markdown abstract over truncated page metadata", async () => {
+  const completeAbstract = "Structured illumination microscopy supports large-field imaging. This complete abstract explains the method, aberration sensing strategy, experimental validation, and resulting improvement in reconstruction quality.";
+  const result = await fetchFirecrawlAbstractForPaper({
+    doi: "10.1021/acsphotonics.5c02743",
+    title: "Adaptive Optics-Assisted Large-Field Structured Illumination Microscopy via Coherent Aberration Sensing",
+    authors: ["C. Liang"]
+  }, {
+    config: {
+      enabled: true,
+      endpoint: "https://api.firecrawl.dev/v2/scrape",
+      apiKey: "firecrawl-secret"
+    },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        data: {
+          rawHtml: '<meta name="citation_abstract" content="Structured illumination microscopy supports large-field imaging...">',
+          markdown: `## Abstract\n\n${completeAbstract}\n\n## Read this article`,
+          metadata: { title: "Adaptive Optics-Assisted Large-Field Structured Illumination Microscopy via Coherent Aberration Sensing | ACS Photonics" }
+        }
+      })
+    })
+  });
+
+  assert.equal(result.abstract, completeAbstract);
+});
+
+test("Firecrawl keeps a complete metadata abstract instead of longer page boilerplate", async () => {
+  const abstract = "Structured illumination microscopy uses patterned excitation to improve resolution. This complete abstract describes the method and validation.";
+  const result = await fetchFirecrawlAbstractForPaper({
+    doi: "10.1021/acsphotonics.5c02743",
+    title: "Adaptive Optics-Assisted Large-Field Structured Illumination Microscopy via Coherent Aberration Sensing",
+    authors: ["C. Liang"]
+  }, {
+    config: {
+      enabled: true,
+      endpoint: "https://api.firecrawl.dev/v2/scrape",
+      apiKey: "firecrawl-secret"
+    },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        data: {
+          rawHtml: `<meta name="citation_abstract" content="${abstract}">`,
+          markdown: `## Abstract\n\nClick to copy section link\n\n${abstract}\n\nACS Publications\n\nCopyright 2026 American Chemical Society\n\n## Read this article`,
+          metadata: { title: "Adaptive Optics-Assisted Large-Field Structured Illumination Microscopy via Coherent Aberration Sensing | ACS Photonics" }
+        }
+      })
+    })
+  });
+
+  assert.equal(result.abstract, abstract);
+});
+
+test("Firecrawl trims Markdown boilerplate after the abstract", async () => {
+  const abstract = "Structured illumination microscopy uses patterned excitation to improve resolution. This complete abstract describes the method and validation.";
+  const result = await fetchFirecrawlAbstractForPaper({
+    doi: "10.1000/markdown-boilerplate",
+    title: "Structured illumination microscopy validation",
+    authors: []
+  }, {
+    config: {
+      enabled: true,
+      endpoint: "https://api.firecrawl.dev/v2/scrape",
+      apiKey: "firecrawl-secret"
+    },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        data: {
+          markdown: `## Abstract\n\n${abstract}\n\nThis is a preview of subscription content.\n\n## Access this article`,
+          metadata: { title: "Structured illumination microscopy validation" }
+        }
+      })
+    })
+  });
+
+  assert.equal(result.abstract, abstract);
+});
+
+test("Firecrawl removes SPIE view suffixes before querying DOI sources", async () => {
+  const requests = [];
+  const paper = {
+    doi: "10.1117/12.3116453.short",
+    url: "https://www.spiedigitallibrary.org/conference-proceedings-of-spie/14235/142355K/title/10.1117/12.3116453.short",
+    title: "Benchmarking large multimodal models for structured illumination microscopy quality assessment",
+    authors: []
+  };
+  await fetchFirecrawlAbstractForPaper(paper, {
+    config: {
+      enabled: true,
+      endpoint: "https://api.firecrawl.dev/v2/scrape",
+      apiKey: "firecrawl-secret"
+    },
+    fetchImpl: async (url, options) => {
+      requests.push({ url: String(url), body: JSON.parse(options.body) });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, data: { markdown: "", rawHtml: "" } })
+      };
+    }
+  });
+
+  const doiRequest = requests.find(request => request.body.url?.startsWith("https://doi.org/"));
+  assert.equal(doiRequest.body.url, "https://doi.org/10.1117/12.3116453");
+});
+
+test("Firecrawl search discovers a candidate page but never trusts its snippet", async () => {
+  const paper = {
+    doi: "10.1117/12.3116453",
+    url: "https://publisher.test/blocked",
+    title: "Benchmarking large multimodal models for structured illumination microscopy quality assessment",
+    authors: ["A. Author"]
+  };
+  const abstract = "Structured illumination microscopy lacks ground-truth images for comparing reconstruction quality. This complete abstract reports the evaluated models and conclusions.";
+  const requests = [];
+  const result = await fetchFirecrawlAbstractForPaper(paper, {
+    config: {
+      enabled: true,
+      endpoint: "https://api.firecrawl.dev/v2/scrape",
+      apiKey: "firecrawl-secret"
+    },
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(options.body);
+      requests.push({ url: String(url), body });
+      if (String(url).endsWith("/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            data: { web: [{ url: "https://repository.test/paper", title: paper.title, description: "A truncated search snippet..." }] }
+          })
+        };
+      }
+      if (body.url === "https://repository.test/paper") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            data: { rawHtml: `<meta name="citation_abstract" content="${abstract}">`, metadata: { title: paper.title } }
+          })
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, data: { markdown: "", rawHtml: "" } })
+      };
+    }
+  });
+
+  assert.equal(result.abstract, abstract);
+  assert.equal(requests.some(request => request.url.endsWith("/search")), true);
+  assert.equal(requests.some(request => request.body.url === "https://repository.test/paper"), true);
+});
+
+test("default abstract recovery starts WoS Semantic Scholar Crossref publisher and Firecrawl paths", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-abstract-default-sources-"));
+  const calls = new Set();
+  const paper = {
+    id: "default-sources",
+    doi: "10.1000/default-sources",
+    title: "Default source structured illumination paper",
+    authors: ["A. Author"],
+    url: "https://publisher.test/paper",
+    summary: "… search snippet …"
+  };
+  const abstract = "Complete structured illumination abstract.";
+  const abstractFetchImpl = async url => {
+    const value = String(url);
+    if (value.includes("semanticscholar")) {
+      calls.add("semantic-scholar");
+      return {
+        ok: true,
+        json: async () => [{ title: paper.title, abstract, externalIds: { DOI: paper.doi }, authors: [{ name: "A. Author" }] }]
+      };
+    }
+    if (value.includes("crossref")) {
+      calls.add("crossref");
+      return {
+        ok: true,
+        json: async () => ({ message: { DOI: paper.doi, title: [paper.title], abstract: `<jats:p>${abstract}</jats:p>`, author: [{ given: "A.", family: "Author" }] } })
+      };
+    }
+    calls.add("publisher");
+    return { ok: true, text: async () => `<meta name="citation_abstract" content="${abstract}">` };
+  };
+  const webOfScience = {
+    config: {
+      enabled: true,
+      endpoint: "https://wos.test/documents",
+      apiKey: "test-key",
+      databaseId: "WOS",
+      maxPages: 1,
+      pageSize: 20,
+      request: { apiKeyHeader: "X-ApiKey", useApiKeyHeader: true },
+      responseMap: { items: "hits", title: "title", summary: "abstract", doi: "doi", authors: "authors" }
+    },
+    fetchImpl: async () => {
+      calls.add("wos");
+      return { ok: true, json: async () => ({ hits: [{ uid: "WOS:DEFAULT", doi: paper.doi, title: paper.title, abstract, authors: ["A. Author"] }] }) };
+    }
+  };
+  const firecrawl = {
+    config: { enabled: true, endpoint: "https://firecrawl.test/v2/scrape", apiKey: "firecrawl-key" },
+    fetchImpl: async () => {
+      calls.add("firecrawl");
+      return { ok: true, json: async () => ({ success: true, data: { markdown: `## Abstract\n\n${abstract}\n\n## Introduction`, metadata: { title: paper.title } } }) };
+    }
+  };
+
+  const [recovered] = await recoverGeneratedSummaryPapers([paper], {
+    dataDir: tempDir,
+    abstractFetchImpl,
+    webOfScience,
+    firecrawl
+  });
+
+  assert.equal(recovered.summary, abstract);
+  assert.equal(recovered.abstractStatus, "confirmed");
+  assert.equal(recovered.abstractConsensusSources.length, 1);
+  assert.deepEqual([...calls].sort(), ["crossref", "firecrawl", "publisher", "semantic-scholar", "wos"]);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("discovery source selection does not disable Semantic Scholar field enrichment", async () => {
+  let semanticCalls = 0;
+  const paper = {
+    id: "arxiv-discovery-only",
+    retrievalSource: "arxiv",
+    doi: "10.1000/discovery-only",
+    title: "Structured illumination microscopy discovery-only switch",
+    authors: ["A. Author"],
+    summary: "Truncated snippet…"
+  };
+  const [recovered] = await recoverGeneratedSummaryPapers([paper], {
+    sources: ["arxiv"],
+    abstractSources: {
+      semanticScholar: async () => {
+        semanticCalls += 1;
+        return {
+          doi: paper.doi,
+          title: paper.title,
+          authors: paper.authors,
+          abstract: "This complete abstract explains structured illumination microscopy discovery and reconstruction in sufficient detail."
+        };
+      }
+    }
+  });
+
+  assert.equal(semanticCalls, 1);
+  assert.equal(recovered.abstractStatus, "confirmed");
+  assert.deepEqual(recovered.abstractConsensusSources, ["semantic-scholar"]);
 });
 
 test("recovers original abstracts before translating generated Chinese summaries", async () => {
@@ -3085,13 +4078,15 @@ test("recovers original abstracts before translating generated Chinese summaries
     date: "2026-06-20",
     keywords: ["structured illumination microscopy"],
     sources: ["arXiv"],
-    fetchers: {
-      arxiv: async () => [],
-      abstract: async paper => {
+    abstractSources: matchingAbstractSources(
+      "This is the original structured illumination microscopy abstract.",
+      paper => {
         abstractCalls += 1;
         assert.equal(paper.title, "Already summarized structured illumination paper");
-        return "This is the original structured illumination microscopy abstract.";
-      },
+      }
+    ),
+    fetchers: {
+      arxiv: async () => [],
       llm: async ({ paper }) => {
         llmCalls += 1;
         assert.equal(paper.summary, "This is the original structured illumination microscopy abstract.");
@@ -3104,7 +4099,7 @@ test("recovers original abstracts before translating generated Chinese summaries
     }
   });
 
-  assert.equal(abstractCalls, 1);
+  assert.equal(abstractCalls, 2);
   assert.equal(llmCalls, 1);
   assert.equal(payload.count, 0);
   assert.equal(payload.papers.length, 0);
@@ -3154,9 +4149,9 @@ test("recent date range keeps year-only Scholar candidates without inventing Jan
 
 
 test("parses enabled frontend sources into supported backend source ids", () => {
-  const sources = parseEnabledSources(["Google 搜索", "arXiv", "bioRxiv", "Semantic Scholar", "Google Scholar", "谷歌学术", "某个公众号"]);
+  const sources = parseEnabledSources(["Google 搜索", "arXiv", "bioRxiv", "Semantic Scholar", "OpenAlex", "Google Scholar", "谷歌学术", "某个公众号"]);
 
-  assert.deepEqual(sources, ["arxiv", "biorxiv", "semanticscholar", "googlescholar", "googlesearch"]);
+  assert.deepEqual(sources, ["arxiv", "biorxiv", "semanticscholar", "openalex", "googlescholar", "googlesearch"]);
 });
 
 test("fetches ordinary Google Search papers through SerpApi", async () => {
@@ -3790,6 +4785,7 @@ test("discovery task state preflight reads the canonical cursor without changing
 test("exact DOI lookup reuses the Crossref DOI helper", async () => {
   const urls = [];
   const metadata = await fetchCrossrefWorkByDoi("https://doi.org/10.1038/s41592-026-00001-1", {
+    academicApis: { contactEmail: "" },
     fetchImpl: async url => {
       urls.push(String(url));
       return {
@@ -3809,6 +4805,49 @@ test("exact DOI lookup reuses the Crossref DOI helper", async () => {
   assert.equal(urls[0], "https://api.crossref.org/works/10.1038%2Fs41592-026-00001-1");
   assert.equal(metadata.doi, "10.1038/s41592-026-00001-1");
   assert.equal(metadata.published, "2026");
+});
+
+test("Crossref sends the configured academic API contact email", async () => {
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url: new URL(String(url)), options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        message: {
+          DOI: "10.1000/test",
+          title: ["Test paper"],
+          items: []
+        }
+      })
+    };
+  };
+  const academicApis = { contactEmail: "researcher@example.org" };
+
+  await fetchCrossrefWorkByDoi("10.1000/test", { fetchImpl, academicApis });
+  await fetchCrossrefWorkByTitle({ title: "Test paper" }, { fetchImpl, academicApis });
+
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    assert.equal(request.url.searchParams.get("mailto"), "researcher@example.org");
+    assert.equal(request.options.headers["User-Agent"], "paperHOT/0.1 (mailto:researcher@example.org)");
+  }
+});
+
+test("Crossref omits placeholder contact details when email is empty", async () => {
+  let captured;
+  await fetchCrossrefWorkByDoi("10.1000/test", {
+    academicApis: { contactEmail: "" },
+    fetchImpl: async (url, options) => {
+      captured = { url: new URL(String(url)), options };
+      return { ok: true, status: 200, json: async () => ({ message: {} }) };
+    }
+  });
+
+  assert.equal(captured.url.searchParams.has("mailto"), false);
+  assert.equal(captured.options.headers["User-Agent"], "paperHOT/0.1");
+  assert.doesNotMatch(JSON.stringify(captured), /local@example\.invalid/);
 });
 
 test("exact DOI lookup skips sources that cannot query a DOI", async () => {
@@ -5930,11 +6969,17 @@ test("exports local research data as zip without API secrets by default", async 
       researchArea: "Private Research Area",
       background: "Private background"
     }, path.join(userDir, "profile.json"));
+    await fs.writeFile(path.join(userDir, "academic-apis.json"), JSON.stringify({
+      contactEmail: "private@example.org"
+    }), "utf8");
+    await fs.writeFile(path.join(userDir, "openalex.json"), JSON.stringify({ enabled: true, apiKey: "oa-private" }), "utf8");
 
     const zip = await exportLocalDataZip({
       dataDir: tempDir,
       userConfigFile: path.join(userDir, "config.json"),
-      userProfileFile: path.join(userDir, "profile.json")
+      userProfileFile: path.join(userDir, "profile.json"),
+      academicApisConfigFile: path.join(userDir, "academic-apis.json"),
+      openAlexConfigFile: path.join(userDir, "openalex.json")
     });
     const entries = parseZipEntries(zip);
     const serialized = Buffer.concat(Object.values(entries)).toString("utf8");
@@ -5955,6 +7000,8 @@ test("exports local research data as zip without API secrets by default", async 
     assert.equal(JSON.parse(entries["data/papers/archive.json"].toString("utf8")).papers[0].doi, "10.1000/exportzip");
     assert.equal(entries["data/user/profile.json"], undefined);
     assert.equal(entries["config/llm.json"], undefined);
+    assert.equal(entries["config/academic-apis.json"], undefined);
+    assert.equal(entries["config/openalex.json"], undefined);
     assert.equal(entries["data/papers/fetch-log.json"], undefined);
     assert.equal(entries["data/papers/operation-log.jsonl"], undefined);
     assert.equal(entries["data/papers/journal-metrics-cache.json"], undefined);
@@ -5964,6 +7011,7 @@ test("exports local research data as zip without API secrets by default", async 
     assert.equal(serialized.includes("secret"), false);
     assert.equal(serialized.includes("should-not-export"), false);
     assert.equal(serialized.includes("shouldNotExportToken123456"), false);
+    assert.equal(serialized.includes("private@example.org"), false);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
     await fs.rm(userDir, { recursive: true, force: true });
@@ -6069,6 +7117,14 @@ test("can export optional profile and API secrets in zip when explicitly request
       enabled: true,
       apiKey: "wos-private-key"
     }), "utf8");
+    await fs.writeFile(path.join(userDir, "firecrawl.json"), JSON.stringify({
+      enabled: true,
+      apiKey: "firecrawl-private-key"
+    }), "utf8");
+    await fs.writeFile(path.join(userDir, "academic-apis.json"), JSON.stringify({
+      contactEmail: "researcher@example.org"
+    }), "utf8");
+    await fs.writeFile(path.join(userDir, "openalex.json"), JSON.stringify({ enabled: true, apiKey: "openalex-private-key" }), "utf8");
 
     const zip = await exportLocalDataZip({
       dataDir: tempDir,
@@ -6078,6 +7134,9 @@ test("can export optional profile and API secrets in zip when explicitly request
       googleScholarConfigFile: path.join(userDir, "google-scholar.json"),
       journalMetricsConfigFile: path.join(userDir, "journal-metrics.json"),
       webOfScienceConfigFile: path.join(userDir, "web-of-science.json"),
+      firecrawlConfigFile: path.join(userDir, "firecrawl.json"),
+      openAlexConfigFile: path.join(userDir, "openalex.json"),
+      academicApisConfigFile: path.join(userDir, "academic-apis.json"),
       includeProfile: true,
       includeSecrets: true
     });
@@ -6088,6 +7147,9 @@ test("can export optional profile and API secrets in zip when explicitly request
     assert.equal(JSON.parse(entries["config/google-scholar.json"].toString("utf8")).apiKey, "serp-private-key");
     assert.equal(JSON.parse(entries["config/journal-metrics.json"].toString("utf8")).apiKey, "easyscholar-private-key");
     assert.equal(JSON.parse(entries["config/web-of-science.json"].toString("utf8")).apiKey, "wos-private-key");
+    assert.equal(JSON.parse(entries["config/firecrawl.json"].toString("utf8")).apiKey, "firecrawl-private-key");
+    assert.equal(JSON.parse(entries["config/openalex.json"].toString("utf8")).apiKey, "openalex-private-key");
+    assert.equal(JSON.parse(entries["config/academic-apis.json"].toString("utf8")).contactEmail, "researcher@example.org");
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
     await fs.rm(userDir, { recursive: true, force: true });
@@ -6105,6 +7167,9 @@ test("skips imported API configs by default and reports the skip", async () => {
     await fs.writeFile(path.join(sourceUserDir, "google-scholar.json"), JSON.stringify({ enabled: true, apiKey: "imported-serp-secret" }), "utf8");
     await fs.writeFile(path.join(sourceUserDir, "journal-metrics.json"), JSON.stringify({ enabled: true, apiKey: "imported-easy-secret" }), "utf8");
     await fs.writeFile(path.join(sourceUserDir, "web-of-science.json"), JSON.stringify({ enabled: true, apiKey: "imported-wos-secret" }), "utf8");
+    await fs.writeFile(path.join(sourceUserDir, "firecrawl.json"), JSON.stringify({ enabled: true, apiKey: "imported-firecrawl-secret" }), "utf8");
+    await fs.writeFile(path.join(sourceUserDir, "openalex.json"), JSON.stringify({ enabled: true, apiKey: "imported-openalex-secret" }), "utf8");
+    await fs.writeFile(path.join(sourceUserDir, "academic-apis.json"), JSON.stringify({ contactEmail: "researcher@example.org" }), "utf8");
 
     const zip = await exportLocalDataZip({
       dataDir: sourceDir,
@@ -6113,6 +7178,9 @@ test("skips imported API configs by default and reports the skip", async () => {
       googleScholarConfigFile: path.join(sourceUserDir, "google-scholar.json"),
       journalMetricsConfigFile: path.join(sourceUserDir, "journal-metrics.json"),
       webOfScienceConfigFile: path.join(sourceUserDir, "web-of-science.json"),
+      firecrawlConfigFile: path.join(sourceUserDir, "firecrawl.json"),
+      openAlexConfigFile: path.join(sourceUserDir, "openalex.json"),
+      academicApisConfigFile: path.join(sourceUserDir, "academic-apis.json"),
       includeSecrets: true
     });
     const imported = await importLocalDataZip(zip, {
@@ -6130,6 +7198,8 @@ test("skips imported API configs by default and reports the skip", async () => {
     await assert.rejects(fs.readFile(path.join(targetUserDir, "google-scholar.json"), "utf8"));
     await assert.rejects(fs.readFile(path.join(targetUserDir, "journal-metrics.json"), "utf8"));
     await assert.rejects(fs.readFile(path.join(targetUserDir, "web-of-science.json"), "utf8"));
+    await assert.rejects(fs.readFile(path.join(targetUserDir, "openalex.json"), "utf8"));
+    await assert.rejects(fs.readFile(path.join(targetUserDir, "academic-apis.json"), "utf8"));
   } finally {
     await fs.rm(sourceDir, { recursive: true, force: true });
     await fs.rm(targetDir, { recursive: true, force: true });
@@ -6149,6 +7219,9 @@ test("imports API configs from zip only when explicitly allowed", async () => {
     await fs.writeFile(path.join(sourceUserDir, "google-scholar.json"), JSON.stringify({ enabled: true, apiKey: "imported-serp-secret" }), "utf8");
     await fs.writeFile(path.join(sourceUserDir, "journal-metrics.json"), JSON.stringify({ enabled: true, apiKey: "imported-easy-secret" }), "utf8");
     await fs.writeFile(path.join(sourceUserDir, "web-of-science.json"), JSON.stringify({ enabled: true, apiKey: "imported-wos-secret" }), "utf8");
+    await fs.writeFile(path.join(sourceUserDir, "firecrawl.json"), JSON.stringify({ enabled: true, apiKey: "imported-firecrawl-secret" }), "utf8");
+    await fs.writeFile(path.join(sourceUserDir, "openalex.json"), JSON.stringify({ enabled: true, apiKey: "imported-openalex-secret" }), "utf8");
+    await fs.writeFile(path.join(sourceUserDir, "academic-apis.json"), JSON.stringify({ contactEmail: "researcher@example.org" }), "utf8");
 
     const zip = await exportLocalDataZip({
       dataDir: sourceDir,
@@ -6157,6 +7230,9 @@ test("imports API configs from zip only when explicitly allowed", async () => {
       googleScholarConfigFile: path.join(sourceUserDir, "google-scholar.json"),
       journalMetricsConfigFile: path.join(sourceUserDir, "journal-metrics.json"),
       webOfScienceConfigFile: path.join(sourceUserDir, "web-of-science.json"),
+      firecrawlConfigFile: path.join(sourceUserDir, "firecrawl.json"),
+      openAlexConfigFile: path.join(sourceUserDir, "openalex.json"),
+      academicApisConfigFile: path.join(sourceUserDir, "academic-apis.json"),
       includeSecrets: true
     });
     const imported = await importLocalDataZip(zip, {
@@ -6166,6 +7242,9 @@ test("imports API configs from zip only when explicitly allowed", async () => {
       googleScholarConfigFile: path.join(targetUserDir, "google-scholar.json"),
       journalMetricsConfigFile: path.join(targetUserDir, "journal-metrics.json"),
       webOfScienceConfigFile: path.join(targetUserDir, "web-of-science.json"),
+      firecrawlConfigFile: path.join(targetUserDir, "firecrawl.json"),
+      openAlexConfigFile: path.join(targetUserDir, "openalex.json"),
+      academicApisConfigFile: path.join(targetUserDir, "academic-apis.json"),
       allowSecrets: true
     });
 
@@ -6175,6 +7254,9 @@ test("imports API configs from zip only when explicitly allowed", async () => {
     assert.equal(JSON.parse(await fs.readFile(path.join(targetUserDir, "google-scholar.json"), "utf8")).apiKey, "imported-serp-secret");
     assert.equal(JSON.parse(await fs.readFile(path.join(targetUserDir, "journal-metrics.json"), "utf8")).apiKey, "imported-easy-secret");
     assert.equal(JSON.parse(await fs.readFile(path.join(targetUserDir, "web-of-science.json"), "utf8")).apiKey, "imported-wos-secret");
+    assert.equal(JSON.parse(await fs.readFile(path.join(targetUserDir, "firecrawl.json"), "utf8")).apiKey, "imported-firecrawl-secret");
+    assert.equal(JSON.parse(await fs.readFile(path.join(targetUserDir, "openalex.json"), "utf8")).apiKey, "imported-openalex-secret");
+    assert.equal(JSON.parse(await fs.readFile(path.join(targetUserDir, "academic-apis.json"), "utf8")).contactEmail, "researcher@example.org");
   } finally {
     await fs.rm(sourceDir, { recursive: true, force: true });
     await fs.rm(targetDir, { recursive: true, force: true });

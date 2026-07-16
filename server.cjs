@@ -31,6 +31,7 @@ const {
   retryFailedFetchLogEnrichment,
   resetGoogleRollingCursors,
   testLlmConfig,
+  testFirecrawlConfig,
   updateFavoritePaper,
   updatePaperNote,
   writeIntegrationConfigs,
@@ -444,6 +445,15 @@ async function handleApi(req, res, url) {
     try {
       const result = await testLlmConfig(body);
       sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 400, { ok: false, error: error.message });
+    }
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/integrations/firecrawl/test") {
+    const body = await collectRequestBody(req);
+    try {
+      sendJson(res, 200, await testFirecrawlConfig(body));
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
     }

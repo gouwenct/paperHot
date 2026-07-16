@@ -62,6 +62,27 @@ test("paper card orders date journal metrics short title and citation controls",
   assert.match(html, /paper-signal-row[\s\S]*paperBibliography\(paper\)/);
 });
 
+test("paper cards do not present unconfirmed snippets as AI abstract translations", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const abstractSource = readNamedFunction(html, "paperAbstractZh", "paperAbstractBlock");
+  const blockSource = readNamedFunction(html, "paperAbstractBlock", "paperReasonBlock");
+  const reasonSource = readNamedFunction(html, "paperReasonBlock", "paperJournalMetrics");
+  const api = new Function("escapeHTML", `${abstractSource}; ${blockSource}; ${reasonSource}; return { paperAbstractZh, paperAbstractBlock, paperReasonBlock };`)(value => String(value));
+  const unconfirmed = { summary: "… search snippet …", abstractStatus: "unconfirmed", abstractZh: "", reason: "不应显示的推荐" };
+
+  assert.equal(api.paperAbstractZh(unconfirmed), "");
+  assert.match(api.paperAbstractBlock(unconfirmed), /未获得完整摘要，未进行 AI 分析/);
+  assert.doesNotMatch(api.paperAbstractBlock(unconfirmed), /摘要翻译/);
+  assert.equal(api.paperReasonBlock(unconfirmed), "");
+  assert.match(api.paperAbstractBlock({ abstractStatus: "confirmed", abstractZh: "完整中文摘要。" }), /摘要翻译.*完整中文摘要。/);
+  assert.match(html, /data-retry-firecrawl-abstract/);
+  assert.match(html, /Firecrawl 重抓/);
+  assert.match(html, /data-manual-abstract/);
+  assert.match(html, /保存并交给 AI/);
+  assert.match(html, /abstractMode:\s*"firecrawl"/);
+  assert.match(html, /manualAbstract/);
+});
+
 test("paper cards show authors and source-specific title metrics with starred backgrounds", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /function paperCitationMetric\(/);
@@ -325,6 +346,8 @@ test("token stats page exposes fetch-log candidate detail view", async () => {
   assert.match(html, /data-candidate-stage/);
   assert.match(html, /日期补全后/);
   assert.match(html, /最终日期通过/);
+  assert.match(html, /let candidateDetailStage = "finalDateMatched"/);
+  assert.match(html, /日期补全后（含超出范围）/);
   assert.match(html, /日期粗筛/);
   assert.match(html, /日期确认/);
   assert.match(html, /历史库新增/);
@@ -365,6 +388,75 @@ test("source config exposes Web of Science API settings", async () => {
   assert.match(html, /Web of Science API Key/);
   assert.match(html, /每次仅抓取少量页面/);
   assert.match(html, /webOfScience:\s*integrationState\.webOfScience/);
+});
+
+test("external integrations expose Firecrawl publisher scraping settings", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /firecrawl:\s*\{/);
+  assert.match(html, /data-integration-section="firecrawl"/);
+  assert.match(html, /Firecrawl API Key/);
+  assert.match(html, /data-api-help="firecrawl"/);
+  assert.match(html, /https:\/\/api\.firecrawl\.dev\/v2\/scrape/);
+  assert.match(html, /firecrawl:\s*integrationState\.firecrawl/);
+  assert.match(html, /Firecrawl 官方额度/);
+  assert.match(html, /remainingCredits/);
+  assert.match(html, /planCredits/);
+  assert.match(html, /计费周期/);
+  assert.match(html, /data-firecrawl-test/);
+  assert.match(html, /\/api\/integrations\/firecrawl\/test/);
+  assert.match(html, /测试 Firecrawl/);
+  assert.match(html, /key === "apiKey" && input\.value === savedSecretMask/);
+});
+
+test("academic API contact email is editable from the config page", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /academicApis:\s*\{\s*contactEmail:\s*""/);
+  assert.match(html, /data-integration-section="academicApis"/);
+  assert.match(html, /type="email"[^>]*data-integration-field="contactEmail"/);
+  assert.match(html, /学术 API 联系邮箱/);
+  assert.match(html, /Crossref/);
+  assert.match(html, /OpenAlex/);
+  assert.match(html, /academicApis:\s*integrationState\.academicApis/);
+  assert.match(html, /payload\.error/);
+});
+
+test("OpenAlex config separates discovery from automatic field enrichment", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /title:\s*"OpenAlex"/);
+  assert.match(html, /openAlex:\s*\{/);
+  assert.match(html, /data-source-integration="openAlex"/);
+  assert.match(html, /OpenAlex API Key/);
+  assert.match(html, /data-api-help="openalex"/);
+  assert.match(html, /https:\/\/openalex\.org\/settings\/api/);
+  assert.match(html, /检索信源/);
+  assert.match(html, /只控制论文发现，字段补全仍自动运行/);
+  assert.match(html, /filter\(\(\{ source \}\) => \/google\|web of science\|openalex\/i\.test\(source\.title\)\)/);
+  assert.match(html, /data-field-provenance/);
+  assert.match(html, /论文字段来源与优先级/);
+  assert.match(html, /WoS &gt; Google Scholar &gt; OpenAlex/);
+  assert.match(html, /最先通过身份、完整性和机器人页校验的完整摘要/);
+  assert.match(html, /openAlex:\s*integrationState\.openAlex/);
+});
+
+test("config page orders primary sections and collapses advanced groups by default", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const markers = [
+    'id="setup-status-panel"',
+    'data-config-order="academic-api"',
+    'data-config-order="field-provenance"',
+    'data-config-order="sources"',
+    'data-config-order="firecrawl"',
+    'data-config-order="external-integrations"'
+  ];
+  const positions = markers.map(marker => html.indexOf(marker));
+  assert.equal(positions.every(position => position >= 0), true);
+  assert.deepEqual([...positions].sort((left, right) => left - right), positions);
+  assert.match(html, /<details class="panel config-disclosure" data-config-order="sources">/);
+  assert.match(html, /<details class="panel config-disclosure" data-config-order="firecrawl">/);
+  assert.match(html, /<details class="panel config-disclosure" data-config-order="external-integrations">/);
+  assert.doesNotMatch(html, /<details class="panel config-disclosure"[^>]*\sopen(?:\s|>)/);
+  assert.match(html, /id="keyword-config-panel"/);
+  assert.match(html, /data-export-local/);
 });
 
 test("Web of Science config shows local usage and backup boundaries", async () => {
@@ -869,6 +961,7 @@ test("API config fields expose help links for obtaining keys", async () => {
   assert.match(html, /data-api-help="llm"/);
   assert.match(html, /data-api-help="serpapi"/);
   assert.match(html, /data-api-help="easyscholar"/);
+  assert.match(html, /data-api-help="firecrawl"/);
   assert.match(html, /https:\/\/serpapi\.com\/users\/sign_up/);
   assert.match(html, /https:\/\/www\.easyscholar\.cc\/console\/user\/open/);
   assert.match(html, /openApiHelp/);

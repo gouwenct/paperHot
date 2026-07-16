@@ -17,6 +17,12 @@
 
 ### 新增功能
 
+- 接入 OpenAlex Works API，支持方向检索、指定 DOI/标题检索、逐页断点和字段补全；OpenAlex 倒排摘要会还原后进入现有身份与完整性校验。
+- 领域配置新增 OpenAlex 免费 API Key 配置及“论文字段来源与优先级”表，逐项说明标题、DOI、作者、期刊、日期、摘要、引用次数、链接、PDF、标签和本地生成字段的来源与回退规则。
+- 领域配置新增共用“学术 API 联系邮箱”；Crossref DOI/标题请求和 OpenAlex 请求复用该联系方式。
+- Firecrawl 配置新增连接测试按钮，使用官方 `team/credit-usage` 验证 API Key 并显示剩余/套餐 credits，不调用 `scrape`、不消耗页面抓取额度；`401`、`429` 和普通连接失败分别给出明确提示。
+- 摘要补全失败的论文卡新增 `Firecrawl 重抓` 和手动填写完整摘要入口；手工输入会拒绝截断文本和机器人验证页，合格摘要先写入归档再交给 AI，因此即使模型调用失败也不会丢失，并记录 `archive-abstract-update` 操作日志。
+- 领域配置新增 Firecrawl 出版方摘要补全选项，可填写 Endpoint 和 API Key；PaperHot 直接调用 Firecrawl REST `scrape` 接口获取 DOI 出版方页面的 `markdown/rawHtml`，不使用 Firecrawl Agent、Question 或 AI 提取。配置区通过官方 `team/credit-usage` 接口实时显示剩余 credits、套餐 credits 和计费周期，查询失败不影响摘要抓取且结果不持久化。
 用于记录新能力、新页面、新按钮、新接口、新数据文件、新导入导出能力等。
 
 示例：
@@ -27,6 +33,11 @@
 
 ### 修复问题
 
+- 修复 SPIE 页面 URL 的 `.short` / `.full` 展示后缀被误存为 DOI 一部分的问题；摘要补全现在使用规范 DOI 查询 WoS、Crossref、Semantic Scholar 和 Firecrawl，不再因错误 DOI 让所有信源同时失效。
+- 修复 Firecrawl 把摘要后的订阅提示、版权信息和页面按钮一并作为摘要交给 AI 的问题；完整 `citation_abstract` 现在优先于更长的 Markdown，Markdown 兜底也会在页面杂质前停止。
+- 修复同时点击多篇论文的 Firecrawl 重抓时，各请求基于旧快照整库写回、导致先完成的摘要被后完成请求覆盖的问题；Firecrawl 与 AI 请求继续并行，仅归档读改写事务按本地数据目录串行执行。
+- 修复 Firecrawl 同时返回截断页面元数据和完整 Markdown 摘要时，PaperHot 因固定优先选择元数据而错误判定重抓失败的问题；现在先逐个执行完整性校验，再采用最长的完整摘要。
+- 修复 Firecrawl 已保存 Key 在配置页显示为 `********` 后，被通用自动保存逻辑误写成真实 Key、导致官方持续返回 `HTTP 401` 的问题；前端不再提交遮蔽符，后端也会清除历史遮蔽值并保留已有真实密钥。
 用于记录 bug 修复、错误处理、数据丢失、接口失败、显示错误、去重异常等。
 
 示例：
@@ -37,6 +48,9 @@
 
 ### 功能优化
 
+- 今日论文“本次信源”改为“检索信源”；关闭 Semantic Scholar、OpenAlex 等开关只停止从该信源发现论文，不关闭已配置的自动字段补全能力。
+- Firecrawl 摘要补全改为并行抓取规范 DOI URL、论文原始 URL，并通过精确 DOI + 标题搜索发现最多 3 个替代页面；搜索结果片段只用于发现 URL，未抓到完整页面摘要时仍禁止调用 AI。
+- 完整摘要补全改为同时启动 WoS DOI、Semantic Scholar DOI、Crossref abstract、出版社页面和可选 Firecrawl 请求；第一份通过 DOI/标题身份匹配、完整性和机器人页校验的摘要立即进入 LLM，不再等待第二信源内容一致。
 用于记录已有功能的行为改善、性能优化、流程简化、默认值调整、容错增强等。
 
 示例：
@@ -46,6 +60,8 @@
 - 优化导入逻辑，默认不覆盖本机 API Key。
 
 ### 视觉改善
+
+- 领域配置的信源卡只显示需要用户填写凭据的 Google、Web of Science 和 OpenAlex；无需 Key 的 arXiv、bioRxiv、Semantic Scholar 不再占用配置卡区域，但仍保留在今日论文检索开关中。
 
 用于记录页面布局、按钮位置、筛选区域、卡片样式、动画、字体和交互反馈等 UI 变化。
 
@@ -57,6 +73,8 @@
 
 ### 配置与数据
 
+- 新增被忽略的本地 `config/openalex.json` 和可提交的 `config/openalex.example.json`；OpenAlex Key 默认不导出，显式包含外部接口配置时才进入兼容的 v1 ZIP。
+- 新增本地 `config/academic-apis.json`；联系邮箱默认不导出，仅在用户显式选择包含 API Key 和外部接口配置时进入 v1 ZIP，旧 v1 备份继续兼容。
 用于记录配置文件、示例文件、本地数据文件、忽略规则、备份规则和迁移行为。
 
 示例：
@@ -67,6 +85,9 @@
 
 ### 文档
 
+- 新增 OpenAlex 检索、自动字段补全、配置页面和固定端口验证的 TDD 实施计划，并同步 README 文档索引；本次计划文档不改变运行时行为。
+- 新增 OpenAlex 检索与字段补全设计，明确今日论文开关只控制论文发现，并记录配置页逐字段来源、回退优先级和本地生成边界；本次文档变更不改变运行时行为。
+- 新增学术 API 联系邮箱、Crossref 请求身份和敏感配置备份边界的 TDD 实施计划，并同步 README 文档索引；本次只新增计划，不改变运行时代码或本地配置。
 用于记录 README、AGENTS.md、架构图、使用说明、API 获取说明、协作规则等文档变化。
 
 示例：
@@ -76,6 +97,9 @@
 
 ### 测试与验证
 
+- 增加 OpenAlex 字段归一化、倒排摘要、API Key/联系邮箱请求、配置遮蔽保留、检索与补全分离、ZIP 隐私边界和配置页字段优先级测试。
+- 增加学术 API 邮箱校验、Crossref DOI/标题请求身份、页面保存提示及敏感配置导入导出回归测试。
+- 后端测试增加 SPIE DOI 展示后缀、Firecrawl 纯净摘要优先、Markdown 页面杂质边界和搜索候选抓取覆盖；完整后端测试 `202/202` 通过，并通过真实 Firecrawl 请求确认 Springer、ACS 返回纯净完整摘要，SPIE 超时不会降级采用搜索片段。
 用于记录新增测试、修复测试、测试命令、验证范围和未验证风险。
 
 示例：
@@ -127,6 +151,7 @@
 
 ### 功能优化
 
+- Semantic Scholar 摘要查询改为一次 batch 请求全部 DOI，HTTP 429 最多重试两次；batch 与逐篇 WoS、Crossref、出版社请求同时启动，不改为全局串行。
 - 统计页的抓取候选详情新增“领域过滤前、日期粗筛、日期补全后、最终日期通过”阶段切换；日期补全后的阶段直接显示 Crossref/出版社补全所得的最终确认日期，并把筛选漏斗中的“历史库新增”改为实际新写入归档的数量。
 - Crossref、出版社日期与 LLM 富集最多使用 2 个并发请求；日期补全后先按真实日期精度和范围重叠筛选再调用 LLM，LLM 单请求等待窗口由 30 秒提高到 60 秒，降低 HTTP 429、超时和无效 Token 消耗。
 - 论文卡标题右侧显示 WoS/Scholar 引用量，arXiv/bioRxiv 则显示预印本来源；作者行最多展示 3 位作者并标注总人数，平台占位期刊不再与标题指标重复，收藏按钮继续保持可见。
@@ -140,6 +165,11 @@
 
 ### 修复问题
 
+- 修复抓取日志默认打开“日期补全后”而展示超出所选范围的未来预定刊期，以及同精度日期合并保留较晚纸刊日期的问题；现在默认查看“最终日期通过”，补全阶段明确标注包含超范围候选，同精度时优先较早在线日期。
+- 修复 Google Scholar 把 ACS 补充材料 DOI（`.s001`）当作正文 DOI，导致 Crossref 和 Semantic Scholar 查不到正文摘要的问题；正文 URL 可明确识别 DOI 时会纠正查询及论文记录，批量补全即使未调用 AI 也会保存该 DOI 修正。
+- 修复逐篇请求 Semantic Scholar 大量触发 HTTP 429 且被静默当作“无摘要”的问题；现在单批请求并在失败时写入摘要错误日志，返回内容仍须通过论文身份和完整性校验。
+- 修复带期刊或分类后缀的 Semantic Scholar、WoS、Crossref、arXiv、bioRxiv 来源标签可能与同一接口的规范名称被误算为两个独立信源的问题；同一提供方现在只能贡献一次摘要共识。
+- 修复 Google Scholar 等摘要片段被交给 LLM、产生缺少原文依据的摘要翻译和推荐理由；现在片段、截断文本、机器人验证页和身份不匹配内容均不调用 LLM，单个通过校验的完整摘要可以直接使用，卡片无完整摘要时明确显示“未获得完整摘要，未进行 AI 分析”。
 - 修复 WoS Starter 已由 `TS` 查询命中的记录，因为响应缺少摘要或完整命中字段而被 PaperHot 本地关键词、领域过滤再次删除的问题；WoS 结果现在直接进入统一候选池，Google Scholar 等其它信源仍执行本地过滤，之后继续统一去重、日期确认和排序。
 - 修复抓取日志只保存日期粗筛前的年份、无法判断 Crossref 是否补全及论文为何被最终日期范围排除的问题；后续抓取会保存补全后的全部候选与最终通过候选，旧日志继续兼容但无法恢复过去未记录的精确日期。
 - 修复 WoS Starter API 误用旧版 `publishTimeSpan`、未给关键词加引号且没有按最近收录/修改时间排序的问题；方向检索现在发送官方 `modifiedTimeSpan`、`sortField=LD+D` 和带引号的 Boolean 查询。
@@ -167,6 +197,8 @@
 
 ### 配置与数据
 
+- 新增 `config/firecrawl.example.json`；真实 `config/firecrawl.json` 作为本机敏感配置被 Git 忽略。默认 ZIP 不包含 Firecrawl API Key，只有显式勾选接口密钥时才导出，导入仍需显式允许覆盖；旧 v1 ZIP 保持兼容。
+- 论文记录继续使用可选 `abstractStatus` 和 `abstractConsensusSources`；字段名为兼容旧数据保持不变，新记录允许保存一个已通过完整性与身份校验的信源。旧记录与旧 v1 ZIP 继续兼容，`paperhot-local-data` 版本保持 `1`。
 - 新抓取日志增加可选的 `afterDateEnrichment`、`finalDateMatched` 候选快照和 `dateConfirmed` 计数；旧日志无需迁移，包含日志的本地 ZIP 仍使用 `paperhot-local-data` v1。
 - 清空未标星只重写现有 `archive.json` 内容，不改变数据结构或 `paperhot-local-data` v1 备份版本；`favorites.json` 与 `paper-notes.json` 保持不变，收藏读取在归档缺失时回退已有论文快照，下一次导出自然反映清理后的归档和保留的个人状态。
 - 勾选统计导出时，v1 ZIP 新增可选 `data/papers/web-of-science-usage.json` 并可通过导入白名单恢复；旧 v1 包缺少该文件仍兼容。`data/user/config.json` 的 Boolean 搜索逻辑继续默认导出，`recent-fetch-cursors.json` 在任何选项下都不导出，API Key 仍仅在显式勾选 secrets 时导出。
@@ -179,6 +211,7 @@
 
 ### 文档
 
+- 新增完整摘要单源放行与 Firecrawl 兜底设计及 TDD 实施计划，并同步 README 文档索引、抓取流程和备份兼容说明。
 - 新增固定端口重启与 `data/papers` 写权限故障排障文档，并在 AGENTS/Claude 协作规则和 README 中明确“新进程时间、HTTP 200、断点文件可写”三项验收，避免旧进程或受限 Node 再次造成旧代码与 `EPERM`。
 - 同步 WoS 文档最终语义：旧近期发现设计改用 `modifiedTimeSpan`，早期实施计划标记对应步骤已被 2026-07-15 计划取代；WoS 日期设计补充服务端 `TS` 命中信任、多信源本地过滤和统一去重流程。
 - 新增 WoS 查询与多级日期补全设计及 TDD 实施计划，并更新 README 对 Starter 最近修改窗口、日期精度和出版社兜底的说明；不改变配置、API Key、持久化 schema 或备份版本。
@@ -196,6 +229,7 @@
 
 ### 测试与验证
 
+- 增加摘要 HTML/JATS/结构标题/断行/标点归一、五路并行启动、首份完整摘要立即放行、片段拒绝、Firecrawl HTML/Markdown 提取，以及无完整摘要卡片隐藏摘要翻译/推荐理由的回归测试；测试使用模拟信源，不调用真实 API。
 - 通过新增 solution 的 frontmatter 与路径/链接机械校验（1 个代码路径、4 个链接、0 个问题），并复跑后端 `175/175`、前端 `64/64`；AGENTS 与 claude 规则内容保持完全一致。
 - 增加 WoS 与 Google Scholar 联合检索回归：Starter 稀疏 WoS 命中保留，Google Scholar 匹配项保留、无关项过滤；测试使用模拟响应，不调用真实 API。
 - 增加抓取日志日期补全前后快照、最终日期筛选、实际历史库新增计数，以及统计页阶段选择与最终确认日期列的回归测试；测试使用临时数据和模拟补全，不调用真实 WoS、Crossref 或 LLM API。

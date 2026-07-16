@@ -28,6 +28,7 @@ Paper Hot 的主要目的只有两个：
 - arXiv。
 - bioRxiv。
 - Semantic Scholar。
+- OpenAlex（需要免费 API Key）。
 - Crossref 和出版方页面元数据补全。
 - 方向检索把保存的 Boolean 搜索图传给信源；WoS 逐关键词加引号并保留 AND/OR 分组，使用 `modifiedTimeSpan` 限定 Starter API 的最近修改/收录窗口并按 `LD+D` 排序，bioRxiv、arXiv、Google Scholar 和 Google Search 使用各自支持的冻结日期约束。近期抓取和指定论文检索统一按任务指纹保存逐信源下一页和完成态，Google 不读取或更新旧滚动位置；`resumeMode=resume` 恢复同指纹断点，`restart` 或 `new` 从第一页开始。refresh state/start/status 接口直接返回后端的任务指纹、可恢复状态、逐信源页码、逐信源结果和错误，只有全部启用信源完成后才清除断点。
 - 指定论文检索可识别 DOI、Web of Science UT、arXiv ID/URL、普通 URL 和标题；信源端不附加方向关键词或日期限制。稳定标识结果可进入现有归档，标题出现多个相近结果时只返回候选供用户确认，不写归档、缓存或抓取日志。
@@ -37,7 +38,7 @@ Paper Hot 的主要目的只有两个：
 - 论文字段归一化：保留信源原始标题，并统一显示标题、作者、摘要、DOI、URL、期刊、日期精度、来源、引用数和正式版/预印本关系。
 - 关键词过滤和领域过滤。
 - 日期范围筛选。
-- LLM 摘要翻译和推荐理由生成。
+- 完整摘要并行补全：带 DOI 的论文同时查询 WoS、Semantic Scholar、OpenAlex、Crossref、出版社页面和可选 Firecrawl 出版方页面抓取；任意一个信源返回通过论文身份与完整性校验的摘要后立即调用 LLM，片段、截断文本和机器人验证页不会进入 AI。今日论文的“检索信源”开关不关闭这些字段补全路径。
 - EasyScholar 期刊指标查询和缓存。
 - 基于摘要、推荐理由、期刊指标和领域规则的重评分。
 
@@ -88,7 +89,10 @@ http://127.0.0.1:50751
 - LLM Provider、模型、Endpoint 和 API Key。
 - SerpApi / Google Scholar 配置。
 - Web of Science API 配置。
+- OpenAlex 免费 API Key；配置页同时显示各论文字段的来源和回退优先级。
 - EasyScholar API Key。
+- Firecrawl API Key，用于抓取 DOI 对应的出版方页面并补全摘要；配置区可用“测试 Firecrawl”通过官方额度接口验证 Key，并实时显示剩余 credits、套餐 credits 和计费周期。测试不抓页面、不消耗 scrape credits，结果不写入本地数据或 ZIP。
+- 学术 API 联系邮箱；Crossref 和 OpenAlex 使用该邮箱标识请求。邮箱默认不进入本地数据导出包。
 - 用户研究背景和评分偏好。
 
 如果不知道 API Key 如何获取，点击配置项旁边的 `?` 按钮，页面会显示获取步骤和对应网站链接。
@@ -101,6 +105,9 @@ http://127.0.0.1:50751
 Copy-Item config\llm.example.json config\llm.json
 Copy-Item config\google-scholar.example.json config\google-scholar.json
 Copy-Item config\web-of-science.example.json config\web-of-science.json
+Copy-Item config\firecrawl.example.json config\firecrawl.json
+Copy-Item config\academic-apis.example.json config\academic-apis.json
+Copy-Item config\openalex.example.json config\openalex.json
 Copy-Item config\journal-metrics.example.json config\journal-metrics.json
 Copy-Item data\user\config.example.json data\user\config.json
 Copy-Item data\user\profile.example.json data\user\profile.json
@@ -113,6 +120,9 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 | `config/llm.json` | LLM 提供商、模型、Endpoint、API Key |
 | `config/google-scholar.json` | SerpApi、Google Scholar、Google Search 配置 |
 | `config/web-of-science.json` | Web of Science API 配置 |
+| `config/firecrawl.json` | Firecrawl 出版方页面摘要抓取配置 |
+| `config/academic-apis.json` | Crossref 和 OpenAlex 共用的学术 API 联系邮箱 |
+| `config/openalex.json` | OpenAlex Works API、免费 API Key 和分页配置 |
 | `config/journal-metrics.json` | EasyScholar 期刊指标查询配置 |
 | `data/user/config.json` | 关键词、Boolean 搜索逻辑、信源开关和前端领域配置 |
 | `data/user/profile.json` | 用户资料、研究背景和语言偏好 |
@@ -130,7 +140,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 - 在“方向检索”和“指定论文”之间切换；指定论文支持标题、DOI、Web of Science UT、arXiv ID 和 URL。
 - 方向检索默认选择近 3 个月，也可快速切换近 1/6 个月或使用自定义起止日期。
 - 单击关键词把它作为独立 OR 条件点亮；把关键词拖到另一个关键词会建立明确的 AND 连线，连通组之间仍为 OR。
-- 本次信源开关来自“领域配置”，只影响当前抓取，不覆盖全局配置。
+- “检索信源”开关来自“领域配置”，只控制本次从哪些信源发现论文，不覆盖全局配置，也不关闭 Semantic Scholar、OpenAlex、Crossref 等字段补全能力。
 - 页面加载或七个 discovery 字段稳定变化后，前端先调用只读 refresh state 接口检查相同 canonical 指纹的 durable 断点；点击抓取后再通过 refresh start/status 接口创建并轮询本地后端任务。
 - 后端从多个信源抓取候选论文，完成过滤、补全、LLM 处理、期刊指标查询和排序。
 - 本次 canonical `papers` 或指定论文候选显示在当前页面；抓取开始前已存在于全部论文的结果半透明显示，本轮新增结果正常显示，正常入库结果仍写入全部论文归档。
@@ -144,7 +154,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 - 论文卡标题右侧显示 WoS/Scholar 引用量；预印本显示 arXiv 或 bioRxiv。卡片同时显示最多 3 位作者和作者总数，不重复显示已经由右侧指标表达的信源标签。
 - 信源分页失败会在工作台下方显示失败页和“重试失败页”，相同 canonical 条件下自动以 `resume` 继续；AI 总结失败保留论文卡片，并在对应卡片显示单篇 LLM 重试。
 - 即使首次抓取在生成成功 session 前失败，页面也会按任务指纹把最小失败状态保存在浏览器本地，切换历史结果或刷新后仍可恢复；任务无错误后自动清除。该短期状态不进入本地数据 ZIP。
-- 关键词增删、OR 点亮和 AND 连线写回现有 `data/user/config.json` 的 `searchLogic`；“清空”只清除活动逻辑和连线，不删除关键词。指定论文输入、本次信源开关、结果标签、筛选和已加载数量都是临时页面状态。
+- 关键词增删、OR 点亮和 AND 连线写回现有 `data/user/config.json` 的 `searchLogic`；“清空”只清除活动逻辑和连线，不删除关键词。指定论文输入、本次检索信源开关、结果标签、筛选和已加载数量都是临时页面状态。
 - 旧的 Google 手动起点、重置按钮和滚动开关已移除，避免与当前任务指纹分页产生两套控制。
 - 如果某些页触发反爬或失败，抓取日志会记录跳过范围，后续可以继续从后面抓。
 - 最近一次抓取时间和距离当前的时间会显示在页面顶部。
@@ -175,8 +185,9 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 - 编辑短标题。
 - 复制引用。
 - 点击发表时间复制 DOI，悬停显示 DOI。
-- 单篇重新运行 LLM 摘要翻译和推荐理由。
-- 批量运行 LLM，只处理缺少翻译或总结的论文。
+- 单篇重新运行完整摘要补全和 LLM 摘要翻译、推荐理由。
+- 摘要补全失败的论文可单独使用 Firecrawl 重抓 DOI 出版方页面，或手动填写完整摘要；通过截断和机器人页校验后先保存到论文归档，再交给 AI，后续导出会随现有 `archive.json` 保留。
+- 批量运行 LLM，只处理已获得至少一份身份匹配完整摘要、但缺少翻译或推荐理由的论文；只有片段、截断文本或机器人验证页时显示“未获得完整摘要，未进行 AI 分析”。
 - 自动去重需要用户手动点击，不会自动删除归档内容。
 - “清空未标星”一次删除全部论文归档中的未标星条目，执行前明确确认；标星论文和个人收藏、待读、已读、短标题及备注继续保留。
 
@@ -288,13 +299,13 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 点击抓取后，前端不会直接访问外部论文网站，而是向本地后端创建抓取任务。后端流程如下：
 
 1. 读取用户配置：关键词、信源、日期范围、LLM、SerpApi、Web of Science、EasyScholar。
-2. 多来源检索：Google Scholar、Google Search、Web of Science、arXiv、bioRxiv、Semantic Scholar；方向检索传递 Boolean 条件和信源支持的冻结日期。WoS 查询把每个关键词加引号，使用 `modifiedTimeSpan` 和 `LD+D` 获取时间窗内最近修改/收录记录；分页恢复会跳过已完成信源，并从未完成信源保存的下一页继续。
+2. 多来源检索：Google Scholar、Google Search、Web of Science、arXiv、bioRxiv、Semantic Scholar、OpenAlex；方向检索传递 Boolean 条件和信源支持的冻结日期。WoS 查询把每个关键词加引号，使用 `modifiedTimeSpan` 和 `LD+D` 获取时间窗内最近修改/收录记录；分页恢复会跳过已完成信源，并从未完成信源保存的下一页继续。
 3. 候选归一化：保留信源原始标题，统一显示标题、摘要、作者、DOI、URL、来源、日期精度和引用数据库；同版本精确重复按信源优先级保留，正式版与预印本分别保留并互相关联。
 4. 关键词和领域过滤：WoS 的 `TS` 命中直接进入候选池，避免 Starter 响应缺少摘要或命中字段时被本地重复删除；Google、arXiv 等信源继续按保存的 Boolean 搜索图和领域上下文过滤。指定论文检索跳过方向、领域和日期过滤，标题多候选不自动入库。
 5. 日期筛选：按前端选择范围筛选；只有年月或年份时按该月或该年与范围是否重叠决定保留，不伪造 `YYYY-01-01` 作为真实日期。
 6. 初步排序：用本地规则控制进入后续富集的候选数量。
 7. 元数据补全：优先读取 WoS 年月；已有 DOI 仍直接查询 Crossref，并在 online、print、published、issued 中选择精度最高的日期；仍不足到日时通过 DOI 出版方页面补全。
-8. LLM 处理：生成中文摘要和推荐理由。
+8. 完整摘要与 LLM：并行查询 WoS DOI、Semantic Scholar DOI、OpenAlex DOI、Crossref abstract、出版社页面和可选 Firecrawl 出版方页面；OpenAlex 的倒排摘要先还原为正文。每份结果再校验 DOI/标题身份及摘要完整性，第一份通过校验的完整摘要立即交给 LLM；片段、截断文本、机器人验证页或身份不匹配内容不调用 LLM。
 9. 期刊指标：通过 EasyScholar 查询影响因子和分区，并写入缓存。
 10. 最终重评分：结合摘要、LLM 推荐理由、期刊指标和领域规则。
 11. 写入归档：新论文追加到 `data/papers/archive.json`。
@@ -325,6 +336,7 @@ flowchart TD
     Sources --> Arxiv["arXiv"]
     Sources --> Biorxiv["bioRxiv"]
     Sources --> Semantic["Semantic Scholar"]
+    Sources --> OpenAlex["OpenAlex"]
     Sources --> Crossref["Crossref / 出版方页面"]
     Sources --> EasyScholar["EasyScholar"]
     Sources --> LLM["LLM Provider"]
@@ -351,7 +363,7 @@ flowchart TD
 
 | 文件夹 | 作用 | 是否建议上传 GitHub |
 | --- | --- | --- |
-| `config/` | 外部接口配置模板目录。GitHub 上只保留 `*.example.json`，用于告诉新用户如何填写 LLM、SerpApi 和 EasyScholar 配置；真实 `*.json` 包含 API Key，应保留在本机并被 `.gitignore` 忽略。 | 是，只上传 `*.example.json` |
+| `config/` | 外部接口配置模板目录。GitHub 上只保留 `*.example.json`，用于告诉新用户如何填写 LLM、SerpApi、WoS、OpenAlex、EasyScholar、Firecrawl 和学术 API 联系邮箱；真实 `*.json` 可能包含 API Key 或个人邮箱，应保留在本机并被 `.gitignore` 忽略。 | 是，只上传 `*.example.json` |
 | `docs/` | 补充文档目录，包含 API 获取与配置说明、论文入库流程说明等。它不是运行必需目录，但对维护者排查配置、理解入库流程和新用户上手有帮助。 | 是 |
 | `public/` | 前端页面目录，目前主要是 `index.html`。必须通过 `http://127.0.0.1:50751` 访问，不要直接双击打开。 | 是 |
 | `test/` | 后端和前端测试目录，用于验证抓取、导入导出、阅读状态、UI 结构等行为。 | 是 |
@@ -370,10 +382,15 @@ flowchart TD
 | `docs/superpowers/specs/2026-07-11-recent-paper-discovery-design.md` | 已确认的近期论文发现、多信源检索、断点恢复和今日论文页面设计 |
 | `docs/superpowers/specs/2026-07-15-archive-clear-and-existing-results-design.md` | 全部论文清除未标星条目、保留个人状态及今日论文显示已入库结果的设计 |
 | `docs/superpowers/specs/2026-07-15-wos-date-and-query-design.md` | WoS Boolean 查询、近期收录范围与多级论文日期补全设计 |
+| `docs/superpowers/specs/2026-07-15-complete-abstract-consensus-design.md` | 完整摘要并行补全、单源完整性门禁与 Firecrawl 兜底设计 |
 | `docs/superpowers/specs/2026-07-16-academic-api-contact-email-design.md` | Crossref 当前使用、OpenAlex 未来复用的学术 API 联系邮箱配置与隐私边界设计 |
+| `docs/superpowers/specs/2026-07-16-openalex-discovery-enrichment-design.md` | OpenAlex 检索、独立字段补全、配置页字段来源与优先级设计 |
 | `docs/superpowers/plans/2026-07-11-recent-paper-discovery.md` | 近期论文发现功能的分步实现、测试和验证计划 |
 | `docs/superpowers/plans/2026-07-15-archive-clear-and-existing-results.md` | 全部论文清理、收藏快照回退和今日论文已入库弱化展示的 TDD 实施计划 |
 | `docs/superpowers/plans/2026-07-15-wos-date-and-query.md` | WoS 查询和论文日期补全的 TDD 实施计划 |
+| `docs/superpowers/plans/2026-07-15-complete-abstract-consensus.md` | 完整摘要单源放行、Firecrawl 配置与无完整摘要禁用 LLM 的 TDD 实施计划 |
+| `docs/superpowers/plans/2026-07-16-academic-api-contact-email.md` | 学术 API 联系邮箱、Crossref 请求身份与敏感配置备份的 TDD 实施计划 |
+| `docs/superpowers/plans/2026-07-16-openalex-discovery-enrichment.md` | OpenAlex 检索、自动字段补全、配置与验证的分步实施计划 |
 | `docs/solutions/runtime-errors/paperhot-service-restart-data-permission.md` | 固定端口旧进程与受限 Node 导致旧代码、断点 `EPERM` 的诊断和重启验收 |
 | `.superpowers/sdd/task-2-report.md` | Task 2 多信源元数据与正式版/预印本关联的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-3-report.md` | Task 3 近期抓取游标与 WoS 本地请求用量的实现、TDD 和验证报告 |

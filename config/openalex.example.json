@@ -1,0 +1,8 @@
+{
+  "provider": "openalex",
+  "enabled": false,
+  "endpoint": "https://api.openalex.org/works",
+  "apiKey": "",
+  "maxPages": 3,
+  "perPage": 100
+}

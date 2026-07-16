@@ -51,7 +51,9 @@ data/papers/paper-notes.json
 
 `data/user/config.json` 可包含 `searchLogic.activeKeywords` 和 `searchLogic.andEdges`，用于跨设备保留关键词的 OR / AND 组合。旧备份缺少 `searchLogic` 时，导入后会把仍处于启用状态的关键词作为默认活动关键词，因此该兼容扩展继续使用格式版本 `1`。
 
-`data/papers/archive.json` 的论文记录可选包含 `displayTitle`、`publishedPrecision`、`publicationStage`、`retrievalSource`、`sourceId`、`citationCount`、`citationSource` 和 `relatedVersions`。这些字段用于保留信源、引用数据库和正式版/预印本关系；旧备份缺少时由读取流程补默认值，因此备份格式仍为版本 `1`，无需迁移。
+`data/papers/archive.json` 的论文记录可选包含 `displayTitle`、`publishedPrecision`、`publicationStage`、`retrievalSource`、`sourceId`、`citationCount`、`citationSource`、`relatedVersions`、`abstractStatus` 和 `abstractConsensusSources`。后两个字段记录摘要是否通过完整性与论文身份校验，以及采用的信源名称；为兼容旧数据继续使用 `abstractConsensusSources` 字段名，但新记录允许只有一个信源。不包含额外全文、API Key 或运行缓存；旧备份缺少时按未确认处理，已有成功 AI 记录继续兼容显示，因此备份格式仍为版本 `1`，无需迁移。
+
+用户手动填写并保存的完整摘要继续写入论文记录的现有 `summary` 字段，并以 `abstractConsensusSources: ["manual"]` 标记来源；Firecrawl 单篇重抓成功时使用 `"firecrawl"`。两者随 `archive.json` 正常导出和导入，不增加新文件或新字段，因此备份版本保持 `1`。
 
 勾选“包含用户资料和研究背景”时额外包含：
 
@@ -66,7 +68,16 @@ config/llm.json
 config/google-scholar.json
 config/journal-metrics.json
 config/web-of-science.json
+config/firecrawl.json
+config/openalex.json
+config/academic-apis.json
 ```
+
+`config/firecrawl.json` 只在用户显式勾选包含 API Key 时进入 ZIP。旧 v1 包不含该可选文件仍可正常导入，因此备份版本保持 `1`。
+
+`config/openalex.json` 保存 OpenAlex 免费 API Key、启用状态和分页参数。该文件默认不导出，只在用户显式勾选包含外部接口配置时进入 ZIP；旧 v1 包缺少该可选文件仍可正常导入，因此备份版本保持 `1`。
+
+`config/academic-apis.json` 保存用户在页面填写的学术 API 联系邮箱。该文件默认不导出，只在用户显式勾选包含外部接口配置时进入 ZIP；旧 v1 包缺少该可选文件仍可正常导入，因此格式版本保持 `1`。
 
 勾选“包含统计缓存、WoS 请求用量和抓取进度缓存”时额外包含：
 

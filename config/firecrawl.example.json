@@ -1,0 +1,6 @@
+{
+  "provider": "firecrawl",
+  "enabled": false,
+  "endpoint": "https://api.firecrawl.dev/v2/scrape",
+  "apiKey": ""
+}

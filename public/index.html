@@ -832,6 +832,38 @@
       font-size: 11px;
       font-weight: 760;
     }
+    .abstract-recovery-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: flex-start;
+      margin-top: 8px;
+    }
+    .abstract-recovery-actions details { flex: 1 1 360px; min-width: min(100%, 260px); }
+    .abstract-recovery-actions summary {
+      width: fit-content;
+      cursor: pointer;
+      color: #0c7658;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .manual-abstract-editor {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .manual-abstract-editor textarea {
+      width: 100%;
+      min-height: 120px;
+      resize: vertical;
+      padding: 9px 10px;
+      border: 1px solid #cbd9df;
+      border-radius: 6px;
+      background: #fff;
+      color: #203049;
+      font: 400 13px/1.55 Arial, sans-serif;
+    }
+    .manual-abstract-editor .primary-btn { justify-self: start; }
     .paper-title-tools {
       display: flex;
       flex-wrap: wrap;
@@ -2195,7 +2227,7 @@
     let fetchLogEntries = [];
     let fetchLogStatus = "";
     let activeFetchLogDetailIndex = null;
-    let candidateDetailStage = "afterDateEnrichment";
+    let candidateDetailStage = "finalDateMatched";
     let operationLogEntries = [];
     let operationLogStatus = "";
     let candidateDetailSort = { field: "index", direction: "asc" };
@@ -3458,6 +3490,7 @@
     }
 
     function paperAbstractZh(paper) {
+      if (paper.abstractStatus === "unconfirmed") return "";
       const abstractZh = String(paper.abstractZh || "").trim();
       if (abstractZh) return abstractZh;
       const summary = String(paper.summary || "").trim();
@@ -3469,11 +3502,34 @@
     }
 
     function paperAbstractBlock(paper) {
-      const abstractZh = paperAbstractZh(paper);
-      return abstractZh ? `<div class="reason abstract-translation"><span class="reason-label">摘要翻译</span>${escapeHTML(abstractZh)}</div>` : "";
+      if (paper.abstractStatus === "unconfirmed") {
+        const key = escapeHTML(String(paper.id || paper.doi || paper.url || paper.title || "").trim());
+        return `
+          <div class="reason abstract-unconfirmed">
+            <span role="status">未获得完整摘要，未进行 AI 分析</span>
+            ${key ? `
+            <div class="abstract-recovery-actions">
+              ${paper.doi ? `<button class="ghost-btn" type="button" data-retry-firecrawl-abstract="${key}">Firecrawl 重抓</button>` : ""}
+              <details>
+                <summary>手动填写完整摘要</summary>
+                <div class="manual-abstract-editor">
+                  <textarea data-manual-abstract="${key}" maxlength="100000" aria-label="手动填写完整摘要"></textarea>
+                  <button class="primary-btn" type="button" data-save-manual-abstract="${key}">保存并交给 AI</button>
+                </div>
+              </details>
+            </div>
+            ` : ""}
+          </div>
+        `;
+      }
+      const abstractZh = String(paper.abstractZh || "").trim();
+      if (abstractZh) return `<div class="reason abstract-translation"><span class="reason-label">摘要翻译</span>${escapeHTML(abstractZh)}</div>`;
+      const summary = String(paper.summary || "").trim();
+      return summary ? `<div class="reason abstract-translation"><span class="reason-label">完整摘要</span>${escapeHTML(summary)}</div>` : "";
     }
 
     function paperReasonBlock(paper) {
+      if (paper.abstractStatus === "unconfirmed") return "";
       const reason = String(paper.reason || "").trim();
       return reason ? `<div class="reason"><span class="reason-label">推荐理由</span>${escapeHTML(reason)}</div>` : "";
     }
@@ -4137,14 +4193,14 @@
       const disabled = todayRunningTask ? "disabled" : "";
       return `
         <div class="today-source-controls">
-          <span class="today-field-label">本次信源</span>
+          <span class="today-field-label">检索信源</span>
           ${sourceState.map(source => `
             <label class="today-source-switch">
               <input type="checkbox" data-today-source="${escapeHTML(source.title)}" ${enabled.has(source.title) ? "checked" : ""} ${disabled}>
               ${escapeHTML(source.title)}
             </label>
           `).join("")}
-          <span class="today-source-summary">本次已选 ${enabled.size} 个；不会覆盖领域配置</span>
+          <span class="today-source-summary">本次已选 ${enabled.size} 个；只控制论文发现，字段补全仍自动运行</span>
         </div>
       `;
     }
@@ -4811,12 +4867,13 @@
       }
     }
 
-    async function refreshOnePaperLlm(key) {
+    async function refreshOnePaperLlm(key, request = {}) {
       const paper = recentPapers.find(item => paperStableKey(item) === key)
         || todayPapers.find(item => paperStableKey(item) === key)
         || favoritePapersCache.find(item => paperStableKey(item) === key)
         || papers.find(item => paperStableKey(item) === key);
       if (!paper) return;
+      if (archiveLlmRefreshingKeys.has(key)) return;
       if (location.protocol === "file:") {
         showToast("直接打开 HTML 时无法访问后端");
         return;
@@ -4828,7 +4885,7 @@
         const response = await fetch("/api/archive/llm/paper", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paper })
+          body: JSON.stringify({ paper: { ...paper, ...request } })
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
@@ -4840,11 +4897,15 @@
         applyArchivePayload(payload);
         if (payload.paper) recentPapers = mergePaperPool(recentPapers, [normalizePaperForView(payload.paper)]);
         if (payload.paper) todayPapers = mergePaperPool(todayPapers, [normalizePaperForView(payload.paper)]);
-        clearPaperLlmFailure(payload.paper || paper);
-        const statusText = "已重新生成该论文的摘要翻译和推荐理由";
+        const aiUpdated = payload.aiUpdated !== false;
+        if (aiUpdated) clearPaperLlmFailure(payload.paper || paper);
+        const failureMessage = payload.errors?.[0]?.message || "模型未返回结果";
+        const statusText = aiUpdated
+          ? "已重新生成该论文的摘要翻译和推荐理由"
+          : `完整摘要已保存，AI 总结未完成：${failureMessage}`;
         recentDataStatus = statusText;
         paperDataStatus = statusText;
-        showToast("LLM 已更新该论文");
+        showToast(aiUpdated ? "LLM 已更新该论文" : "摘要已保存，AI 总结未完成");
       } catch (error) {
         recentDataStatus = `单篇 LLM 失败：${error.message}`;
         paperDataStatus = recentDataStatus;
@@ -4853,6 +4914,16 @@
         archiveLlmRefreshingKeys.delete(key);
       }
       renderPage(location.hash.replace("#", "") || "all");
+    }
+
+    function saveManualPaperAbstract(button) {
+      const key = button.getAttribute("data-save-manual-abstract");
+      const manualAbstract = button.closest("details")?.querySelector("[data-manual-abstract]")?.value.trim() || "";
+      if (!manualAbstract) {
+        showToast("请先填写完整摘要");
+        return;
+      }
+      refreshOnePaperLlm(key, { manualAbstract });
     }
 
     function invalidateTodayCanonicalTask() {
@@ -5301,6 +5372,12 @@
       document.querySelectorAll("[data-refresh-paper-llm]").forEach(button => {
         button.addEventListener("click", () => refreshOnePaperLlm(button.getAttribute("data-refresh-paper-llm")));
       });
+      document.querySelectorAll("[data-retry-firecrawl-abstract]").forEach(button => {
+        button.addEventListener("click", () => refreshOnePaperLlm(button.getAttribute("data-retry-firecrawl-abstract"), { abstractMode: "firecrawl" }));
+      });
+      document.querySelectorAll("[data-save-manual-abstract]").forEach(button => {
+        button.addEventListener("click", () => saveManualPaperAbstract(button));
+      });
     }
 
     function pageShell(title, subtitle, body, side = "", heroActions = "") {
@@ -5523,7 +5600,7 @@
     const fetchLogCandidateStages = [
       { key: "beforeDomain", title: "领域过滤前候选论文", label: "领域过滤前" },
       { key: "dateMatched", title: "日期粗筛候选论文", label: "日期粗筛" },
-      { key: "afterDateEnrichment", title: "日期补全后候选论文", label: "日期补全后", confirmedDate: true },
+      { key: "afterDateEnrichment", title: "日期补全后候选论文（含超出范围）", label: "日期补全后（含超出范围）", confirmedDate: true },
       { key: "finalDateMatched", title: "最终日期通过论文", label: "最终日期通过", confirmedDate: true }
     ];
 
@@ -6440,6 +6517,12 @@
         desc: "通过 Semantic Scholar Paper Search API 补充论文、引用和开放 PDF；当前不需要填写密钥。",
         tags: ["论文数据库", "无需配置", "开放 PDF"],
         enabled: true
+      },
+      {
+        title: "OpenAlex",
+        desc: "通过 OpenAlex Works API 检索论文并补充开放元数据；需要免费的 API Key。",
+        tags: ["论文数据库", "需配置 API", "开放元数据"],
+        enabled: false
       }
     ];
     let editingSourceIndex = null;
@@ -6546,7 +6629,24 @@
         pageSize: 25,
         queryTemplate: "TS=({query})",
         hasApiKey: false
-      }
+      },
+      firecrawl: {
+        provider: "firecrawl",
+        enabled: false,
+        endpoint: "https://api.firecrawl.dev/v2/scrape",
+        apiKey: "",
+        hasApiKey: false
+      },
+      openAlex: {
+        provider: "openalex",
+        enabled: false,
+        endpoint: "https://api.openalex.org/works",
+        apiKey: "",
+        maxPages: 3,
+        perPage: 100,
+        hasApiKey: false
+      },
+      academicApis: { contactEmail: "" }
     };
     let integrationState = JSON.parse(JSON.stringify(defaultIntegrationState));
     let expandedLlmProviderId = "";
@@ -6610,7 +6710,10 @@
         llm: { ...defaultIntegrationState.llm, ...incomingLlm, providers: mergedProviders },
         googleScholar: { ...defaultIntegrationState.googleScholar, ...(items.googleScholar || {}) },
         journalMetrics: { ...defaultIntegrationState.journalMetrics, ...(items.journalMetrics || {}) },
-        webOfScience: { ...defaultIntegrationState.webOfScience, ...(items.webOfScience || {}) }
+        webOfScience: { ...defaultIntegrationState.webOfScience, ...(items.webOfScience || {}) },
+        firecrawl: { ...defaultIntegrationState.firecrawl, ...(items.firecrawl || {}) },
+        openAlex: { ...defaultIntegrationState.openAlex, ...(items.openAlex || {}) },
+        academicApis: { ...defaultIntegrationState.academicApis, ...(items.academicApis || {}) }
       };
       if (!expandedLlmProviderId) {
         expandedLlmProviderId = integrationState.llm.activeProviderId || integrationState.llm.providers?.[0]?.id || "";
@@ -6672,6 +6775,8 @@
       if (path === "googleScholar") return secrets?.googleScholar?.apiKey || "";
       if (path === "journalMetrics") return secrets?.journalMetrics?.apiKey || "";
       if (path === "webOfScience") return secrets?.webOfScience?.apiKey || "";
+      if (path === "firecrawl") return secrets?.firecrawl?.apiKey || "";
+      if (path === "openAlex") return secrets?.openAlex?.apiKey || "";
       if (path === "llm") return secrets?.llm?.apiKey || "";
       if (path.startsWith("llm.providers.")) {
         const providerId = path.slice("llm.providers.".length);
@@ -6709,6 +6814,30 @@
             ${monthRows.length ? monthRows.map(([month, count]) => `<span>${escapeHTML(month)} · ${escapeHTML(count)}</span>`).join("") : `<span>暂无月度记录</span>`}
           </div>
           <div class="small-text">最后请求：${escapeHTML(lastRequest)} · ${escapeHTML(lastStatus)}；按当前设置，本次每个查询预计最多 ${estimatedRequests} 页 / ${estimatedRequests} 次 API 请求。</div>
+        </div>
+      `;
+    }
+
+    function firecrawlCreditUsagePanel(firecrawl = {}) {
+      const usage = firecrawl.usage || {};
+      if (usage.status === "unconfigured") {
+        return `<div class="wos-usage-panel"><strong>Firecrawl 官方额度</strong><div class="small-text">保存 API Key 后显示官方剩余 credits。</div></div>`;
+      }
+      if (usage.status !== "ok") {
+        return `<div class="wos-usage-panel"><strong>Firecrawl 官方额度</strong><div class="small-text">官方额度暂时无法读取，不影响摘要抓取。</div></div>`;
+      }
+      const formatDate = value => {
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? "未提供" : date.toLocaleDateString("zh-CN");
+      };
+      return `
+        <div class="wos-usage-panel">
+          <div class="wos-usage-head"><strong>Firecrawl 官方额度</strong><span class="small-text">实时查询</span></div>
+          <div class="wos-usage-grid">
+            <div class="wos-usage-stat"><b>${escapeHTML(usage.remainingCredits)}</b><span>剩余 credits</span></div>
+            <div class="wos-usage-stat"><b>${escapeHTML(usage.planCredits)}</b><span>套餐 credits</span></div>
+          </div>
+          <div class="small-text">计费周期：${escapeHTML(formatDate(usage.billingPeriodStart))} 至 ${escapeHTML(formatDate(usage.billingPeriodEnd))}</div>
         </div>
       `;
     }
@@ -6779,6 +6908,29 @@
           </div>
         `;
       }
+      if (title.includes("openalex")) {
+        const openAlex = integrationState.openAlex;
+        return `
+          <div class="config-section source-form" data-source-integration="openAlex">
+            <label><span><input type="checkbox" data-source-integration-field="enabled" ${openAlex.enabled ? "checked" : ""}> 启用 OpenAlex API</span></label>
+            <div class="small-text">OpenAlex 同时用于论文检索和自动字段补全；今日论文关闭 OpenAlex 检索后，字段补全仍保持开启。</div>
+            <label>Endpoint
+              <input data-source-integration-field="endpoint" value="${escapeHTML(openAlex.endpoint)}" placeholder="https://api.openalex.org/works">
+            </label>
+            <label><span class="field-title-row">OpenAlex API Key <button class="help-btn" type="button" data-api-help="openalex" title="如何获取 OpenAlex API Key">?</button></span>
+              ${sourceSecretField("openAlex", openAlex)}
+            </label>
+            <div class="input-row">
+              <label>抓取页数
+                <input type="number" min="1" max="10" step="1" data-source-integration-field="maxPages" value="${escapeHTML(openAlex.maxPages || 3)}">
+              </label>
+              <label>每页数量
+                <input type="number" min="1" max="100" step="1" data-source-integration-field="perPage" value="${escapeHTML(openAlex.perPage || 100)}">
+              </label>
+            </div>
+          </div>
+        `;
+      }
       return `<div class="config-section source-form"><div class="small-text">这个信源由后端内置 API 直接抓取，当前不需要填写 Endpoint 或 API Key。</div></div>`;
     }
 
@@ -6797,7 +6949,9 @@
       const list = document.getElementById("source-list");
       if (!list) return;
 
-      list.innerHTML = sourceState.map((source, index) => {
+      list.innerHTML = sourceState.map((source, index) => ({ source, index }))
+        .filter(({ source }) => /google|web of science|openalex/i.test(source.title))
+        .map(({ source, index }) => {
         if (editingSourceIndex === index) {
           return `
             <article class="source-card editing" data-source-index="${index}">
@@ -6827,7 +6981,7 @@
             </div>
           </article>
         `;
-      }).join("");
+        }).join("");
 
       list.onclick = handleSourceClick;
       list.onkeydown = handleSourceKeydown;
@@ -6877,6 +7031,26 @@
           "创建或查看 API Key，然后回到本页面填写 Endpoint、数据库和抓取页数。"
         ],
         note: "Web of Science API 权限取决于 Clarivate 订阅；没有 API 权限时不要改用网页翻页抓取。"
+      },
+      firecrawl: {
+        title: "如何获取 Firecrawl API Key",
+        url: "https://www.firecrawl.dev/app/api-keys",
+        steps: [
+          "打开 Firecrawl 控制台并注册或登录账号。",
+          "在 API Keys 页面创建并复制 API Key。",
+          "回到本页面填写 API Key、启用 Firecrawl 并保存。"
+        ],
+        note: "PaperHot 只用 Firecrawl 抓取 DOI 对应的出版方页面，并读取 markdown/rawHtml；不会调用 Firecrawl Agent 或 AI 提取。"
+      },
+      openalex: {
+        title: "如何获取 OpenAlex API Key",
+        url: "https://openalex.org/settings/api",
+        steps: [
+          "打开 OpenAlex API 设置页面并登录。",
+          "创建并复制免费的 API Key。",
+          "回到本页面，在 OpenAlex 卡片中填写 API Key、启用并保存。"
+        ],
+        note: "OpenAlex 的检索开关只控制论文发现；已配置的 OpenAlex 仍会自动参与字段补全。"
       }
     };
 
@@ -7003,6 +7177,63 @@
           </div>
           ${renderLlmProviderList(llm)}
         </div>
+        <div class="config-section source-form" data-integration-section="academicApis">
+          <div class="keyword-section-head">
+            <h3>学术 API 联系邮箱</h3>
+            <div class="keyword-section-note">Crossref 和 OpenAlex 请求复用。默认不进入本地数据导出包。</div>
+          </div>
+          <label>联系邮箱
+            <input type="email" data-integration-field="contactEmail" value="${escapeHTML(integrationState.academicApis.contactEmail)}" placeholder="name@example.org" autocomplete="email">
+          </label>
+        </div>
+        <div class="config-section source-form" data-integration-section="firecrawl">
+          <div class="keyword-section-head">
+            <h3>Firecrawl 出版方摘要补全 <button class="help-btn" type="button" data-api-help="firecrawl" title="如何获取 Firecrawl API Key">?</button></h3>
+            <div class="keyword-section-note">与其它摘要信源并行抓取 DOI 对应的出版方页面；仅在摘要通过身份与完整性校验后才交给 AI。</div>
+          </div>
+          <label><span><input type="checkbox" data-integration-field="enabled" ${integrationState.firecrawl.enabled ? "checked" : ""}> 启用 Firecrawl</span></label>
+          <label>Endpoint
+            <input data-integration-field="endpoint" value="${escapeHTML(integrationState.firecrawl.endpoint)}" placeholder="https://api.firecrawl.dev/v2/scrape">
+          </label>
+          <label><span class="field-title-row">Firecrawl API Key <button class="help-btn" type="button" data-api-help="firecrawl" title="如何获取 Firecrawl API Key">?</button></span>
+            <div class="secret-row">
+              <input type="password" data-integration-field="apiKey" data-secret-path="firecrawl" value="${escapeHTML(secretInputValue(integrationState.firecrawl))}" placeholder="${escapeHTML(integrationSecretText(integrationState.firecrawl))}">
+              <button class="secret-toggle" type="button" data-secret-toggle="firecrawl" ${integrationState.firecrawl.hasApiKey ? "" : "disabled"}>${secretButtonLabel(integrationState.firecrawl, false)}</button>
+            </div>
+          </label>
+          <div class="llm-test-result" data-firecrawl-test-result></div>
+          <div class="llm-provider-actions">
+            <button class="ghost-btn" type="button" data-firecrawl-test>测试 Firecrawl</button>
+          </div>
+          ${firecrawlCreditUsagePanel(integrationState.firecrawl)}
+        </div>
+        <div class="config-section" data-field-provenance>
+          <div class="keyword-section-head">
+            <h3>论文字段来源与优先级</h3>
+            <div class="keyword-section-note">检索开关只控制论文发现；字段补全接口按下列规则自动运行。</div>
+          </div>
+          <div class="candidate-table-wrap">
+            <table class="candidate-table">
+              <thead><tr><th>字段</th><th>来源</th><th>优先级</th></tr></thead>
+              <tbody>
+                <tr><td>标题</td><td>原检索信源、Crossref、OpenAlex</td><td>保留完整原题；缺失或截断时 Crossref &gt; OpenAlex</td></tr>
+                <tr><td>DOI</td><td>原检索信源、Crossref、OpenAlex</td><td>有效原值 &gt; Crossref &gt; OpenAlex</td></tr>
+                <tr><td>作者</td><td>原检索信源、Crossref、OpenAlex</td><td>非空原值 &gt; Crossref &gt; OpenAlex</td></tr>
+                <tr><td>期刊/来源</td><td>Crossref、原检索信源、OpenAlex</td><td>Crossref 正式出版容器 &gt; 原值 &gt; OpenAlex</td></tr>
+                <tr><td>发表时间</td><td>原检索信源、Crossref、OpenAlex、出版方页面</td><td>按精度选择：日 &gt; 月 &gt; 年，不伪造日期</td></tr>
+                <tr><td>摘要</td><td>原记录、WoS、Semantic Scholar、Crossref、OpenAlex、出版方、Firecrawl</td><td>最先通过身份、完整性和机器人页校验的完整摘要</td></tr>
+                <tr><td>引用次数</td><td>WoS、Google Scholar、OpenAlex</td><td>WoS &gt; Google Scholar &gt; OpenAlex；不相加</td></tr>
+                <tr><td>论文链接</td><td>原检索信源、DOI、OpenAlex landing page / Work ID</td><td>可直接打开的原链接 &gt; DOI &gt; OpenAlex</td></tr>
+                <tr><td>开放 PDF</td><td>原信源、OpenAlex OA location</td><td>原可用 PDF &gt; OpenAlex，仅补空值</td></tr>
+                <tr><td>标签</td><td>原信源关键词/分类、OpenAlex topics/keywords</td><td>合并去重，OpenAlex 只补充</td></tr>
+                <tr><td>正式版/预印本</td><td>arXiv、bioRxiv、OpenAlex type/version</td><td>明确预印本标记优先</td></tr>
+                <tr><td>来源 ID</td><td>实际检索信源的稳定 ID</td><td>与 retrievalSource 成对保存，不互相覆盖</td></tr>
+                <tr><td>引用文本</td><td>PaperHot 本地生成</td><td>使用最终标题、作者、年份、期刊和 DOI</td></tr>
+                <tr><td>中文摘要、短标题、推荐理由、评分</td><td>PaperHot 本地规则与 LLM</td><td>完整摘要通过校验后生成，不来自 OpenAlex</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       `;
     }
 
@@ -7032,7 +7263,9 @@
       const result = {};
       section.querySelectorAll("[data-integration-field]").forEach(input => {
         const key = input.getAttribute("data-integration-field");
-        result[key] = input.type === "checkbox" ? input.checked : input.value.trim();
+        result[key] = input.type === "checkbox"
+          ? input.checked
+          : (key === "apiKey" && input.value === savedSecretMask ? "" : input.value.trim());
       });
       return result;
     }
@@ -7088,7 +7321,10 @@
         llm: currentLlmConfig(),
         googleScholar: integrationState.googleScholar,
         journalMetrics: integrationState.journalMetrics,
-        webOfScience: integrationState.webOfScience
+        webOfScience: integrationState.webOfScience,
+        firecrawl: integrationState.firecrawl,
+        openAlex: integrationState.openAlex,
+        academicApis: integrationState.academicApis
       };
       if (form) {
         form.querySelectorAll("[data-integration-section]").forEach(section => {
@@ -7164,6 +7400,32 @@
         showToast("模型连接测试失败");
       }
     }
+
+    async function testFirecrawlIntegration(button) {
+      const result = document.querySelector("[data-firecrawl-test-result]");
+      if (!result) return;
+      button.disabled = true;
+      result.textContent = "正在验证 Firecrawl API Key...";
+      result.className = "llm-test-result";
+      try {
+        const response = await fetch("/api/integrations/firecrawl/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ firecrawl: currentIntegrationConfig().firecrawl })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
+        result.textContent = `连接成功：剩余 ${payload.usage.remainingCredits} / ${payload.usage.planCredits} credits`;
+        result.className = "llm-test-result ok";
+        showToast("Firecrawl 连接测试成功");
+      } catch (error) {
+        result.textContent = `连接失败：${error.message}`;
+        result.className = "llm-test-result error";
+        showToast("Firecrawl 连接测试失败");
+      } finally {
+        button.disabled = false;
+      }
+    }
     async function saveIntegrationConfig() {
       if (location.protocol === "file:") {
         showToast("请通过本地服务页面保存接口配置");
@@ -7175,15 +7437,16 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(currentIntegrationConfig())
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        applyIntegrationState(await response.json());
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+        applyIntegrationState(payload);
         renderIntegrationConfig();
         renderSetupStatus();
         bindIntegrationAutosave();
         showToast("配置已保存");
       } catch (error) {
         console.warn("Integration config save failed", error);
-        showToast("配置保存失败");
+        showToast(`配置保存失败：${error.message}`);
       }
     }
 
@@ -7374,6 +7637,12 @@
       if (test) {
         event.preventDefault();
         testLlmProvider(test.getAttribute("data-llm-test"));
+        return;
+      }
+      const firecrawlTest = event.target.closest("[data-firecrawl-test]");
+      if (firecrawlTest) {
+        event.preventDefault();
+        testFirecrawlIntegration(firecrawlTest);
         return;
       }
       const confirm = event.target.closest("[data-llm-confirm]");

@@ -10,6 +10,9 @@ node_modules/
 config/journal-metrics.json
 config/google-scholar.json
 config/web-of-science.json
+config/firecrawl.json
+config/academic-apis.json
+config/openalex.json
 config/llm.json
 
 # Runtime logs and process files
