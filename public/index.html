@@ -524,6 +524,31 @@
     }
     .config-section:first-of-type { padding-top: 0; }
     .config-section:last-child { border-bottom: 0; padding-bottom: 0; }
+    .config-main-column { display: grid; gap: 16px; align-content: start; }
+    .config-disclosure { padding: 0; overflow: hidden; }
+    .config-disclosure > summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 64px;
+      padding: 16px 18px;
+      cursor: pointer;
+      list-style: none;
+    }
+    .config-disclosure > summary::-webkit-details-marker { display: none; }
+    .config-disclosure > summary::after {
+      content: "›";
+      flex: 0 0 auto;
+      color: #718096;
+      font-size: 22px;
+      line-height: 1;
+      transform: rotate(90deg);
+      transition: transform 120ms ease;
+    }
+    .config-disclosure[open] > summary::after { transform: rotate(-90deg); }
+    .config-disclosure > summary h2 { margin: 0; }
+    .config-disclosure-body { padding: 0 18px 18px; }
     .keyword-chip {
       display: inline-flex;
       align-items: center;
@@ -2033,28 +2058,51 @@
       <section class="panel setup-status-panel" id="setup-status-panel"></section>
 
       <section class="layout">
-        <div>
-          <section class="panel">
-            <div class="panel-head">
+        <div class="config-main-column">
+          <section class="panel" data-config-order="academic-api">
+            <div id="academic-api-config-form" data-integration-config-root></div>
+          </section>
+
+          <section class="panel" data-config-order="field-provenance">
+            <div id="field-provenance-config"></div>
+          </section>
+
+          <details class="panel config-disclosure" data-config-order="sources">
+            <summary>
               <div>
                 <h2>信源配置</h2>
-                <div class="panel-note">这里只显示后端已经接入、抓取时真正会使用的论文信源</div>
+                <div class="panel-note">这里只显示需要填写凭据的论文检索信源</div>
               </div>
+            </summary>
+            <div class="config-disclosure-body">
+              <div class="source-list" id="source-list"></div>
             </div>
+          </details>
 
-            <div class="source-list" id="source-list"></div>
+          <details class="panel config-disclosure" data-config-order="firecrawl">
+            <summary>
+              <div>
+                <h2>Firecrawl 出版方摘要补全</h2>
+                <div class="panel-note">按需配置出版方页面摘要抓取</div>
+              </div>
+            </summary>
+            <div class="config-disclosure-body" id="firecrawl-config-form" data-integration-config-root></div>
+          </details>
 
-            <div class="add-box" id="integration-config-panel">
-              <div class="panel-head">
-                <div>
-                  <h2>外部接口配置 <button class="help-btn" type="button" data-api-help="easyscholar" title="如何获取 EasyScholar API">?</button></h2>
-                  <div class="panel-note">API Key 只写入本机后端配置；留空表示保留已有密钥</div>
-                </div>
+          <details class="panel config-disclosure" data-config-order="external-integrations">
+            <summary>
+              <div>
+                <h2>外部接口配置 <button class="help-btn" type="button" data-api-help="easyscholar" title="如何获取 EasyScholar API">?</button></h2>
+                <div class="panel-note">API Key 只写入本机后端配置；留空表示保留已有密钥</div>
+              </div>
+            </summary>
+            <div class="config-disclosure-body">
+              <div id="external-integration-config-form" data-integration-config-root></div>
+              <div class="source-form-actions">
                 <button class="primary-btn" id="save-integrations">保存接口</button>
               </div>
-              <div id="integration-config-form"></div>
             </div>
-          </section>
+          </details>
 
           <section class="panel" style="margin-top:16px">
             <div class="panel-head">
@@ -7166,10 +7214,12 @@
     }
 
     function renderIntegrationConfig() {
-      const form = document.getElementById("integration-config-form");
-      if (!form) return;
       const llm = integrationState.llm;
-      form.innerHTML = `
+      const externalForm = document.getElementById("external-integration-config-form");
+      const academicForm = document.getElementById("academic-api-config-form");
+      const firecrawlForm = document.getElementById("firecrawl-config-form");
+      const provenancePanel = document.getElementById("field-provenance-config");
+      if (externalForm) externalForm.innerHTML = `
         <div class="config-section" data-integration-section="llm">
           <div class="keyword-section-head">
             <h3>LLM 模型 <button class="help-btn" type="button" data-api-help="llm" title="如何获取 LLM API Key">?</button></h3>
@@ -7177,6 +7227,8 @@
           </div>
           ${renderLlmProviderList(llm)}
         </div>
+      `;
+      if (academicForm) academicForm.innerHTML = `
         <div class="config-section source-form" data-integration-section="academicApis">
           <div class="keyword-section-head">
             <h3>学术 API 联系邮箱</h3>
@@ -7186,6 +7238,8 @@
             <input type="email" data-integration-field="contactEmail" value="${escapeHTML(integrationState.academicApis.contactEmail)}" placeholder="name@example.org" autocomplete="email">
           </label>
         </div>
+      `;
+      if (firecrawlForm) firecrawlForm.innerHTML = `
         <div class="config-section source-form" data-integration-section="firecrawl">
           <div class="keyword-section-head">
             <h3>Firecrawl 出版方摘要补全 <button class="help-btn" type="button" data-api-help="firecrawl" title="如何获取 Firecrawl API Key">?</button></h3>
@@ -7207,6 +7261,8 @@
           </div>
           ${firecrawlCreditUsagePanel(integrationState.firecrawl)}
         </div>
+      `;
+      if (provenancePanel) provenancePanel.innerHTML = `
         <div class="config-section" data-field-provenance>
           <div class="keyword-section-head">
             <h3>论文字段来源与优先级</h3>
@@ -7316,7 +7372,6 @@
     }
 
     function currentIntegrationConfig() {
-      const form = document.getElementById("integration-config-form");
       const payload = {
         llm: currentLlmConfig(),
         googleScholar: integrationState.googleScholar,
@@ -7326,11 +7381,9 @@
         openAlex: integrationState.openAlex,
         academicApis: integrationState.academicApis
       };
-      if (form) {
-        form.querySelectorAll("[data-integration-section]").forEach(section => {
-          payload[section.getAttribute("data-integration-section")] = readIntegrationSection(section);
-        });
-      }
+      document.querySelectorAll("[data-integration-config-root] [data-integration-section]").forEach(section => {
+        payload[section.getAttribute("data-integration-section")] = readIntegrationSection(section);
+      });
       return payload;
     }
 
@@ -7653,15 +7706,15 @@
     }
 
     function bindIntegrationAutosave() {
-      const form = document.getElementById("integration-config-form");
-      if (!form) return;
-      form.onclick = handleIntegrationClick;
-      form.oninput = event => {
-        if (event.target.matches("[data-integration-field]")) scheduleIntegrationSave();
-      };
-      form.onchange = event => {
-        if (event.target.matches("[data-integration-field]")) scheduleIntegrationSave();
-      };
+      document.querySelectorAll("[data-integration-config-root]").forEach(form => {
+        form.onclick = handleIntegrationClick;
+        form.oninput = event => {
+          if (event.target.matches("[data-integration-field]")) scheduleIntegrationSave();
+        };
+        form.onchange = event => {
+          if (event.target.matches("[data-integration-field]")) scheduleIntegrationSave();
+        };
+      });
     }
 
     function saveSourceEdit(card) {

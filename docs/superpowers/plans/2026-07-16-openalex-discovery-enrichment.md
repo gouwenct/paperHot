@@ -102,8 +102,8 @@
 - Consumes: existing `renderSetupStatus`, `renderSourceConfig`, `renderIntegrationConfig`, autosave, secret reveal, and API help handlers.
 - Produces: six ordered configuration sections; source, Firecrawl, and external integration sections use closed native `<details>` elements.
 
-- [ ] Add frontend assertions for the six section markers in the approved order and closed `<details>` wrappers around source, Firecrawl, and external integrations.
-- [ ] Split `renderIntegrationConfig` output across dedicated contact-email, field-provenance, Firecrawl, and external-interface containers without changing integration payload keys.
-- [ ] Reorder the static configuration skeleton, keep keyword configuration in the existing right column, and place local data after the six ordered sections.
-- [ ] Add restrained native disclosure styling and preserve save/help/autosave event delegation.
-- [ ] Update `CHANGELOG.md`, run frontend tests and embedded-script syntax validation, then restart and verify `50751`.
+- [x] Add frontend assertions for the six section markers in the approved order and closed `<details>` wrappers around source, Firecrawl, and external integrations.
+- [x] Split `renderIntegrationConfig` output across dedicated contact-email, field-provenance, Firecrawl, and external-interface containers without changing integration payload keys.
+- [x] Reorder the static configuration skeleton, keep keyword configuration in the existing right column, and place local data after the six ordered sections.
+- [x] Add restrained native disclosure styling and preserve save/help/autosave event delegation.
+- [x] Update `CHANGELOG.md`, run frontend tests (`69/69`) and embedded-script syntax validation, then restart and verify `50751` (HTTP 200, PID `22272`).
