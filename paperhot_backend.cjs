@@ -2586,12 +2586,20 @@ function activeAliyunProviderFromConfig(config = {}) {
     || null;
 }
 
+function assertAliyunTextModel(model) {
+  const cleanModel = compactText(model);
+  if (!cleanModel) throw new Error("模型名称不能为空");
+  if (!readAliyunTextModelRegistry().some(item => item.model === cleanModel)) {
+    throw new Error(`模型不在阿里百炼文本模型注册表中: ${cleanModel}`);
+  }
+  return cleanModel;
+}
+
 function patchLlmPoolModel(pool = DEFAULT_ALIYUN_MODEL_POOL, model, patch = {}) {
   const cleanModel = compactText(model);
-  const registryEntry = readAliyunTextModelRegistry().find(item => item.model === cleanModel) || { model: cleanModel, displayName: cleanModel, family: "Aliyun Text", priority: 9990, freeQuotaTokens: 1000000 };
   const cleanPool = cleanLlmModelPool(pool);
   const rows = new Map(cleanPool.models.map(item => [item.model, item]));
-  const current = rows.get(cleanModel) || registryEntry;
+  const current = rows.get(cleanModel) || readAliyunTextModelRegistry().find(item => item.model === cleanModel);
   rows.set(cleanModel, cleanLlmModelPoolEntry({
     ...current,
     enabled: typeof patch.enabled === "boolean" ? patch.enabled : current.enabled,
@@ -2601,8 +2609,7 @@ function patchLlmPoolModel(pool = DEFAULT_ALIYUN_MODEL_POOL, model, patch = {}) 
 }
 
 async function updateLlmModelPoolModel(model, patch = {}, options = {}) {
-  const cleanModel = compactText(model);
-  if (!cleanModel) throw new Error("模型名称不能为空");
+  const cleanModel = assertAliyunTextModel(model);
   const configFile = options.llmConfigFile || options.configFile || LLM_CONFIG_FILE;
   const config = await readLlmConfig(configFile);
   const provider = activeAliyunProviderFromConfig(config);
@@ -2613,8 +2620,7 @@ async function updateLlmModelPoolModel(model, patch = {}, options = {}) {
 }
 
 async function testLlmPoolModel(model, options = {}) {
-  const cleanModel = compactText(model);
-  if (!cleanModel) throw new Error("模型名称不能为空");
+  const cleanModel = assertAliyunTextModel(model);
   const configFile = options.llmConfigFile || options.configFile || LLM_CONFIG_FILE;
   const dataDir = options.dataDir || DATA_DIR;
   const config = await readLlmConfig(configFile);

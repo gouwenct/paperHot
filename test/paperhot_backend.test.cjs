@@ -2938,6 +2938,66 @@ test("aliyun llm pool filters non-registry models from automatic calls", async (
   await writeLlmModelPoolState({
     models: {
       "qwen-plus": { model: "qwen-plus", localUsedTokens: 850000, status: "near_limit" }
+test("updates reject non-registry aliyun models without writing config or pool state", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-update-non-registry-"));
+  const configFile = path.join(tempDir, "llm.json");
+  const configText = JSON.stringify({
+    enabled: true,
+    activeProviderId: "aliyun-coding",
+    providers: [{
+      id: "aliyun-coding",
+      provider: "aliyun-modelstudio",
+      enabled: true,
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "secret-key",
+      model: "qwen-plus",
+      modelPool: { models: [{ model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 }] }
+    }]
+  });
+  await fs.writeFile(configFile, configText, "utf8");
+
+  await assert.rejects(
+    updateLlmModelPoolModel("qwen-embedding-v3", { enabled: true }, { llmConfigFile: configFile, dataDir: tempDir }),
+    /不在阿里百炼文本模型注册表中/
+  );
+  assert.equal(await fs.readFile(configFile, "utf8"), configText);
+  await assert.rejects(fs.access(path.join(tempDir, "llm-model-pool-state.json")), { code: "ENOENT" });
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("per-model aliyun tests reject non-registry models without HTTP or pool state writes", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-test-non-registry-"));
+  const configFile = path.join(tempDir, "llm.json");
+  const configText = JSON.stringify({
+    enabled: true,
+    activeProviderId: "aliyun-coding",
+    providers: [{
+      id: "aliyun-coding",
+      provider: "aliyun-modelstudio",
+      enabled: true,
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "secret-key",
+      model: "qwen-plus",
+      modelPool: { models: [{ model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 }] }
+    }]
+  });
+  await fs.writeFile(configFile, configText, "utf8");
+  let httpCalls = 0;
+
+  await assert.rejects(
+    testLlmPoolModel("qwen-embedding-v3", {
+      llmConfigFile: configFile,
+      dataDir: tempDir,
+      fetchImpl: async () => { httpCalls += 1; }
+    }),
+    /不在阿里百炼文本模型注册表中/
+  );
+  assert.equal(httpCalls, 0);
+  assert.equal(await fs.readFile(configFile, "utf8"), configText);
+  await assert.rejects(fs.access(path.join(tempDir, "llm-model-pool-state.json")), { code: "ENOENT" });
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
     }
   }, tempDir);
   const calls = [];
