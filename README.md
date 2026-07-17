@@ -399,6 +399,7 @@ flowchart TD
 | `docs/superpowers/plans/2026-07-16-academic-api-contact-email.md` | 学术 API 联系邮箱、Crossref 请求身份与敏感配置备份的 TDD 实施计划 |
 | `docs/superpowers/plans/2026-07-16-openalex-discovery-enrichment.md` | OpenAlex 检索、自动字段补全、配置与验证的分步实施计划 |
 | `docs/superpowers/plans/2026-07-16-paper-list-filter-sort.md` | 今日论文与全部论文分类、发表阶段和排序功能的 TDD 实施计划 |
+| `docs/superpowers/plans/2026-07-17-aliyun-llm-model-pool.md` | 阿里百炼 LLM 模型池自动切换、状态可视化和本地额度估算的 TDD 实施计划 |
 | `docs/solutions/runtime-errors/paperhot-service-restart-data-permission.md` | 固定端口旧进程与受限 Node 导致旧代码、断点 `EPERM` 的诊断和重启验收 |
 | `.superpowers/sdd/task-2-report.md` | Task 2 多信源元数据与正式版/预印本关联的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-3-report.md` | Task 3 近期抓取游标与 WoS 本地请求用量的实现、TDD 和验证报告 |
