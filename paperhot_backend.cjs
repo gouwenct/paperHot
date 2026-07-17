@@ -13,6 +13,7 @@ const JOURNAL_METRICS_CACHE_NAME = "journal-metrics-cache.json";
 const GOOGLE_ROLLING_CURSOR_NAME = "google-rolling-cursors.json";
 const RECENT_FETCH_CURSORS_NAME = "recent-fetch-cursors.json";
 const WEB_OF_SCIENCE_USAGE_NAME = "web-of-science-usage.json";
+const LLM_MODEL_POOL_STATE_NAME = "llm-model-pool-state.json";
 const LOCAL_DATA_FORMAT = "paperhot-local-data";
 const LOCAL_DATA_VERSION = 1;
 const FETCH_LOG_LIMIT = 30;
@@ -144,6 +145,28 @@ const DEFAULT_GOOGLE_SCHOLAR_CONFIG = {
   }
 };
 const DEFAULT_USER_BACKGROUND = "请在页面中填写你的研究背景、关注方向和评分偏好。";
+const LLM_MODEL_POOL_STATE_FORMAT = "paperhot-llm-model-pool-state";
+const DEFAULT_ALIYUN_MODEL_POOL_MODELS = [
+  "qwen-plus",
+  "qwen-flash",
+  "qwen-turbo",
+  "qwen-long",
+  "qwen3.5-flash",
+  "qwen3.7-plus",
+  "qwen3-coder-plus"
+];
+const DEFAULT_ALIYUN_MODEL_POOL = {
+  quotaMode: "official-first",
+  quotaFallback: "local",
+  quotaSwitchRatio: 0.85,
+  failureSwitchThreshold: 3,
+  models: DEFAULT_ALIYUN_MODEL_POOL_MODELS.map((model, index) => ({
+    model,
+    enabled: true,
+    freeQuotaTokens: 1000000,
+    priority: (index + 1) * 10
+  }))
+};
 const DEFAULT_LLM_CONFIG = {
   provider: "aliyun-modelstudio",
   enabled: false,
@@ -1671,14 +1694,55 @@ async function readFirecrawlCreditUsage(config, fetchImpl = fetch) {
   }
 }
 
+function cleanLlmModelPoolEntry(value = {}, index = 0) {
+  const model = compactText(value.model);
+  if (!model) return null;
+  const quota = Number(value.freeQuotaTokens);
+  const priority = Number(value.priority);
+  return {
+    model,
+    enabled: value.enabled !== false,
+    freeQuotaTokens: Number.isFinite(quota) && quota > 0 ? Math.round(quota) : 1000000,
+    priority: Number.isFinite(priority) ? priority : (index + 1) * 10
+  };
+}
+
+function cleanLlmModelPool(value = {}) {
+  const input = value && typeof value === "object" ? value : {};
+  const ratio = Number(input.quotaSwitchRatio);
+  const failureSwitchThreshold = Number(input.failureSwitchThreshold);
+  const sourceModels = Array.isArray(input.models) && input.models.length
+    ? input.models
+    : DEFAULT_ALIYUN_MODEL_POOL.models;
+  const seen = new Set();
+  const models = sourceModels
+    .map((item, index) => cleanLlmModelPoolEntry(item, index))
+    .filter(Boolean)
+    .sort((left, right) => left.priority - right.priority)
+    .filter(item => {
+      const key = item.model.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return {
+    quotaMode: input.quotaMode === "official-first" ? "official-first" : DEFAULT_ALIYUN_MODEL_POOL.quotaMode,
+    quotaFallback: input.quotaFallback === "local" ? "local" : DEFAULT_ALIYUN_MODEL_POOL.quotaFallback,
+    quotaSwitchRatio: Number.isFinite(ratio) && ratio > 0 && ratio <= 1 ? ratio : DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio,
+    failureSwitchThreshold: Number.isInteger(failureSwitchThreshold) && failureSwitchThreshold > 0 ? failureSwitchThreshold : DEFAULT_ALIYUN_MODEL_POOL.failureSwitchThreshold,
+    models: models.length ? models : DEFAULT_ALIYUN_MODEL_POOL.models
+  };
+}
+
 function cleanLlmProvider(value, fallback = {}) {
   const input = value && typeof value === "object" ? value : {};
   const id = String(input.id || fallback.id || input.provider || fallback.provider || "custom").trim();
+  const provider = String(input.provider || fallback.provider || id);
   return {
     id,
     name: String(input.name || fallback.name || id),
     desc: String(input.desc || fallback.desc || ""),
-    provider: String(input.provider || fallback.provider || id),
+    provider,
     enabled: input.enabled === true,
     apiMode: String(input.apiMode || fallback.apiMode || "openai"),
     host: String(input.host || fallback.host || ""),
@@ -1688,7 +1752,8 @@ function cleanLlmProvider(value, fallback = {}) {
     model: String(input.model || fallback.model || ""),
     modelPresets: Array.isArray(input.modelPresets) ? input.modelPresets.map(compactText).filter(Boolean) : (fallback.modelPresets || []),
     contextWindow: Number(input.contextWindow || fallback.contextWindow || 131000),
-    reasoning: String(input.reasoning || fallback.reasoning || "auto")
+    reasoning: String(input.reasoning || fallback.reasoning || "auto"),
+    ...(provider === "aliyun-modelstudio" ? { modelPool: cleanLlmModelPool(input.modelPool || fallback.modelPool) } : {})
   };
 }
 
@@ -2303,6 +2368,56 @@ async function readWebOfScienceUsage(dataDir = DATA_DIR, now = new Date()) {
     lastRequestAt: compactText(usage.lastRequestAt),
     lastStatus: compactText(usage.lastStatus)
   };
+}
+
+function cleanLlmModelPoolStateEntry(value = {}) {
+  const status = ["available", "near_limit", "exhausted", "failing", "disabled"].includes(value.status)
+    ? value.status
+    : "available";
+  return {
+    model: compactText(value.model),
+    status,
+    localUsedTokens: Math.max(0, Math.round(Number(value.localUsedTokens || 0))),
+    officialRemainingTokens: value.officialRemainingTokens === null || value.officialRemainingTokens === undefined
+      ? null
+      : Math.max(0, Math.round(Number(value.officialRemainingTokens || 0))),
+    officialQuotaCheckedAt: compactText(value.officialQuotaCheckedAt),
+    officialQuotaStatus: compactText(value.officialQuotaStatus || "unavailable"),
+    consecutiveFailures: Math.max(0, Math.round(Number(value.consecutiveFailures || 0))),
+    lastSuccessAt: compactText(value.lastSuccessAt),
+    lastFailureAt: compactText(value.lastFailureAt),
+    lastFailureMessage: compactText(value.lastFailureMessage),
+    lastSwitchAt: compactText(value.lastSwitchAt),
+    lastSwitchReason: compactText(value.lastSwitchReason)
+  };
+}
+
+function cleanLlmModelPoolState(value = {}) {
+  const inputModels = value && typeof value.models === "object" && !Array.isArray(value.models) ? value.models : {};
+  const models = {};
+  Object.entries(inputModels).forEach(([key, entry]) => {
+    const clean = cleanLlmModelPoolStateEntry({ ...entry, model: entry?.model || key });
+    if (clean.model) models[clean.model] = clean;
+  });
+  return {
+    format: LLM_MODEL_POOL_STATE_FORMAT,
+    updatedAt: compactText(value.updatedAt),
+    activeModel: compactText(value.activeModel),
+    models
+  };
+}
+
+async function readLlmModelPoolState(dataDir = DATA_DIR) {
+  return cleanLlmModelPoolState(await readJsonFile(path.join(dataDir, LLM_MODEL_POOL_STATE_NAME), {
+    format: LLM_MODEL_POOL_STATE_FORMAT,
+    models: {}
+  }));
+}
+
+async function writeLlmModelPoolState(state, dataDir = DATA_DIR) {
+  const clean = cleanLlmModelPoolState({ ...state, updatedAt: new Date().toISOString() });
+  await writeJsonFile(path.join(dataDir, LLM_MODEL_POOL_STATE_NAME), clean);
+  return clean;
 }
 
 // ponytail: serialized only within this process; use an atomic datastore if multi-process fetches are introduced.
@@ -6831,6 +6946,9 @@ module.exports = {
   readJournalMetricsConfig,
   readJournalMetricsCache,
   readLlmConfig,
+  cleanLlmModelPool,
+  readLlmModelPoolState,
+  writeLlmModelPoolState,
   readOpenAlexConfig,
   readUserState,
   readWebOfScienceConfig,

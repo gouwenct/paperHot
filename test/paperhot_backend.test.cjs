@@ -53,6 +53,8 @@ const {
   appendOperationLog,
   testLlmConfig,
   testFirecrawlConfig,
+  readLlmConfig,
+  readLlmModelPoolState,
   todayString,
   readIntegrationConfigs,
   readIntegrationSecrets,
@@ -2782,6 +2784,51 @@ test("tests an LLM provider using saved or submitted configuration", async () =>
   });
   await fs.rm(tempDir, { recursive: true, force: true });
 });
+
+test("llm config includes a cleaned aliyun model pool with safe defaults", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-config-"));
+  const llmConfigFile = path.join(tempDir, "llm.json");
+  await fs.writeFile(llmConfigFile, JSON.stringify({
+    enabled: true,
+    activeProviderId: "aliyun-coding",
+    providers: [{
+      id: "aliyun-coding",
+      provider: "aliyun-modelstudio",
+      enabled: true,
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "test-key",
+      model: "qwen-plus",
+      modelPool: {
+        quotaSwitchRatio: 0.99,
+        failureSwitchThreshold: 0,
+        models: [
+          { model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 2 },
+          { model: "qwen-flash", enabled: true, freeQuotaTokens: -1, priority: 1 },
+          { model: "", enabled: true, freeQuotaTokens: 1000000 }
+        ]
+      }
+    }]
+  }), "utf8");
+
+  const config = await readLlmConfig(llmConfigFile);
+  const pool = config.providers.find(provider => provider.id === "aliyun-coding").modelPool;
+  assert.equal(pool.quotaMode, "official-first");
+  assert.equal(pool.quotaFallback, "local");
+  assert.equal(pool.quotaSwitchRatio, 0.99);
+  assert.equal(pool.failureSwitchThreshold, 3);
+  assert.deepEqual(pool.models.map(item => item.model), ["qwen-flash", "qwen-plus"]);
+  assert.equal(pool.models[0].freeQuotaTokens, 1000000);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("llm model pool state defaults to empty model records", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-state-"));
+  const state = await readLlmModelPoolState(tempDir);
+  assert.deepEqual(state.models, {});
+  assert.equal(state.format, "paperhot-llm-model-pool-state");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
 test("calls OpenAI-compatible LLM with chat completions path", async () => {
   let seenUrl = "";
   const papers = await enrichPapersWithLlmInsights([

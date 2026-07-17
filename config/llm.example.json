@@ -306,6 +306,56 @@
         "qwen3-coder-plus",
         "qwen3-coder-next"
       ],
+      "modelPool": {
+        "quotaMode": "official-first",
+        "quotaFallback": "local",
+        "quotaSwitchRatio": 0.85,
+        "failureSwitchThreshold": 3,
+        "models": [
+          {
+            "model": "qwen-plus",
+            "enabled": true,
+            "freeQuotaTokens": 1000000,
+            "priority": 10
+          },
+          {
+            "model": "qwen-flash",
+            "enabled": true,
+            "freeQuotaTokens": 1000000,
+            "priority": 20
+          },
+          {
+            "model": "qwen-turbo",
+            "enabled": true,
+            "freeQuotaTokens": 1000000,
+            "priority": 30
+          },
+          {
+            "model": "qwen-long",
+            "enabled": true,
+            "freeQuotaTokens": 1000000,
+            "priority": 40
+          },
+          {
+            "model": "qwen3.5-flash",
+            "enabled": true,
+            "freeQuotaTokens": 1000000,
+            "priority": 50
+          },
+          {
+            "model": "qwen3.7-plus",
+            "enabled": true,
+            "freeQuotaTokens": 1000000,
+            "priority": 60
+          },
+          {
+            "model": "qwen3-coder-plus",
+            "enabled": true,
+            "freeQuotaTokens": 1000000,
+            "priority": 70
+          }
+        ]
+      },
       "contextWindow": 173000,
       "reasoning": "auto"
     },
