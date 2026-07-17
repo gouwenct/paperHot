@@ -2872,11 +2872,11 @@ test("aliyun llm pool filters non-registry models from automatic calls", async (
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
-test("aliyun llm pool caps a saved 0.99 threshold at the binding 85 percent limit", () => {
-  const pool = cleanLlmModelPool({
+test("aliyun llm pool status caps a raw 0.99 threshold at the binding 85 percent limit", () => {
+  const pool = {
     quotaSwitchRatio: 0.99,
     models: [{ model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 }]
-  });
+  };
   const selected = selectLlmPoolModel({
     pool,
     state: {

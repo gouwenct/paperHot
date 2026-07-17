@@ -2500,7 +2500,11 @@ function modelPoolStatusForModel(modelConfig, stateEntry = {}, pool = DEFAULT_AL
   if (!modelConfig.enabled) return "disabled";
   const used = Number(stateEntry.localUsedTokens || 0);
   const quota = Number(modelConfig.freeQuotaTokens || 1000000);
-  const threshold = quota * Number(pool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio);
+  const configuredRatio = Number(pool?.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio);
+  const quotaSwitchRatio = Number.isFinite(configuredRatio)
+    ? Math.min(configuredRatio, DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio)
+    : DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio;
+  const threshold = quota * quotaSwitchRatio;
   if (stateEntry.status === "exhausted" || used >= quota) return "exhausted";
   if (stateEntry.status === "failing") return "failing";
   if (used >= threshold) return "near_limit";
