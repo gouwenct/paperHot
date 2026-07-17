@@ -87,6 +87,7 @@ http://127.0.0.1:50751
 - 主要关键词、辅助关键词、灵感关键词。
 - 启用的论文来源。
 - LLM Provider、模型、Endpoint 和 API Key。
+- 阿里百炼模型池可按官方额度优先、本地 Token 估算兜底运行；模型达到 85% 本地免费额度或连续失败 3 次后自动切换，并在统计页显示当前模型、接近用尽、响应失败和可用模型。
 - SerpApi / Google Scholar 配置。
 - Web of Science API 配置。
 - OpenAlex 免费 API Key；配置页同时显示各论文字段的来源和回退优先级。
@@ -268,6 +269,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 - 显示今日、近 7 天、近 30 天的 Token 统计。
 - 按模型展示调用情况。
+- 显示阿里百炼模型池当前模型、各模型本地已用 Token、估算剩余额度、连续失败次数，并可重置 PaperHot 本地估算。
 - 展示最近抓取日志。
 - 抓取日志保留每次抓取的来源、数量、时间范围、候选论文快照和失败信息；新日志同时记录日期粗筛、Crossref/出版社补全后及最终日期通过数量。
 - 可以打开某次抓取的候选论文详情，在“领域过滤前、日期粗筛、日期补全后、最终日期通过”之间切换；补全后的两个阶段显示最终确认日期。
@@ -420,6 +422,7 @@ flowchart TD
 | `data/papers/google-rolling-cursors.json` | 旧版直接 Google adapter 调用的滚动抓取位置；近期抓取和指定论文检索不读取或更新 |
 | `data/papers/recent-fetch-cursors.json` | 近期抓取和指定论文检索的唯一短期断点；Google、WoS、arXiv 等逐信源只保存下一页和完成态，仅相同检索模式、表达式、日期和信源任务可续传，全部信源完成后清除，不进入本地数据 ZIP |
 | `data/papers/web-of-science-usage.json` | PaperHot 本地记录的 WoS 请求日/月/累计次数及最后状态；不保存请求 URL、Header 或 API Key，勾选统计时进入 v1 ZIP 并可导回 |
+| `data/papers/llm-model-pool-state.json` | PaperHot 本地记录的阿里百炼模型池 Token 估算、失败次数和当前状态；不保存 API Key，勾选统计时进入 v1 ZIP 并可导回 |
 | `data/papers/*.example.json` | 可提交的运行态 JSON 示例模板；真实运行文件继续只保留在本机 |
 
 ## 维护者统一任务流程

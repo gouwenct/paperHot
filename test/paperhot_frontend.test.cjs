@@ -397,6 +397,15 @@ test("token stats cards label LLM usage count as calls", async () => {
   assert.doesNotMatch(html, /输出 \$\{formatToken\(bucket\?\.completion\)\} · \$\{formatToken\(bucket\?\.papers\)\} 篇/);
 });
 
+test("token stats page exposes aliyun model pool status", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /llmModelPoolStatsPanel/);
+  assert.match(html, /百炼模型池/);
+  assert.match(html, /额度充足/);
+  assert.match(html, /响应失败/);
+  assert.match(html, /\/api\/integrations\/llm\/model-pool\/reset/);
+});
+
 test("candidate detail view exposes archive action and sortable columns", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /data-candidate-add/);
@@ -455,6 +464,15 @@ test("academic API contact email is editable from the config page", async () => 
   assert.match(html, /OpenAlex/);
   assert.match(html, /academicApis:\s*integrationState\.academicApis/);
   assert.match(html, /payload\.error/);
+});
+
+test("config page exposes aliyun llm model pool controls", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /renderLlmModelPoolConfig/);
+  assert.match(html, /data-llm-model-pool/);
+  assert.match(html, /qwen-plus/);
+  assert.match(html, /85%/);
+  assert.match(html, /只重置 PaperHot 本地估算/);
 });
 
 test("OpenAlex config separates discovery from automatic field enrichment", async () => {

@@ -390,6 +390,22 @@
       font-weight: 800;
     }
     .model-chip.active { background: #1f2a40; color: #fff; border-color: #1f2a40; }
+    .llm-model-pool-list { display: grid; gap: 6px; margin-top: 8px; }
+    .llm-model-pool-row {
+      display: grid;
+      grid-template-columns: auto minmax(120px, 1fr) minmax(120px, 160px);
+      gap: 8px;
+      align-items: center;
+      padding: 7px 8px;
+      border: 1px solid #edf2f5;
+      border-radius: 8px;
+      background: #fbfcfd;
+      font-size: 12px;
+      font-weight: 800;
+      color: #425268;
+    }
+    .llm-model-pool-row input[type="number"] { min-width: 0; height: 30px; }
+    .llm-model-pool-row input[type="checkbox"] { accent-color: #1f2a40; }
     .range-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
     .range-row input { accent-color: #644df6; }
     .llm-provider-actions {
@@ -5750,6 +5766,45 @@
       `).join("")}</div>`;
     }
 
+    function llmModelPoolStatusLabel(status) {
+      if (status === "near_limit") return "接近阈值";
+      if (status === "exhausted") return "已用尽";
+      if (status === "failing") return "响应失败";
+      if (status === "disabled") return "已停用";
+      return "额度充足";
+    }
+
+    function llmModelPoolStatsPanel(pool = {}) {
+      const models = Array.isArray(pool.models) ? pool.models : [];
+      if (!models.length) return "";
+      return `
+        <section class="panel" style="margin-top:16px">
+          <div class="panel-head">
+            <div>
+              <h2>百炼模型池</h2>
+              <div class="panel-note">当前模型：${escapeHTML(pool.activeModel || "未记录")}；官方额度不可用时使用 PaperHot 本地估算。</div>
+            </div>
+          </div>
+          <div class="candidate-table-wrap" style="margin-top:12px">
+            <table class="candidate-table">
+              <thead><tr><th>模型</th><th>状态</th><th>本地已用</th><th>估算剩余</th><th>失败</th><th>操作</th></tr></thead>
+              <tbody>${models.map(model => `
+                <tr>
+                  <td>${escapeHTML(model.model)}</td>
+                  <td>${escapeHTML(llmModelPoolStatusLabel(model.status))}</td>
+                  <td>${formatToken(model.localUsedTokens || 0)}</td>
+                  <td>${formatToken(model.estimatedRemainingTokens || 0)}</td>
+                  <td>${formatToken(model.consecutiveFailures || 0)}</td>
+                  <td><button class="ghost-btn" type="button" data-llm-pool-reset="${escapeHTML(model.model)}">重置本地估算</button></td>
+                </tr>
+              `).join("")}</tbody>
+            </table>
+          </div>
+          <div class="small-text" style="margin-top:8px">重置只重置 PaperHot 本地估算，不会恢复阿里云真实免费额度。</div>
+        </section>
+      `;
+    }
+
     function dailyBars(stats) {
       const days = stats?.daily || [];
       const maxTotal = Math.max(...days.map(item => item.total), 1);
@@ -6188,6 +6243,7 @@
             <div style="margin-top:12px">${modelChartRows(stats)}</div>
           </aside>
         </section>
+        ${llmModelPoolStatsPanel(stats.llmModelPool)}
         <section class="panel" style="margin-top:16px">
           <div class="panel-head">
             <div>
@@ -6200,6 +6256,29 @@
       `;
       mainContent.innerHTML = pageShell("统计", "查看 AI Token 消耗（每天 / 近 7 天 / 近 30 天、按模型分布）以及最近的论文抓取日志。", body);
       bindFetchLogPanel();
+      bindLlmModelPoolStatsPanel();
+    }
+
+    function bindLlmModelPoolStatsPanel() {
+      document.querySelectorAll("[data-llm-pool-reset]").forEach(button => {
+        button.addEventListener("click", async () => {
+          const model = button.getAttribute("data-llm-pool-reset");
+          if (!confirm(`只重置 PaperHot 对 ${model} 的本地额度估算，不会恢复阿里云真实免费额度。继续吗？`)) return;
+          button.disabled = true;
+          try {
+            const response = await fetch("/api/integrations/llm/model-pool/reset", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ model })
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            await loadTokenStats();
+          } catch (error) {
+            alert(`重置失败：${error.message}`);
+            button.disabled = false;
+          }
+        });
+      });
     }
 
     async function loadOperationLog() {
@@ -6781,6 +6860,21 @@
     }
 
     let sourceState = loadSourceState();
+    const defaultAliyunModelPool = {
+      quotaMode: "official-first",
+      quotaFallback: "local",
+      quotaSwitchRatio: 0.85,
+      failureSwitchThreshold: 3,
+      models: [
+        { model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 },
+        { model: "qwen-flash", enabled: true, freeQuotaTokens: 1000000, priority: 20 },
+        { model: "qwen-turbo", enabled: true, freeQuotaTokens: 1000000, priority: 30 },
+        { model: "qwen-long", enabled: true, freeQuotaTokens: 1000000, priority: 40 },
+        { model: "qwen3.5-flash", enabled: true, freeQuotaTokens: 1000000, priority: 50 },
+        { model: "qwen3.7-plus", enabled: true, freeQuotaTokens: 1000000, priority: 60 },
+        { model: "qwen3-coder-plus", enabled: true, freeQuotaTokens: 1000000, priority: 70 }
+      ]
+    };
     const defaultIntegrationState = {
       llm: {
         provider: "aliyun-modelstudio",
@@ -6810,7 +6904,7 @@
           { id: "zhipu", name: "智谱 GLM (Zhipu)", desc: "open.bigmodel.cn", provider: "zhipu", enabled: false, apiMode: "openai", endpoint: "https://open.bigmodel.cn/api/paas/v4", apiKey: "", model: "", modelPresets: ["glm-4.7", "glm-4-flash"], contextWindow: 128000, reasoning: "auto" },
           { id: "minimax-global", name: "MiniMax (Global)", desc: "api.minimax.io/anthropic", provider: "minimax-global", enabled: false, apiMode: "anthropic", endpoint: "https://api.minimax.io/anthropic", apiKey: "", model: "", modelPresets: ["MiniMax-M2.5"], contextWindow: 128000, reasoning: "auto" },
           { id: "minimax-cn", name: "MiniMax (中国)", desc: "api.minimax.com/anthropic", provider: "minimax-cn", enabled: false, apiMode: "anthropic", endpoint: "https://api.minimax.com/anthropic", apiKey: "", model: "", modelPresets: ["MiniMax-M2.5"], contextWindow: 128000, reasoning: "auto" },
-          { id: "aliyun-coding", name: "阿里百炼 Coding Plan", desc: "dashscope.aliyuncs.com", provider: "aliyun-modelstudio", enabled: false, apiMode: "openai", host: "dashscope.aliyuncs.com", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", dashscopeEndpoint: "https://dashscope.aliyuncs.com/api/v1", apiKey: "", model: "qwen-plus", modelPresets: ["qwen-plus", "qwen-max", "qwen3-coder-plus", "qwen3-coder-next"], contextWindow: 131000, reasoning: "auto" },
+          { id: "aliyun-coding", name: "阿里百炼 Coding Plan", desc: "dashscope.aliyuncs.com", provider: "aliyun-modelstudio", enabled: false, apiMode: "openai", host: "dashscope.aliyuncs.com", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", dashscopeEndpoint: "https://dashscope.aliyuncs.com/api/v1", apiKey: "", model: "qwen-plus", modelPresets: ["qwen-plus", "qwen-max", "qwen3-coder-plus", "qwen3-coder-next"], contextWindow: 131000, reasoning: "auto", modelPool: defaultAliyunModelPool },
           { id: "xiaomi", name: "小米 MiMo (Xiaomi)", desc: "api.xiaomimimo.com", provider: "xiaomi", enabled: false, apiMode: "openai", endpoint: "https://api.xiaomimimo.com/v1", apiKey: "", model: "", modelPresets: ["MiMo"], contextWindow: 128000, reasoning: "auto" },
           { id: "volcengine", name: "火山引擎 Ark (Volcengine)", desc: "ark.cn-beijing.volces.com/api/coding/v3", provider: "volcengine", enabled: false, apiMode: "openai", endpoint: "https://ark.cn-beijing.volces.com/api/coding/v3", apiKey: "", model: "Doubao-Seed-2.0-Code", modelPresets: ["Doubao-Seed-2.0-Code", "Doubao-Seed-2.0-pro", "Doubao-Seed-2.0-lite"], contextWindow: 128000, reasoning: "auto" },
           { id: "ollama-local", name: "Ollama (Local)", desc: "Self-hosted llama.cpp / Ollama", provider: "ollama-local", enabled: false, apiMode: "openai", endpoint: "http://127.0.0.1:11434/v1", apiKey: "", model: "", modelPresets: ["qwen2.5", "llama3.1"], contextWindow: 128000, reasoning: "off" },
@@ -6916,10 +7010,14 @@
     function applyIntegrationState(payload) {
       const items = payload?.integrations || payload || {};
       const incomingLlm = items.llm || {};
+      const incomingProviders = Array.isArray(incomingLlm.providers) ? incomingLlm.providers : [];
       const mergedProviders = [
-        ...(incomingLlm.providers || []),
+        ...incomingProviders.map(provider => {
+          const defaults = defaultIntegrationState.llm.providers.find(item => item.id === provider.id) || {};
+          return { ...defaults, ...provider };
+        }),
         ...defaultIntegrationState.llm.providers.filter(defaultProvider => (
-          !(incomingLlm.providers || []).some(provider => provider.id === defaultProvider.id)
+          !incomingProviders.some(provider => provider.id === defaultProvider.id)
         ))
       ];
       integrationState = {
@@ -7304,6 +7402,28 @@
       backdrop.querySelector("[data-close-api-help]")?.focus();
     }
 
+    function renderLlmModelPoolConfig(provider) {
+      if (provider.provider !== "aliyun-modelstudio") return "";
+      const pool = provider.modelPool || defaultAliyunModelPool;
+      const models = Array.isArray(pool.models) ? pool.models : [];
+      return `
+        <div class="wos-usage-panel" data-llm-model-pool="${escapeHTML(provider.id)}">
+          <div class="wos-usage-head"><strong>百炼模型池</strong><span class="small-text">官方额度优先，本地估算兜底</span></div>
+          <div class="small-text">默认 85%；达到 ${escapeHTML(`${Math.round(Number(pool.quotaSwitchRatio || 0.85) * 100)}%`)} 或连续失败 ${escapeHTML(pool.failureSwitchThreshold || 3)} 次后自动切换。</div>
+          <div class="llm-model-pool-list">
+            ${models.map(model => `
+              <label class="llm-model-pool-row">
+                <input type="checkbox" data-llm-pool-field="enabled" data-llm-pool-model="${escapeHTML(model.model)}" ${model.enabled !== false ? "checked" : ""}>
+                <span>${escapeHTML(model.model)}</span>
+                <input type="number" min="1" step="1" data-llm-pool-field="freeQuotaTokens" data-llm-pool-model="${escapeHTML(model.model)}" value="${escapeHTML(model.freeQuotaTokens || 1000000)}">
+              </label>
+            `).join("")}
+          </div>
+          <div class="small-text">重置按钮只重置 PaperHot 本地估算，不会恢复阿里云真实免费额度。</div>
+        </div>
+      `;
+    }
+
     function llmProviderBody(provider) {
       const modelPresets = Array.isArray(provider.modelPresets) ? provider.modelPresets : [];
       const reasoningOptions = ["auto", "off", "low", "medium", "high", "max", "custom"];
@@ -7346,6 +7466,7 @@
               ${reasoningOptions.map(option => `<button class="segment ${provider.reasoning === option ? "active" : ""}" data-llm-value="${option}">${escapeHTML({ auto: "自动", off: "关闭", low: "低", medium: "中", high: "高", max: "最大", custom: "自定义" }[option])}</button>`).join("")}
             </div>
           </label>
+          ${renderLlmModelPoolConfig(provider)}
           <div class="llm-test-result" data-llm-test-result="${escapeHTML(provider.id)}"></div>
           <div class="llm-provider-actions">
             <button class="ghost-btn" data-llm-test="${escapeHTML(provider.id)}">测试</button>
@@ -7509,6 +7630,18 @@
         const active = group.querySelector(".segment.active");
         if (active) next[group.getAttribute("data-llm-field")] = active.getAttribute("data-llm-value");
       });
+      if (provider.modelPool) {
+        const pool = JSON.parse(JSON.stringify(provider.modelPool));
+        const rows = new Map((pool.models || []).map(item => [item.model, { ...item }]));
+        body.querySelectorAll("[data-llm-pool-model]").forEach(input => {
+          const model = input.getAttribute("data-llm-pool-model");
+          const field = input.getAttribute("data-llm-pool-field");
+          const row = rows.get(model) || { model, enabled: true, freeQuotaTokens: 1000000 };
+          row[field] = input.type === "checkbox" ? input.checked : Number(input.value);
+          rows.set(model, row);
+        });
+        next.modelPool = { ...pool, models: [...rows.values()] };
+      }
       return next;
     }
 
