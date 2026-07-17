@@ -6,6 +6,7 @@ const path = require("node:path");
 const htmlFile = path.join(__dirname, "..", "public", "index.html");
 const logoFile = path.join(__dirname, "..", "public", "paperhot-logo.png");
 const serverFile = path.join(__dirname, "..", "server.cjs");
+const backendFile = path.join(__dirname, "..", "paperhot_backend.cjs");
 const {
   buildDiscoveryTaskContext,
   buildDiscoveryTaskDescriptor
@@ -195,11 +196,44 @@ test("all papers page supports combined filters and OR search", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /selectedAllPaperKeywords/);
   assert.match(html, /allPaperDateFilter/);
+  assert.match(html, /allCommonPaperFilters/);
   assert.match(html, /paperMatchesAllFilters/);
   assert.match(html, /splitSearchOrClauses/);
   assert.match(html, /\\s\+OR\\s\+/i);
-  assert.doesNotMatch(html, /data-all-filter-category/);
+  assert.match(html, /data-paper-common-category="all"/);
+  assert.match(html, /data-paper-common-stage="all"/);
   assert.match(html, /data-all-filter-keyword/);
+});
+
+test("paper list common filters use OR within groups and AND between groups", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const categorySource = readNamedFunction(html, "paperCategoryKeys", "paperCategoryLabels");
+  const filterSource = readNamedFunction(html, "paperMatchesCommonFilters", "paperSortValue");
+  const paperMatchesCommonFilters = new Function(`${categorySource}; ${filterSource}; return paperMatchesCommonFilters;`)();
+  const filters = { categories: new Set(["hardware", "classic"]), stages: new Set(["formal"]) };
+
+  assert.equal(paperMatchesCommonFilters({ categories: ["hardware"], publicationStage: "formal" }, filters), true);
+  assert.equal(paperMatchesCommonFilters({ categories: ["classic"], publicationStage: "preprint" }, filters), false);
+  assert.equal(paperMatchesCommonFilters({ categories: ["bio"], publicationStage: "formal" }, filters), false);
+});
+
+test("paper list sorting keeps unknown values last in both directions", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const dateSource = readNamedFunction(html, "paperDateValue", "paperDateKey");
+  const valueSource = readNamedFunction(html, "paperSortValue", "sortPapersByMode");
+  const sortSource = readNamedFunction(html, "sortPapersByMode", "allPaperTimeFilterMode");
+  const sortPapersByMode = new Function(`${dateSource}; ${valueSource}; ${sortSource}; return sortPapersByMode;`)();
+  const papers = [
+    { id: "unknown", citationCount: null, published: "" },
+    { id: "low", citationCount: 2, published: "2025-01" },
+    { id: "high", citationCount: 10, published: "2026-01-02" }
+  ];
+
+  assert.deepEqual(sortPapersByMode(papers, "citation", "asc").map(paper => paper.id), ["low", "high", "unknown"]);
+  assert.deepEqual(sortPapersByMode(papers, "citation", "desc").map(paper => paper.id), ["high", "low", "unknown"]);
+  assert.deepEqual(sortPapersByMode(papers, "published", "asc").map(paper => paper.id), ["low", "high", "unknown"]);
+  assert.match(html, /scope === "today"[\s\S]*sortPapersByMode\(list, todayPaperSortMode, todayPaperSortDirection\)/);
+  assert.match(html, /scope === "all"[\s\S]*sortPapersByMode\(list, allPaperSortMode, allPaperSortDirection\)/);
 });
 
 test("all papers page exposes sortable time groups", async () => {
@@ -218,7 +252,7 @@ test("all papers page exposes sortable time groups", async () => {
   assert.match(html, /最旧/);
 });
 
-test("all papers page moves archive actions to the hero and removes type chips from the side filter", async () => {
+test("all papers page keeps archive actions in the hero and exposes common side filters", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /function pageShell\(title, subtitle, body, side = "", heroActions = ""\)/);
   assert.match(html, /if \(normalized === "all"\) renderAll\(\)/);
@@ -226,7 +260,10 @@ test("all papers page moves archive actions to the hero and removes type chips f
   const sideFilterMatch = html.match(/function allPaperSideFilter\(\) \{[\s\S]*?\n    function toggleSetValue/);
   assert.ok(sideFilterMatch, "expected allPaperSideFilter function");
   assert.match(sideFilterMatch[0], /关注标签/);
-  assert.doesNotMatch(sideFilterMatch[0], /论文类型/);
+  assert.match(sideFilterMatch[0], /论文类型/);
+  assert.match(sideFilterMatch[0], /发表阶段/);
+  assert.match(sideFilterMatch[0], /引用量/);
+  assert.match(sideFilterMatch[0], /发表日期/);
 });
 
 test("all papers clear unstarred archive uses one confirmed request and preserves state on failure", async () => {
@@ -843,7 +880,9 @@ test("saved papers are visually muted outside the favorites page", async () => {
 
 test("mobile paper timeline stacks its timestamp above the card", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
+  const tabletCss = html.slice(html.indexOf("@media (max-width: 820px)"), html.indexOf("@media (max-width: 420px)"));
   const mobileCss = html.slice(html.indexOf("@media (max-width: 420px)"), html.indexOf("</style>"));
+  assert.match(tabletCss, /\.simple-grid\s*>\s*aside\s*\{[^}]*order:\s*-1/);
   assert.match(mobileCss, /\.timeline-item\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
   assert.match(mobileCss, /\.timeline-sort-button\s*\{[^}]*grid-template-columns:/);
 });
@@ -1218,7 +1257,10 @@ test("today running task freezes its request and cannot replace current prefligh
 });
 
 test("today results use fixed source tabs and automatic 15-paper batches", async () => {
-  const html = await fs.readFile(htmlFile, "utf8");
+  const [html, backendSource] = await Promise.all([
+    fs.readFile(htmlFile, "utf8"),
+    fs.readFile(backendFile, "utf8")
+  ]);
   assert.match(html, /Web of Science[\s\S]*Google Scholar[\s\S]*arXiv \/ bioRxiv[\s\S]*所有信源/);
   assert.match(html, /const todayPaperBatchSize = 15/);
   assert.match(html, /const todayLoadedCounts = \{ webofscience: 15, googlescholar: 15, preprints: 15, all: 15 \}/);
@@ -1272,8 +1314,13 @@ test("today results use fixed source tabs and automatic 15-paper batches", async
   const todayFilterValueMatches = new Function(`${sourceKeySource}; ${matchSource}; return todayFilterValueMatches;`)();
   assert.equal(todayFilterValueMatches({ citationCount: null }, "citation", "zero"), false);
   assert.equal(todayFilterValueMatches({ citationCount: 0 }, "citation", "zero"), true);
-  assert.equal(todayFilterValueMatches({ publishedPrecision: "month" }, "precision", "month"), true);
-  assert.match(html, /\["month", "精确到月份"\]/);
+  assert.doesNotMatch(html, /label: "日期精度"/);
+  assert.doesNotMatch(html, /label: "日期完整度"/);
+  assert.doesNotMatch(html, /data-today-filter-key="precision"/);
+  assert.match(backendSource, /publishedPrecision/);
+  assert.match(html, /data-paper-common-category="today"/);
+  assert.match(html, /data-paper-common-stage="today"/);
+  assert.match(html, /data-today-paper-sort/);
 });
 
 test("today result tab selects once, preserves manual choice, and resets for a new result set", async () => {

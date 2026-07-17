@@ -151,6 +151,8 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 - “继续抓取”“从头重抓”“开始新抓取”只依据后端返回的 canonical 任务指纹和可恢复状态显示，不根据页面已显示论文数猜测断点。预检失败时保留原结果和上一次断点信息，并禁用新抓取，避免把未确认状态破坏性降级为 `new`。
 - 结果按 Web of Science、Google Scholar、arXiv / bioRxiv、所有信源四个标签查看；每个标签初始显示 15 篇，接近底部后自动加载下一批 15 篇。
+- 右侧悬浮窗可按六类论文类型、正式发表 / 预印本筛选，并按引用量或发表日期升降序排列；同组多选为 OR，不同组与当前信源标签、信源专属筛选和搜索条件之间为 AND，未知引用量或日期始终排在末尾。
+- Web of Science 引用量、预印本平台和版本状态等信源专属筛选继续保留；日期精度筛选项已移除，但底层日期精度数据和日期处理不变。
 - 论文卡标题右侧显示 WoS/Scholar 引用量；预印本显示 arXiv 或 bioRxiv。卡片同时显示最多 3 位作者和作者总数，不重复显示已经由右侧指标表达的信源标签。
 - 信源分页失败会在工作台下方显示失败页和“重试失败页”，相同 canonical 条件下自动以 `resume` 继续；AI 总结失败保留论文卡片，并在对应卡片显示单篇 LLM 重试。
 - 即使首次抓取在生成成功 session 前失败，页面也会按任务指纹把最小失败状态保存在浏览器本地，切换历史结果或刷新后仍可恢复；任务无错误后自动清除。该短期状态不进入本地数据 ZIP。
@@ -173,11 +175,13 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 - 默认显示 `data/papers/archive.json` 中的论文。
 - 搜索框支持普通关键词，也支持类似 `A OR B` 的任意匹配。
-- 右侧标签筛选互相之间是 OR 关系。
-- 搜索、标签、抓取时间、发表时间、排序条件之间是 AND 关系。
+- 右侧悬浮窗支持全部六类论文类型和正式发表 / 预印本筛选；同组多选为 OR，不同筛选组之间为 AND。
+- 搜索、关注标签、论文类型、发表阶段、时间范围和排序条件之间是 AND 关系。
+- 右侧可按引用量或发表日期升降序排列，未知引用量或日期始终排在末尾。
 - 抓取时间和发表时间可以点击切换正序或倒序。
 - 时间节点用于快速筛选某一天、某个月或某一年范围的论文。
 - 每次按需加载最多 20 篇，接近底部后继续加载下一批。
+- 右侧筛选和排序均为临时页面状态，不写入论文库、用户配置或本地数据 ZIP。
 
 论文卡片操作：
 
@@ -393,6 +397,7 @@ flowchart TD
 | `docs/superpowers/plans/2026-07-15-complete-abstract-consensus.md` | 完整摘要单源放行、Firecrawl 配置与无完整摘要禁用 LLM 的 TDD 实施计划 |
 | `docs/superpowers/plans/2026-07-16-academic-api-contact-email.md` | 学术 API 联系邮箱、Crossref 请求身份与敏感配置备份的 TDD 实施计划 |
 | `docs/superpowers/plans/2026-07-16-openalex-discovery-enrichment.md` | OpenAlex 检索、自动字段补全、配置与验证的分步实施计划 |
+| `docs/superpowers/plans/2026-07-16-paper-list-filter-sort.md` | 今日论文与全部论文分类、发表阶段和排序功能的 TDD 实施计划 |
 | `docs/solutions/runtime-errors/paperhot-service-restart-data-permission.md` | 固定端口旧进程与受限 Node 导致旧代码、断点 `EPERM` 的诊断和重启验收 |
 | `.superpowers/sdd/task-2-report.md` | Task 2 多信源元数据与正式版/预印本关联的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-3-report.md` | Task 3 近期抓取游标与 WoS 本地请求用量的实现、TDD 和验证报告 |

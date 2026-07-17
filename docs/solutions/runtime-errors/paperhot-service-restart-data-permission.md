@@ -36,6 +36,7 @@ tags:
 ## What Didn't Work
 
 - 只请求一个接口并看到 HTTP 200：这不能证明监听端口的是新进程，也不能证明数据目录可写。
+- 使用 `Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 50751` 查旧进程：如果 Node 监听在 `0.0.0.0` 或 `::`，该过滤会错误返回空结果，使后续启动仍连接旧 PID。
 - 在同一个受限执行环境里反复 `Start-Process node`：新 Node 会继承相同权限。
 - 把读取失败当作空断点：[`readJsonFile()`](../../../paperhot_backend.cjs) 会返回 fallback，后续写入仍会失败，且可能掩盖原始权限问题。
 
@@ -46,11 +47,13 @@ tags:
 3. 同时验证新 PID、启动时间、HTTP 和断点文件写权限：
 
 ```powershell
-netstat -ano | Select-String ':50751'
+Get-NetTCPConnection -LocalPort 50751 -State Listen
 Get-Process -Id <PID> | Select-Object Id, StartTime, Path
 Invoke-WebRequest -UseBasicParsing http://127.0.0.1:50751/api/fetch/log
 node -e "const fs=require('fs');const f='data/papers/recent-fetch-cursors.json';const fd=fs.openSync(f,'r+');fs.closeSync(fd);console.log('cursor writable')"
 ```
+
+监听查询只按端口和状态筛选，再读取 `OwningProcess`；不要预先限定本地地址。
 
 `r+` 只验证既有文件可以读写，不修改内容。若断点文件尚不存在，应在 `data/papers` 创建临时探针文件、验证后立即删除。
 

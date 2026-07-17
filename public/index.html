@@ -1984,6 +1984,7 @@
       .app { grid-template-columns: 1fr; }
       .sidebar { display: none; }
       .main { padding: 14px; }
+      .simple-grid > aside { order: -1; }
       .hero-top { flex-direction: column; }
       .today-query-grid { grid-template-columns: 1fr; }
       .today-fetch-actions { grid-column: auto; justify-content: stretch; }
@@ -2160,9 +2161,22 @@
     const configHTML = mainContent.innerHTML;
     let allPaperSortMode = "fetched";
     let allPaperSortDirection = "desc";
-    const timelineSortDirections = { today: "desc", favorites: "desc" };
+    const timelineSortDirections = { favorites: "desc" };
     let allPaperDateFilter = "all";
     const selectedAllPaperKeywords = new Set();
+    const paperCategoryFilterOptions = [
+      ["classic", "偏传统算法"],
+      ["neural", "带有神经网络算法"],
+      ["bio", "偏生物结果"],
+      ["hardware", "偏硬件创新"],
+      ["theory", "偏理论创新"],
+      ["review", "综述"]
+    ];
+    const publicationStageFilterOptions = [["formal", "正式发表"], ["preprint", "预印本"]];
+    const allCommonPaperFilters = { categories: new Set(), stages: new Set() };
+    const todayCommonPaperFilters = { categories: new Set(), stages: new Set() };
+    let todayPaperSortMode = "published";
+    let todayPaperSortDirection = "desc";
     const samplePapers = [
       {
         id: "p1",
@@ -2240,8 +2254,7 @@
         { key: "stage", label: "发表阶段", options: [["formal", "正式发表"], ["preprint", "预印本"]] }
       ],
       googlescholar: [
-        { key: "citation", label: "Scholar 引用量", options: [["10plus", "10 次以上"], ["1to9", "1-9 次"], ["zero", "尚未引用"]] },
-        { key: "precision", label: "日期精度", options: [["day", "精确日期"], ["month", "精确到月份"], ["year", "仅年份"], ["unknown", "日期待确认"]] }
+        { key: "citation", label: "Scholar 引用量", options: [["10plus", "10 次以上"], ["1to9", "1-9 次"], ["zero", "尚未引用"]] }
       ],
       preprints: [
         { key: "source", label: "预印本平台", options: [["arxiv", "arXiv"], ["biorxiv", "bioRxiv"]] },
@@ -2249,8 +2262,7 @@
       ],
       all: [
         { key: "source", label: "抓取信源", options: [["webofscience", "Web of Science"], ["googlescholar", "Google Scholar"], ["arxiv", "arXiv"], ["biorxiv", "bioRxiv"], ["semanticscholar", "Semantic Scholar"]] },
-        { key: "stage", label: "发表阶段", options: [["formal", "正式发表"], ["preprint", "预印本"]] },
-        { key: "precision", label: "日期完整度", options: [["day", "精确日期"], ["month", "精确到月份"], ["year", "仅年份"], ["unknown", "日期待确认"]] }
+        { key: "stage", label: "发表阶段", options: [["formal", "正式发表"], ["preprint", "预印本"]] }
       ]
     };
     let todaySearchMode = "direction";
@@ -2525,7 +2537,6 @@
     function todayFilterValueMatches(paper, key, value) {
       if (key === "source") return todaySourceKeyForPaper(paper) === value;
       if (key === "stage") return String(paper.publicationStage || "formal") === value;
-      if (key === "precision") return String(paper.publishedPrecision || "unknown") === value;
       if (key === "version") return value === "linked" ? Boolean(paper.relatedVersions?.length) : !paper.relatedVersions?.length;
       if (key === "citation") {
         if (paper.citationCount === null || paper.citationCount === undefined || paper.citationCount === "") return false;
@@ -3301,6 +3312,7 @@
 
     function paperTimelineSortDirection(scope) {
       if (scope === "all") return allPaperSortDirection;
+      if (scope === "today") return todayPaperSortDirection;
       return timelineSortDirections[scope] || "desc";
     }
 
@@ -3310,6 +3322,8 @@
     }
 
     function sortPaperTimelinePapers(list, scope) {
+      if (scope === "today") return sortPapersByMode(list, todayPaperSortMode, todayPaperSortDirection);
+      if (scope === "all") return sortPapersByMode(list, allPaperSortMode, allPaperSortDirection);
       const direction = paperTimelineSortDirection(scope) === "asc" ? 1 : -1;
       return list.slice().sort((a, b) => {
         const left = paperTimelineSortValue(a, scope);
@@ -3469,6 +3483,41 @@
 
     function paperCategoryLabels(paper) {
       return Array.isArray(paper.categoryLabels) && paper.categoryLabels.length ? paper.categoryLabels : [paper.categoryLabel].filter(Boolean);
+    }
+
+    function paperMatchesCommonFilters(paper, filters) {
+      const categories = paperCategoryKeys(paper);
+      const stage = String(paper.publicationStage || "formal");
+      return (!filters.categories.size || categories.some(category => filters.categories.has(category)))
+        && (!filters.stages.size || filters.stages.has(stage));
+    }
+
+    function paperSortValue(paper, mode) {
+      if (mode === "citation") {
+        if (paper.citationCount === null || paper.citationCount === undefined || paper.citationCount === "") {
+          return { known: false, value: 0 };
+        }
+        const value = Number(paper.citationCount);
+        return Number.isFinite(value) ? { known: true, value } : { known: false, value: 0 };
+      }
+      const value = Date.parse(paperDateValue(paper, mode));
+      return Number.isNaN(value) ? { known: false, value: 0 } : { known: true, value };
+    }
+
+    function sortPapersByMode(list, mode, direction) {
+      const multiplier = direction === "asc" ? 1 : -1;
+      return list
+        .map((paper, index) => ({ paper, index, sort: paperSortValue(paper, mode) }))
+        .sort((left, right) => {
+          if (left.sort.known !== right.sort.known) return left.sort.known ? -1 : 1;
+          if (left.sort.value !== right.sort.value) return multiplier * (left.sort.value - right.sort.value);
+          return left.index - right.index;
+        })
+        .map(item => item.paper);
+    }
+
+    function allPaperTimeFilterMode() {
+      return allPaperSortMode === "published" ? "published" : "fetched";
     }
 
     function paperPublishedDoiControl(paper, publishedLabel) {
@@ -3721,7 +3770,7 @@
       return buckets;
     }
 
-    function allPaperTimeBucketKey(paper, mode = allPaperSortMode) {
+    function allPaperTimeBucketKey(paper, mode = allPaperTimeFilterMode()) {
       if (mode === "published") {
         const year = paperPublishedYear(paper);
         if (!year) return "unknown";
@@ -3737,7 +3786,7 @@
       return fetchedTimeBucketKey(paper);
     }
 
-    function allPaperTimeBuckets(list, mode = allPaperSortMode) {
+    function allPaperTimeBuckets(list, mode = allPaperTimeFilterMode()) {
       const buckets = new Map();
       list.forEach(paper => {
         const key = allPaperTimeBucketKey(paper, mode);
@@ -3760,24 +3809,18 @@
     }
 
     function matchesAllPaperDateFilter(paper) {
-      return allPaperDateFilter === "all" || allPaperTimeBucketKey(paper) === allPaperDateFilter;
+      return allPaperDateFilter === "all" || allPaperTimeBucketKey(paper, allPaperTimeFilterMode()) === allPaperDateFilter;
     }
 
     function paperMatchesAllFilters(paper) {
       return matchesSelectedAllPaperKeywords(paper)
+        && paperMatchesCommonFilters(paper, allCommonPaperFilters)
         && matchesAllPaperDateFilter(paper)
         && paperMatchesSearchQuery(paper, allPaperSearchQuery);
     }
 
-    function paperTimestamp(value) {
-      const time = Date.parse(value || "");
-      return Number.isNaN(time) ? 0 : time;
-    }
-
     function sortAllPapers(list) {
-      const field = allPaperSortMode === "published" ? "published" : "fetchedAt";
-      const direction = allPaperSortDirection === "asc" ? 1 : -1;
-      return [...list].sort((a, b) => direction * (paperTimestamp(a[field] || a.date) - paperTimestamp(b[field] || b.date)));
+      return sortPapersByMode(list, allPaperSortMode, allPaperSortDirection);
     }
 
     function sortDirectionLabel(mode) {
@@ -3874,10 +3917,46 @@
           `).join("")
         : `<span class="small-text">还没有启用的关注领域，请到“领域配置”中添加。</span>`;
       return `
-        <h2>全部论文筛选</h2>
+        <div class="panel-head">
+          <h2>全部论文筛选</h2>
+          <button class="edit-link" type="button" data-all-filter-clear>清空</button>
+        </div>
         <div class="all-filter-section">
           <div class="all-filter-title">关注标签</div>
           <div class="token-row">${keywordChips}</div>
+        </div>
+        <div class="all-filter-section">
+          <div class="all-filter-title">论文类型</div>
+          <div class="today-filter-group">
+            ${paperCategoryFilterOptions.map(([value, label]) => `
+              <label class="today-filter-option">
+                <input type="checkbox" data-paper-common-category="all" value="${value}" ${allCommonPaperFilters.categories.has(value) ? "checked" : ""}>
+                ${escapeHTML(label)}
+              </label>
+            `).join("")}
+          </div>
+        </div>
+        <div class="all-filter-section">
+          <div class="all-filter-title">发表阶段</div>
+          <div class="today-filter-group">
+            ${publicationStageFilterOptions.map(([value, label]) => `
+              <label class="today-filter-option">
+                <input type="checkbox" data-paper-common-stage="all" value="${value}" ${allCommonPaperFilters.stages.has(value) ? "checked" : ""}>
+                ${escapeHTML(label)}
+              </label>
+            `).join("")}
+          </div>
+        </div>
+        <div class="all-filter-section">
+          <div class="all-filter-title">排序</div>
+          <div class="token-row">
+            <button class="category-btn ${allPaperSortMode === "citation" ? "active" : ""}" type="button" data-paper-sort="citation">引用量</button>
+            <button class="category-btn ${allPaperSortMode === "published" ? "active" : ""}" type="button" data-paper-sort="published">发表日期</button>
+          </div>
+          <div class="token-row">
+            <button class="category-btn ${allPaperSortDirection === "asc" ? "active" : ""}" type="button" data-paper-sort-direction="asc">升序</button>
+            <button class="category-btn ${allPaperSortDirection === "desc" ? "active" : ""}" type="button" data-paper-sort-direction="desc">降序</button>
+          </div>
         </div>
       `;
     }
@@ -3933,6 +4012,34 @@
           resetPaperVisibleLimit("all");
           renderAll();
         });
+      });
+      document.querySelectorAll('[data-paper-common-category="all"]').forEach(input => {
+        input.addEventListener("change", () => {
+          toggleSetValue(allCommonPaperFilters.categories, input.value);
+          resetPaperVisibleLimit("all");
+          renderAll();
+        });
+      });
+      document.querySelectorAll('[data-paper-common-stage="all"]').forEach(input => {
+        input.addEventListener("change", () => {
+          toggleSetValue(allCommonPaperFilters.stages, input.value);
+          resetPaperVisibleLimit("all");
+          renderAll();
+        });
+      });
+      document.querySelectorAll("[data-paper-sort-direction]").forEach(button => {
+        button.addEventListener("click", () => {
+          allPaperSortDirection = button.getAttribute("data-paper-sort-direction") === "asc" ? "asc" : "desc";
+          resetPaperVisibleLimit("all");
+          renderAll();
+        });
+      });
+      document.querySelector("[data-all-filter-clear]")?.addEventListener("click", () => {
+        selectedAllPaperKeywords.clear();
+        allCommonPaperFilters.categories.clear();
+        allCommonPaperFilters.stages.clear();
+        resetPaperVisibleLimit("all");
+        renderAll();
       });
     }
 
@@ -3990,6 +4097,7 @@
         button.addEventListener("click", () => {
           const scope = button.getAttribute("data-paper-timeline-sort") || "";
           if (scope === "all") allPaperSortDirection = allPaperSortDirection === "asc" ? "desc" : "asc";
+          else if (scope === "today") todayPaperSortDirection = todayPaperSortDirection === "asc" ? "desc" : "asc";
           else timelineSortDirections[scope] = paperTimelineSortDirection(scope) === "asc" ? "desc" : "asc";
           if (scope === "today") resetTodayLoadedCount();
           else resetPaperVisibleLimit(scope);
@@ -4392,6 +4500,35 @@
               `).join("")}
             </div>
           `).join("")}
+          <div class="today-filter-group">
+            <h3>论文类型</h3>
+            ${paperCategoryFilterOptions.map(([value, label]) => `
+              <label class="today-filter-option">
+                <input type="checkbox" data-paper-common-category="today" value="${value}" ${todayCommonPaperFilters.categories.has(value) ? "checked" : ""}>
+                ${escapeHTML(label)}
+              </label>
+            `).join("")}
+          </div>
+          <div class="today-filter-group">
+            <h3>发表阶段</h3>
+            ${publicationStageFilterOptions.map(([value, label]) => `
+              <label class="today-filter-option">
+                <input type="checkbox" data-paper-common-stage="today" value="${value}" ${todayCommonPaperFilters.stages.has(value) ? "checked" : ""}>
+                ${escapeHTML(label)}
+              </label>
+            `).join("")}
+          </div>
+          <div class="today-filter-group">
+            <h3>排序</h3>
+            <div class="token-row">
+              <button class="category-btn ${todayPaperSortMode === "citation" ? "active" : ""}" type="button" data-today-paper-sort="citation">引用量</button>
+              <button class="category-btn ${todayPaperSortMode === "published" ? "active" : ""}" type="button" data-today-paper-sort="published">发表日期</button>
+            </div>
+            <div class="token-row">
+              <button class="category-btn ${todayPaperSortDirection === "asc" ? "active" : ""}" type="button" data-today-paper-sort-direction="asc">升序</button>
+              <button class="category-btn ${todayPaperSortDirection === "desc" ? "active" : ""}" type="button" data-today-paper-sort-direction="desc">降序</button>
+            </div>
+          </div>
         </div>
       `;
     }
@@ -4433,6 +4570,7 @@
       const selections = todayFilterSelections[todaySourceTab] || {};
       return sourcePapers
         .filter(paper => todayPaperMatchesFilters(paper, selections))
+        .filter(paper => paperMatchesCommonFilters(paper, todayCommonPaperFilters))
         .filter(paper => paperMatchesSearchQuery(paper, todayPaperSearchQuery));
     }
 
@@ -5306,8 +5444,38 @@
           renderToday();
         });
       });
+      document.querySelectorAll('[data-paper-common-category="today"]').forEach(input => {
+        input.addEventListener("change", () => {
+          toggleSetValue(todayCommonPaperFilters.categories, input.value);
+          resetTodayLoadedCount(todaySourceTab);
+          renderToday();
+        });
+      });
+      document.querySelectorAll('[data-paper-common-stage="today"]').forEach(input => {
+        input.addEventListener("change", () => {
+          toggleSetValue(todayCommonPaperFilters.stages, input.value);
+          resetTodayLoadedCount(todaySourceTab);
+          renderToday();
+        });
+      });
+      document.querySelectorAll("[data-today-paper-sort]").forEach(button => {
+        button.addEventListener("click", () => {
+          todayPaperSortMode = button.getAttribute("data-today-paper-sort") === "citation" ? "citation" : "published";
+          resetTodayLoadedCount(todaySourceTab);
+          renderToday();
+        });
+      });
+      document.querySelectorAll("[data-today-paper-sort-direction]").forEach(button => {
+        button.addEventListener("click", () => {
+          todayPaperSortDirection = button.getAttribute("data-today-paper-sort-direction") === "asc" ? "asc" : "desc";
+          resetTodayLoadedCount(todaySourceTab);
+          renderToday();
+        });
+      });
       document.querySelector("[data-today-filter-clear]")?.addEventListener("click", () => {
         todayFilterSelections[todaySourceTab] = {};
+        todayCommonPaperFilters.categories.clear();
+        todayCommonPaperFilters.stages.clear();
         resetTodayLoadedCount(todaySourceTab);
         renderToday();
       });
