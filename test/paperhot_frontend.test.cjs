@@ -502,13 +502,13 @@ test("aliyun model pool manager calls per-model test and update endpoints", asyn
   assert.match(html, /updateOneLlmPoolModel/);
 });
 
-test("aliyun model pool mutations synchronize provider state for later config saves", async () => {
+test("aliyun model pool manager synchronizes an inactive provider state for later config saves", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   const syncSource = readNamedFunction(html, "syncLlmModelPoolStatus", "updateOneLlmPoolModel");
   const updateSource = readNamedFunction(html, "updateOneLlmPoolModel", "testOneLlmPoolModel");
   const testSource = readNamedFunction(html, "testOneLlmPoolModel", "loadIntegrationSecrets");
-  assert.match(updateSource, /syncLlmModelPoolStatus\(payload\.status \|\| null\)/);
-  assert.match(testSource, /syncLlmModelPoolStatus\(payload\.status \|\| null\)/);
+  assert.match(updateSource, /syncLlmModelPoolStatus\(payload\.status \|\| null, providerId\)/);
+  assert.match(testSource, /syncLlmModelPoolStatus\(payload\.status \|\| null, providerId\)/);
 
   const modelPool = {
     quotaMode: "official-first",
@@ -522,10 +522,10 @@ test("aliyun model pool mutations synchronize provider state for later config sa
     const defaultAliyunModelPool = {};
     let integrationState = {
       llm: {
-        activeProviderId: "aliyun-coding",
+        activeProviderId: "other",
         providers: [
-          { id: "aliyun-coding", provider: "aliyun-modelstudio", modelPool: ${JSON.stringify(modelPool)} },
-          { id: "other", provider: "custom", modelPool: { models: [{ model: "unchanged" }] } }
+          { id: "other", provider: "custom", modelPool: { models: [{ model: "unchanged" }] } },
+          { id: "aliyun-coding", provider: "aliyun-modelstudio", modelPool: ${JSON.stringify(modelPool)} }
         ]
       }
     };
@@ -539,13 +539,13 @@ test("aliyun model pool mutations synchronize provider state for later config sa
       { model: "qwen-hidden", displayName: "Qwen Hidden", family: "Qwen", enabled: true, freeQuotaTokens: 2000000, priority: 20 }
     ]
   };
-  result.syncLlmModelPoolStatus(status);
+  result.syncLlmModelPoolStatus(status, "aliyun-coding");
   assert.equal(result.status(), status);
-  assert.deepEqual(result.state().llm.providers[0].modelPool.models.map(model => [model.model, model.enabled]), [
+  assert.deepEqual(result.state().llm.providers[1].modelPool.models.map(model => [model.model, model.enabled]), [
     ["qwen-plus", true],
     ["qwen-hidden", true]
   ]);
-  assert.deepEqual(result.state().llm.providers[1].modelPool, { models: [{ model: "unchanged" }] });
+  assert.deepEqual(result.state().llm.providers[0].modelPool, { models: [{ model: "unchanged" }] });
 });
 
 test("OpenAlex config separates discovery from automatic field enrichment", async () => {

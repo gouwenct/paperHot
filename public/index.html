@@ -7109,10 +7109,9 @@
       }
     }
 
-    function syncLlmModelPoolStatus(status) {
+    function syncLlmModelPoolStatus(status, providerId = integrationState.llm.activeProviderId) {
       llmModelPoolStatus = status || null;
       if (!Array.isArray(status?.models)) return;
-      const activeProviderId = integrationState.llm.activeProviderId;
       const models = status.models.map(model => ({
         model: model.model,
         displayName: model.displayName,
@@ -7128,7 +7127,7 @@
         llm: {
           ...integrationState.llm,
           providers: (integrationState.llm.providers || []).map(provider => {
-            if (provider.id !== activeProviderId || provider.provider !== "aliyun-modelstudio") return provider;
+            if (provider.id !== providerId || provider.provider !== "aliyun-modelstudio") return provider;
             return {
               ...provider,
               modelPool: {
@@ -7145,7 +7144,7 @@
       };
     }
 
-    async function updateOneLlmPoolModel(model, patch) {
+    async function updateOneLlmPoolModel(providerId, model, patch) {
       const response = await fetch("/api/integrations/llm/model-pool/model", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -7153,11 +7152,11 @@
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
-      syncLlmModelPoolStatus(payload.status || null);
+      syncLlmModelPoolStatus(payload.status || null, providerId);
       llmModelPoolMessage = `${model} 已更新`;
     }
 
-    async function testOneLlmPoolModel(model) {
+    async function testOneLlmPoolModel(providerId, model) {
       llmModelPoolMessage = `正在测试 ${model}...`;
       renderIntegrationConfig();
       bindIntegrationAutosave();
@@ -7168,7 +7167,7 @@
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
-      syncLlmModelPoolStatus(payload.status || null);
+      syncLlmModelPoolStatus(payload.status || null, providerId);
       llmModelPoolMessage = payload.ok ? `${model} 测试成功，已自动启用` : `${model} 测试失败：${payload.error || "模型未响应"}`;
     }
 
@@ -7547,7 +7546,7 @@
       })) : [];
     }
 
-    function llmModelPoolCard(model) {
+    function llmModelPoolCard(providerId, model) {
       const percent = Math.max(0, Math.min(100, Math.round(Number(model.usageRatio || 0) * 100)));
       return `
         <article class="llm-pool-card ${model.greyed ? "greyed" : ""}" data-llm-pool-card="${escapeHTML(model.model)}">
@@ -7562,8 +7561,8 @@
           <div class="small-text">剩余 ${formatToken(model.estimatedRemainingTokens || 0)} / 已用 ${formatToken(model.localUsedTokens || 0)}</div>
           <div class="small-text">${escapeHTML(model.statusLabel || "额度充足")}${model.failureHint ? ` · ${escapeHTML(model.failureHint || "上次因连续失败切换")}` : ""}</div>
           <div class="llm-pool-card-actions">
-            <button class="ghost-btn" type="button" data-llm-pool-enable-model="${escapeHTML(model.model)}" data-llm-pool-selectable="${model.selectable}" disabled=${model.selectable ? "" : "disabled"}>${model.enabled ? "已启用" : "启用"}</button>
-            <button class="ghost-btn" type="button" data-llm-pool-test-model="${escapeHTML(model.model)}">测试</button>
+            <button class="ghost-btn" type="button" data-llm-pool-enable-model="${escapeHTML(model.model)}" data-llm-pool-provider="${escapeHTML(providerId)}" data-llm-pool-selectable="${model.selectable}" disabled=${model.selectable ? "" : "disabled"}>${model.enabled ? "已启用" : "启用"}</button>
+            <button class="ghost-btn" type="button" data-llm-pool-test-model="${escapeHTML(model.model)}" data-llm-pool-provider="${escapeHTML(providerId)}">测试</button>
           </div>
         </article>
       `;
@@ -7584,12 +7583,12 @@
               <div class="small-text">5 x 5；只显示兼容文本对话的模型。额度条是 PaperHot 本地估算。</div>
             </div>
             <div class="llm-pool-pager">
-              <button class="ghost-btn" type="button" data-llm-pool-page="prev" ${llmModelPoolPage <= 0 ? "disabled" : ""}>上一页</button>
+              <button class="ghost-btn" type="button" data-llm-pool-page="prev" data-llm-pool-provider="${escapeHTML(provider.id)}" ${llmModelPoolPage <= 0 ? "disabled" : ""}>上一页</button>
               <span class="small-text">${llmModelPoolPage + 1} / ${pageCount}</span>
-              <button class="ghost-btn" type="button" data-llm-pool-page="next" ${llmModelPoolPage >= pageCount - 1 ? "disabled" : ""}>下一页</button>
+              <button class="ghost-btn" type="button" data-llm-pool-page="next" data-llm-pool-provider="${escapeHTML(provider.id)}" ${llmModelPoolPage >= pageCount - 1 ? "disabled" : ""}>下一页</button>
             </div>
           </div>
-          <div class="llm-pool-grid">${pageRows.map(llmModelPoolCard).join("")}</div>
+          <div class="llm-pool-grid">${pageRows.map(model => llmModelPoolCard(provider.id, model)).join("")}</div>
           <div class="small-text">${escapeHTML(llmModelPoolMessage || "测试成功会自动启用模型；低于 15% 剩余额度或连续失败后会灰掉并跳过。")}</div>
         </div>
       `;
@@ -8190,9 +8189,10 @@
         button.disabled = button.getAttribute("data-llm-pool-selectable") !== "true";
         button.addEventListener("click", async () => {
           const model = button.getAttribute("data-llm-pool-enable-model");
+          const providerId = button.getAttribute("data-llm-pool-provider");
           button.disabled = true;
           try {
-            await updateOneLlmPoolModel(model, { enabled: true });
+            await updateOneLlmPoolModel(providerId, model, { enabled: true });
           } catch (error) {
             llmModelPoolMessage = `启用失败：${error.message}`;
           }
@@ -8203,9 +8203,10 @@
       document.querySelectorAll("[data-llm-pool-test-model]").forEach(button => {
         button.addEventListener("click", async () => {
           const model = button.getAttribute("data-llm-pool-test-model");
+          const providerId = button.getAttribute("data-llm-pool-provider");
           button.disabled = true;
           try {
-            await testOneLlmPoolModel(model);
+            await testOneLlmPoolModel(providerId, model);
           } catch (error) {
             llmModelPoolMessage = `测试失败：${error.message}`;
           }
