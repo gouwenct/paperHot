@@ -2883,6 +2883,32 @@ test("llm model pool status greys out near-limit exhausted failing and disabled 
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
+test("llm model pool status keeps default enabled models enabled with a partial saved pool", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-partial-registry-"));
+  const llmConfigFile = path.join(tempDir, "llm.json");
+  await fs.writeFile(llmConfigFile, JSON.stringify({
+    enabled: true,
+    activeProviderId: "aliyun-coding",
+    providers: [{
+      id: "aliyun-coding",
+      provider: "aliyun-modelstudio",
+      enabled: true,
+      model: "qwen-plus",
+      modelPool: {
+        models: [{ model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 }]
+      }
+    }]
+  }), "utf8");
+
+  const status = await readLlmModelPoolStatus({ dataDir: tempDir, llmConfigFile });
+  const byModel = new Map(status.models.map(item => [item.model, item]));
+  assert.equal(byModel.get("qwen3-coder-plus").enabled, true);
+  assert.equal(byModel.get("qwen3-coder-plus").status, "available");
+  assert.equal(byModel.get("qwen-max").enabled, false);
+  assert.equal(byModel.get("qwen-max").status, "disabled");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
 test("aliyun llm pool selection skips greyed failing disabled and near-limit models", () => {
   const pool = cleanLlmModelPool({
     quotaSwitchRatio: 0.85,
@@ -2940,6 +2966,43 @@ test("keeps a shared credential failure from rotating through the pool", () => {
   assert.equal(isRetryableLlmModelFailure(new Error("LLM 摘要失败：HTTP 500")), true);
   assert.equal(isRetryableLlmModelFailure(new Error("LLM 摘要失败：HTTP 401")), false);
   assert.equal(isRetryableLlmModelFailure(new Error("LLM API 密钥未填写")), false);
+});
+
+test("aliyun llm pool rejects when every configured model is unavailable", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-no-selectable-"));
+  await writeLlmModelPoolState({
+    models: {
+      "qwen-plus": { model: "qwen-plus", localUsedTokens: 850000, status: "near_limit" },
+      "qwen-flash": { model: "qwen-flash", localUsedTokens: 1000000, status: "exhausted" }
+    }
+  }, tempDir);
+  let calls = 0;
+  await assert.rejects(callConfiguredLlmWithPool({
+    dataDir: tempDir,
+    paper: { title: "SIM paper", summary: "Complete abstract text for testing." },
+    userBackground: "SIM",
+    config: {
+      enabled: true,
+      provider: "aliyun-modelstudio",
+      apiMode: "openai",
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "test",
+      model: "qwen-plus",
+      modelPool: {
+        quotaSwitchRatio: 0.85,
+        models: [
+          { model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 },
+          { model: "qwen-flash", enabled: true, freeQuotaTokens: 1000000, priority: 20 }
+        ]
+      }
+    },
+    fetchImpl: async () => {
+      calls += 1;
+      throw new Error("request should not be sent");
+    }
+  }), /模型池中没有可用模型/);
+  assert.equal(calls, 0);
+  await fs.rm(tempDir, { recursive: true, force: true });
 });
 
 test("aliyun llm pool switches after local quota threshold and logs the actual model", async () => {

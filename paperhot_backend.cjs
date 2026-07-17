@@ -191,7 +191,7 @@ const ALIYUN_TEXT_MODEL_REGISTRY = [
   model,
   displayName,
   family,
-  enabled: index < DEFAULT_ALIYUN_MODEL_POOL_MODELS.length,
+  enabled: DEFAULT_ALIYUN_MODEL_POOL_MODELS.includes(model),
   freeQuotaTokens: 1000000,
   priority: (index + 1) * 10,
   source: "aliyun-modelstudio-text-generation",
@@ -4242,7 +4242,7 @@ async function callConfiguredLlmWithPool({ paper, userBackground, config, fetchI
   const state = await readLlmModelPoolState(dataDir);
   const attempted = new Set();
   const selected = selectLlmPoolModel({ pool, state, attempted });
-  if (!selected) return callConfiguredLlm({ paper, userBackground, config, fetchImpl });
+  if (!selected) throw new Error("LLM 模型池中没有可用模型，请重置状态或启用其他模型");
   return callConfiguredLlmWithSelectedPoolModel({
     paper,
     userBackground,
