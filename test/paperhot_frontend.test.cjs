@@ -468,11 +468,38 @@ test("academic API contact email is editable from the config page", async () => 
 
 test("config page exposes aliyun llm model pool controls", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
-  assert.match(html, /renderLlmModelPoolConfig/);
+  assert.match(html, /renderLlmModelPoolManager/);
   assert.match(html, /data-llm-model-pool/);
   assert.match(html, /qwen-plus/);
-  assert.match(html, /85%/);
-  assert.match(html, /只重置 PaperHot 本地估算/);
+  assert.match(html, /PaperHot 本地估算/);
+});
+
+test("aliyun model pool manager renders quota bars test buttons and pagination", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /const llmModelPoolPageSize = 25/);
+  assert.match(html, /function renderLlmModelPoolManager/);
+  assert.match(html, /function llmModelPoolCard/);
+  assert.match(html, /class="llm-pool-grid"/);
+  assert.match(html, /class="llm-pool-quota-bar"/);
+  assert.match(html, /data-llm-pool-test-model/);
+  assert.match(html, /data-llm-pool-page="next"/);
+  assert.match(html, /5 x 5/);
+});
+
+test("aliyun model pool manager greys unavailable cards and shows repeated failure hints", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /model\.greyed \? "greyed" : ""/);
+  assert.match(html, /disabled=\$\{model\.selectable \? "" : "disabled"\}/);
+  assert.match(html, /上次因连续失败切换/);
+  assert.match(html, /PaperHot 本地估算/);
+});
+
+test("aliyun model pool manager calls per-model test and update endpoints", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /\/api\/integrations\/llm\/model-pool\/test/);
+  assert.match(html, /\/api\/integrations\/llm\/model-pool\/model/);
+  assert.match(html, /testOneLlmPoolModel/);
+  assert.match(html, /updateOneLlmPoolModel/);
 });
 
 test("OpenAlex config separates discovery from automatic field enrichment", async () => {

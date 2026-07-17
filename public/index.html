@@ -406,6 +406,53 @@
     }
     .llm-model-pool-row input[type="number"] { min-width: 0; height: 30px; }
     .llm-model-pool-row input[type="checkbox"] { accent-color: #1f2a40; }
+    .llm-pool-manager { display: grid; gap: 10px; }
+    .llm-pool-manager-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+    .llm-pool-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .llm-pool-card {
+      display: grid;
+      gap: 7px;
+      min-height: 148px;
+      padding: 9px;
+      border: 1px solid #dfe8ee;
+      border-radius: 8px;
+      background: #fff;
+      color: #27364c;
+    }
+    .llm-pool-card.greyed {
+      background: #f2f4f6;
+      color: #8794a4;
+      opacity: 0.72;
+    }
+    .llm-pool-card-title { display: grid; gap: 2px; min-width: 0; }
+    .llm-pool-card-title strong { font-size: 12px; overflow-wrap: anywhere; }
+    .llm-pool-card-title span { color: #718195; font-size: 10px; overflow-wrap: anywhere; }
+    .llm-pool-quota-bar {
+      height: 8px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e7edf2;
+    }
+    .llm-pool-quota-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: #12a5b8;
+    }
+    .llm-pool-card.greyed .llm-pool-quota-fill { background: #9aa7b4; }
+    .llm-pool-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .llm-pool-card-actions button { height: 26px; padding: 0 8px; border-radius: 7px; font-size: 11px; }
+    .llm-pool-pager { display: flex; justify-content: flex-end; gap: 8px; align-items: center; }
+    @media (max-width: 1200px) { .llm-pool-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 720px) { .llm-pool-grid { grid-template-columns: 1fr; } }
     .range-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
     .range-row input { accent-color: #644df6; }
     .llm-provider-actions {
@@ -6960,6 +7007,10 @@
     };
     let integrationState = JSON.parse(JSON.stringify(defaultIntegrationState));
     let expandedLlmProviderId = "";
+    const llmModelPoolPageSize = 25;
+    let llmModelPoolPage = 0;
+    let llmModelPoolStatus = null;
+    let llmModelPoolMessage = "";
     const savedSecretMask = "********";
     let integrationSecrets = null;
 
@@ -7040,9 +7091,49 @@
         const response = await fetch("/api/integrations/config");
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         applyIntegrationState(await response.json());
+        await loadLlmModelPoolStatus();
       } catch (error) {
         console.warn("Integration config load failed", error);
       }
+    }
+
+    async function loadLlmModelPoolStatus() {
+      if (location.protocol === "file:") return;
+      try {
+        const response = await fetch("/api/integrations/llm/model-pool");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        llmModelPoolStatus = payload.modelPool || null;
+      } catch (error) {
+        llmModelPoolMessage = `模型池状态暂不可用：${error.message}`;
+      }
+    }
+
+    async function updateOneLlmPoolModel(model, patch) {
+      const response = await fetch("/api/integrations/llm/model-pool/model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, ...patch })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
+      llmModelPoolStatus = payload.status || null;
+      llmModelPoolMessage = `${model} 已更新`;
+    }
+
+    async function testOneLlmPoolModel(model) {
+      llmModelPoolMessage = `正在测试 ${model}...`;
+      renderIntegrationConfig();
+      bindIntegrationAutosave();
+      const response = await fetch("/api/integrations/llm/model-pool/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+      llmModelPoolStatus = payload.status || null;
+      llmModelPoolMessage = payload.ok ? `${model} 测试成功，已自动启用` : `${model} 测试失败：${payload.error || "模型未响应"}`;
     }
 
     async function loadIntegrationSecrets() {
@@ -7402,24 +7493,68 @@
       backdrop.querySelector("[data-close-api-help]")?.focus();
     }
 
-    function renderLlmModelPoolConfig(provider) {
-      if (provider.provider !== "aliyun-modelstudio") return "";
+    function modelPoolRowsForProvider(provider) {
+      const statusRows = Array.isArray(llmModelPoolStatus?.models) ? llmModelPoolStatus.models : [];
+      if (statusRows.length) return statusRows;
       const pool = provider.modelPool || defaultAliyunModelPool;
-      const models = Array.isArray(pool.models) ? pool.models : [];
+      return Array.isArray(pool.models) ? pool.models.map(model => ({
+        ...model,
+        displayName: model.displayName || model.model,
+        family: model.family || "Aliyun Text",
+        localUsedTokens: 0,
+        estimatedRemainingTokens: model.freeQuotaTokens || 1000000,
+        usageRatio: 0,
+        statusLabel: model.enabled === false ? "未启用" : "额度充足",
+        selectable: model.enabled !== false,
+        greyed: model.enabled === false,
+        failureHint: ""
+      })) : [];
+    }
+
+    function llmModelPoolCard(model) {
+      const percent = Math.max(0, Math.min(100, Math.round(Number(model.usageRatio || 0) * 100)));
       return `
-        <div class="wos-usage-panel" data-llm-model-pool="${escapeHTML(provider.id)}">
-          <div class="wos-usage-head"><strong>百炼模型池</strong><span class="small-text">官方额度优先，本地估算兜底</span></div>
-          <div class="small-text">默认 85%；达到 ${escapeHTML(`${Math.round(Number(pool.quotaSwitchRatio || 0.85) * 100)}%`)} 或连续失败 ${escapeHTML(pool.failureSwitchThreshold || 3)} 次后自动切换。</div>
-          <div class="llm-model-pool-list">
-            ${models.map(model => `
-              <label class="llm-model-pool-row">
-                <input type="checkbox" data-llm-pool-field="enabled" data-llm-pool-model="${escapeHTML(model.model)}" ${model.enabled !== false ? "checked" : ""}>
-                <span>${escapeHTML(model.model)}</span>
-                <input type="number" min="1" step="1" data-llm-pool-field="freeQuotaTokens" data-llm-pool-model="${escapeHTML(model.model)}" value="${escapeHTML(model.freeQuotaTokens || 1000000)}">
-              </label>
-            `).join("")}
+        <article class="llm-pool-card ${model.greyed ? "greyed" : ""}" data-llm-pool-card="${escapeHTML(model.model)}">
+          <div class="llm-pool-card-title">
+            <strong>${escapeHTML(model.displayName || model.model)}</strong>
+            <span>${escapeHTML(model.model)}</span>
           </div>
-          <div class="small-text">重置按钮只重置 PaperHot 本地估算，不会恢复阿里云真实免费额度。</div>
+          <span class="tag">${escapeHTML(model.family || "Aliyun Text")}</span>
+          <div class="llm-pool-quota-bar" title="PaperHot 本地估算：已用 ${escapeHTML(percent)}%">
+            <div class="llm-pool-quota-fill" style="width:${Math.max(2, percent)}%"></div>
+          </div>
+          <div class="small-text">剩余 ${formatToken(model.estimatedRemainingTokens || 0)} / 已用 ${formatToken(model.localUsedTokens || 0)}</div>
+          <div class="small-text">${escapeHTML(model.statusLabel || "额度充足")}${model.failureHint ? ` · ${escapeHTML(model.failureHint || "上次因连续失败切换")}` : ""}</div>
+          <div class="llm-pool-card-actions">
+            <button class="ghost-btn" type="button" data-llm-pool-enable-model="${escapeHTML(model.model)}" data-llm-pool-selectable="${model.selectable}" disabled=${model.selectable ? "" : "disabled"}>${model.enabled ? "已启用" : "启用"}</button>
+            <button class="ghost-btn" type="button" data-llm-pool-test-model="${escapeHTML(model.model)}">测试</button>
+          </div>
+        </article>
+      `;
+    }
+
+    function renderLlmModelPoolManager(provider) {
+      if (provider.provider !== "aliyun-modelstudio") return "";
+      const rows = modelPoolRowsForProvider(provider);
+      const pageCount = Math.max(1, Math.ceil(rows.length / llmModelPoolPageSize));
+      llmModelPoolPage = Math.max(0, Math.min(llmModelPoolPage, pageCount - 1));
+      const start = llmModelPoolPage * llmModelPoolPageSize;
+      const pageRows = rows.slice(start, start + llmModelPoolPageSize);
+      return `
+        <div class="wos-usage-panel llm-pool-manager" data-llm-model-pool="${escapeHTML(provider.id)}">
+          <div class="llm-pool-manager-head">
+            <div>
+              <strong>百炼文本模型池</strong>
+              <div class="small-text">5 x 5；只显示兼容文本对话的模型。额度条是 PaperHot 本地估算。</div>
+            </div>
+            <div class="llm-pool-pager">
+              <button class="ghost-btn" type="button" data-llm-pool-page="prev" ${llmModelPoolPage <= 0 ? "disabled" : ""}>上一页</button>
+              <span class="small-text">${llmModelPoolPage + 1} / ${pageCount}</span>
+              <button class="ghost-btn" type="button" data-llm-pool-page="next" ${llmModelPoolPage >= pageCount - 1 ? "disabled" : ""}>下一页</button>
+            </div>
+          </div>
+          <div class="llm-pool-grid">${pageRows.map(llmModelPoolCard).join("")}</div>
+          <div class="small-text">${escapeHTML(llmModelPoolMessage || "测试成功会自动启用模型；低于 15% 剩余额度或连续失败后会灰掉并跳过。")}</div>
         </div>
       `;
     }
@@ -7466,7 +7601,7 @@
               ${reasoningOptions.map(option => `<button class="segment ${provider.reasoning === option ? "active" : ""}" data-llm-value="${option}">${escapeHTML({ auto: "自动", off: "关闭", low: "低", medium: "中", high: "高", max: "最大", custom: "自定义" }[option])}</button>`).join("")}
             </div>
           </label>
-          ${renderLlmModelPoolConfig(provider)}
+          ${renderLlmModelPoolManager(provider)}
           <div class="llm-test-result" data-llm-test-result="${escapeHTML(provider.id)}"></div>
           <div class="llm-provider-actions">
             <button class="ghost-btn" data-llm-test="${escapeHTML(provider.id)}">测试</button>
@@ -8006,6 +8141,44 @@
       }
     }
 
+    function bindLlmModelPoolManager() {
+      document.querySelectorAll("[data-llm-pool-page]").forEach(button => {
+        button.addEventListener("click", () => {
+          const direction = button.getAttribute("data-llm-pool-page");
+          llmModelPoolPage += direction === "next" ? 1 : -1;
+          renderIntegrationConfig();
+          bindIntegrationAutosave();
+        });
+      });
+      document.querySelectorAll("[data-llm-pool-enable-model]").forEach(button => {
+        button.disabled = button.getAttribute("data-llm-pool-selectable") !== "true";
+        button.addEventListener("click", async () => {
+          const model = button.getAttribute("data-llm-pool-enable-model");
+          button.disabled = true;
+          try {
+            await updateOneLlmPoolModel(model, { enabled: true });
+          } catch (error) {
+            llmModelPoolMessage = `启用失败：${error.message}`;
+          }
+          renderIntegrationConfig();
+          bindIntegrationAutosave();
+        });
+      });
+      document.querySelectorAll("[data-llm-pool-test-model]").forEach(button => {
+        button.addEventListener("click", async () => {
+          const model = button.getAttribute("data-llm-pool-test-model");
+          button.disabled = true;
+          try {
+            await testOneLlmPoolModel(model);
+          } catch (error) {
+            llmModelPoolMessage = `测试失败：${error.message}`;
+          }
+          renderIntegrationConfig();
+          bindIntegrationAutosave();
+        });
+      });
+    }
+
     function bindIntegrationAutosave() {
       document.querySelectorAll("[data-integration-config-root]").forEach(form => {
         form.onclick = handleIntegrationClick;
@@ -8016,6 +8189,7 @@
           if (event.target.matches("[data-integration-field]")) scheduleIntegrationSave();
         };
       });
+      bindLlmModelPoolManager();
     }
 
     function saveSourceEdit(card) {
