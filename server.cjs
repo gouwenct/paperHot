@@ -464,13 +464,13 @@ async function handleApi(req, res, url) {
     return true;
   }
   if (req.method === "GET" && pathname === "/api/integrations/llm/model-pool") {
-    sendJson(res, 200, { ok: true, modelPool: await readLlmModelPoolStatus() });
+    sendJson(res, 200, { ok: true, modelPool: await readLlmModelPoolStatus({ providerId: url.searchParams.get("providerId") || "" }) });
     return true;
   }
   if (req.method === "POST" && pathname === "/api/integrations/llm/model-pool/test") {
     const body = await collectRequestBody(req);
     try {
-      sendJson(res, 200, await testLlmPoolModel(body.model));
+      sendJson(res, 200, await testLlmPoolModel(body.model, { providerId: body.providerId }));
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
     }
@@ -479,7 +479,7 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && pathname === "/api/integrations/llm/model-pool/model") {
     const body = await collectRequestBody(req);
     try {
-      sendJson(res, 200, await updateLlmModelPoolModel(body.model, body));
+      sendJson(res, 200, await updateLlmModelPoolModel(body.model, body, { providerId: body.providerId }));
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
     }

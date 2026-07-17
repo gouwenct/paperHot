@@ -507,6 +507,10 @@ test("aliyun model pool manager synchronizes an inactive provider state for late
   const syncSource = readNamedFunction(html, "syncLlmModelPoolStatus", "updateOneLlmPoolModel");
   const updateSource = readNamedFunction(html, "updateOneLlmPoolModel", "testOneLlmPoolModel");
   const testSource = readNamedFunction(html, "testOneLlmPoolModel", "loadIntegrationSecrets");
+  const readProviderSource = readNamedFunction(html, "readActiveLlmProvider", "currentLlmConfig");
+  const currentConfigSource = readNamedFunction(html, "currentLlmConfig", "currentIntegrationConfig");
+  assert.match(updateSource, /JSON\.stringify\(\{ providerId, model, \.\.\.patch \}\)/);
+  assert.match(testSource, /JSON\.stringify\(\{ providerId, model \}\)/);
   assert.match(updateSource, /syncLlmModelPoolStatus\(payload\.status \|\| null, providerId\)/);
   assert.match(testSource, /syncLlmModelPoolStatus\(payload\.status \|\| null, providerId\)/);
 
@@ -530,7 +534,10 @@ test("aliyun model pool manager synchronizes an inactive provider state for late
       }
     };
     ${syncSource}
-    return { syncLlmModelPoolStatus, state: () => integrationState, status: () => llmModelPoolStatus };
+    const document = { querySelector: () => null };
+    ${readProviderSource}
+    ${currentConfigSource}
+    return { syncLlmModelPoolStatus, currentLlmConfig, state: () => integrationState, status: () => llmModelPoolStatus };
   `)();
   const status = {
     ...modelPool,
@@ -546,6 +553,12 @@ test("aliyun model pool manager synchronizes an inactive provider state for late
     ["qwen-hidden", true]
   ]);
   assert.deepEqual(result.state().llm.providers[0].modelPool, { models: [{ model: "unchanged" }] });
+  const serialized = result.currentLlmConfig();
+  assert.equal(serialized.activeProviderId, "other");
+  assert.deepEqual(serialized.providers[1].modelPool.models.map(model => [model.model, model.enabled]), [
+    ["qwen-plus", true],
+    ["qwen-hidden", true]
+  ]);
 });
 
 test("OpenAlex config separates discovery from automatic field enrichment", async () => {

@@ -7097,13 +7097,19 @@
       }
     }
 
-    async function loadLlmModelPoolStatus() {
+    async function loadLlmModelPoolStatus(providerId = "") {
       if (location.protocol === "file:") return;
+      const aliyunProviders = (integrationState.llm.providers || []).filter(provider => provider.provider === "aliyun-modelstudio");
+      const selectedProviderId = providerId
+        || aliyunProviders.find(provider => provider.id === integrationState.llm.activeProviderId)?.id
+        || aliyunProviders[0]?.id
+        || "";
+      if (!selectedProviderId) return;
       try {
-        const response = await fetch("/api/integrations/llm/model-pool");
+        const response = await fetch(`/api/integrations/llm/model-pool?providerId=${encodeURIComponent(selectedProviderId)}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
-        syncLlmModelPoolStatus(payload.modelPool || null);
+        syncLlmModelPoolStatus(payload.modelPool || null, selectedProviderId);
       } catch (error) {
         llmModelPoolMessage = `模型池状态暂不可用：${error.message}`;
       }
@@ -7148,7 +7154,7 @@
       const response = await fetch("/api/integrations/llm/model-pool/model", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, ...patch })
+        body: JSON.stringify({ providerId, model, ...patch })
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
@@ -7163,7 +7169,7 @@
       const response = await fetch("/api/integrations/llm/model-pool/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model })
+        body: JSON.stringify({ providerId, model })
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);

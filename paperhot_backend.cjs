@@ -2543,13 +2543,15 @@ function activeProviderModelPool(config = {}) {
 async function readLlmModelPoolStatus(options = {}) {
   const config = await readLlmConfig(options.llmConfigFile);
   const state = await readLlmModelPoolState(options.dataDir || DATA_DIR);
-  const provider = (config.providers || []).find(item => item.id === config.activeProviderId) || {};
-  const pool = cleanLlmModelPool(activeProviderModelPool(provider) || activeProviderModelPool(config) || DEFAULT_ALIYUN_MODEL_POOL);
+  const provider = aliyunProviderFromConfig(config, options.providerId);
+  if (!provider) throw new Error("未找到指定的阿里百炼 LLM 配置");
+  const pool = cleanLlmModelPool(provider.modelPool || DEFAULT_ALIYUN_MODEL_POOL);
   const registry = readAliyunTextModelRegistry();
   const savedRows = new Map(pool.models.map(item => [item.model, item]));
   const allModels = registry.map(item => ({ ...item, ...(savedRows.get(item.model) || {}) }));
   return {
-    activeModel: state.activeModel || config.model || provider.model || "",
+    providerId: provider.id,
+    activeModel: state.activeModel || provider.model || "",
     quotaMode: pool.quotaMode,
     quotaFallback: pool.quotaFallback,
     quotaSwitchRatio: pool.quotaSwitchRatio,
@@ -2580,7 +2582,11 @@ async function readLlmModelPoolStatus(options = {}) {
   };
 }
 
-function activeAliyunProviderFromConfig(config = {}) {
+function aliyunProviderFromConfig(config = {}, providerId = "") {
+  const cleanProviderId = compactText(providerId);
+  if (cleanProviderId) {
+    return (config.providers || []).find(item => item.id === cleanProviderId && item.provider === "aliyun-modelstudio") || null;
+  }
   return (config.providers || []).find(item => item.id === config.activeProviderId && item.provider === "aliyun-modelstudio")
     || (config.providers || []).find(item => item.provider === "aliyun-modelstudio")
     || null;
@@ -2612,11 +2618,11 @@ async function updateLlmModelPoolModel(model, patch = {}, options = {}) {
   const cleanModel = assertAliyunTextModel(model);
   const configFile = options.llmConfigFile || options.configFile || LLM_CONFIG_FILE;
   const config = await readLlmConfig(configFile);
-  const provider = activeAliyunProviderFromConfig(config);
-  if (!provider) throw new Error("未找到阿里百炼 LLM 配置");
+  const provider = aliyunProviderFromConfig(config, options.providerId || patch.providerId);
+  if (!provider) throw new Error("未找到指定的阿里百炼 LLM 配置");
   provider.modelPool = patchLlmPoolModel(provider.modelPool, cleanModel, patch);
   await writeJsonFile(configFile, cleanLlmConfig(config));
-  return { ok: true, status: await readLlmModelPoolStatus({ ...options, llmConfigFile: configFile }) };
+  return { ok: true, status: await readLlmModelPoolStatus({ ...options, providerId: provider.id, llmConfigFile: configFile }) };
 }
 
 async function testLlmPoolModel(model, options = {}) {
@@ -2624,8 +2630,8 @@ async function testLlmPoolModel(model, options = {}) {
   const configFile = options.llmConfigFile || options.configFile || LLM_CONFIG_FILE;
   const dataDir = options.dataDir || DATA_DIR;
   const config = await readLlmConfig(configFile);
-  const provider = activeAliyunProviderFromConfig(config);
-  if (!provider) throw new Error("未找到阿里百炼 LLM 配置");
+  const provider = aliyunProviderFromConfig(config, options.providerId);
+  if (!provider) throw new Error("未找到指定的阿里百炼 LLM 配置");
   if (!provider.endpoint) throw new Error("LLM Endpoint 未填写");
   if (!provider.apiKey && provider.apiMode !== "local") throw new Error("LLM API 密钥未填写");
   const state = await readLlmModelPoolState(dataDir);
@@ -2656,7 +2662,7 @@ async function testLlmPoolModel(model, options = {}) {
       lastTestMessage: "测试成功"
     });
     await writeLlmModelPoolState(state, dataDir);
-    await updateLlmModelPoolModel(cleanModel, { enabled: true }, { ...options, llmConfigFile: configFile, dataDir });
+    await updateLlmModelPoolModel(cleanModel, { enabled: true }, { ...options, providerId: provider.id, llmConfigFile: configFile, dataDir });
     await appendOperationLogSafe({
       action: "test",
       operation: "llm-model-pool-test",
@@ -2669,7 +2675,7 @@ async function testLlmPoolModel(model, options = {}) {
         total: Number(usage.total || Number(usage.prompt || 0) + Number(usage.completion || 0))
       }])
     }, dataDir);
-    return { ok: true, model: cleanModel, enabled: true, tokenUsage: usage, status: await readLlmModelPoolStatus({ ...options, llmConfigFile: configFile, dataDir }) };
+    return { ok: true, model: cleanModel, enabled: true, tokenUsage: usage, status: await readLlmModelPoolStatus({ ...options, providerId: provider.id, llmConfigFile: configFile, dataDir }) };
   } catch (error) {
     const consecutiveFailures = Number(previous.consecutiveFailures || 0) + (isRetryableLlmModelFailure(error) ? 1 : 0);
     state.models[cleanModel] = cleanLlmModelPoolStateEntry({
@@ -2691,7 +2697,7 @@ async function testLlmPoolModel(model, options = {}) {
       result: "failed",
       error: error.message
     }, dataDir);
-    return { ok: false, model: cleanModel, enabled: false, error: error.message, status: await readLlmModelPoolStatus({ ...options, llmConfigFile: configFile, dataDir }) };
+    return { ok: false, model: cleanModel, enabled: false, error: error.message, status: await readLlmModelPoolStatus({ ...options, providerId: provider.id, llmConfigFile: configFile, dataDir }) };
   }
 }
 
@@ -4271,11 +4277,12 @@ async function callConfiguredLlmWithSelectedPoolModel({
   pool,
   state,
   selected,
-  attempted
+  attempted,
+  switchAlreadyLogged = false
 }) {
   const previousModel = compactText(config.model);
   const selectedConfig = { ...config, model: selected.model };
-  if (previousModel && previousModel !== selected.model) {
+  if (!switchAlreadyLogged && previousModel && previousModel !== selected.model) {
     const previousPoolModel = cleanLlmModelPool(pool).models.find(model => model.model === previousModel);
     const previousState = state.models[previousModel] || {};
     const previousThreshold = Number(previousPoolModel?.freeQuotaTokens || 1000000) * Number(pool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio);
@@ -4312,46 +4319,55 @@ async function callConfiguredLlmWithSelectedPoolModel({
     await writeLlmModelPoolState(state, dataDir);
     return insight;
   } catch (error) {
+    if (!isRetryableLlmModelFailure(error)) throw error;
     const current = state.models[selected.model] || {};
+    const failureAt = new Date().toISOString();
     const entry = cleanLlmModelPoolStateEntry({
       ...current,
       model: selected.model,
       consecutiveFailures: Number(current.consecutiveFailures || 0) + 1,
-      lastFailureAt: new Date().toISOString(),
+      lastFailureAt: failureAt,
       lastFailureMessage: error.message
     });
-    if (entry.consecutiveFailures >= Number(pool.failureSwitchThreshold || DEFAULT_ALIYUN_MODEL_POOL.failureSwitchThreshold)) {
-      entry.status = "failing";
+    const failureThreshold = Number(pool.failureSwitchThreshold || DEFAULT_ALIYUN_MODEL_POOL.failureSwitchThreshold);
+    if (entry.consecutiveFailures < failureThreshold) {
+      state.models[selected.model] = entry;
+      await writeLlmModelPoolState(state, dataDir);
+      throw error;
     }
+    entry.status = "failing";
     state.models[selected.model] = entry;
-    await writeLlmModelPoolState(state, dataDir);
     attempted.add(selected.model);
-    if (isRetryableLlmModelFailure(error)) {
-      const next = selectLlmPoolModel({ pool, state, attempted });
-      if (next && next.model !== selected.model) {
-        await appendOperationLogSafe({
-          action: "modify",
-          operation: "llm-model-switch",
-          fromModel: selected.model,
-          toModel: next.model,
-          reason: "repeated-failure",
-          localUsedTokens: Number(entry.localUsedTokens || 0),
-          freeQuotaTokens: selected.freeQuotaTokens,
-          officialQuotaStatus: entry.officialQuotaStatus || "unavailable"
-        }, dataDir);
-        return callConfiguredLlmWithSelectedPoolModel({
-          paper,
-          userBackground,
-          config,
-          fetchImpl,
-          dataDir,
-          pool,
-          state,
-          selected: next,
-          attempted
-        });
-      }
+    const next = selectLlmPoolModel({ pool, state, attempted });
+    if (next && next.model !== selected.model) {
+      entry.lastSwitchAt = failureAt;
+      entry.lastSwitchReason = "repeated-failure";
+      state.models[selected.model] = entry;
+      await writeLlmModelPoolState(state, dataDir);
+      await appendOperationLogSafe({
+        action: "modify",
+        operation: "llm-model-switch",
+        fromModel: selected.model,
+        toModel: next.model,
+        reason: "repeated-failure",
+        localUsedTokens: Number(entry.localUsedTokens || 0),
+        freeQuotaTokens: selected.freeQuotaTokens,
+        officialQuotaStatus: entry.officialQuotaStatus || "unavailable"
+      }, dataDir);
+      return callConfiguredLlmWithSelectedPoolModel({
+        paper,
+        userBackground,
+        config,
+        fetchImpl,
+        dataDir,
+        pool,
+        state,
+        selected: next,
+        attempted,
+        switchAlreadyLogged: true
+      });
     }
+    await writeLlmModelPoolState(state, dataDir);
     throw error;
   }
 }

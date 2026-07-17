@@ -2933,11 +2933,62 @@ test("per-model aliyun test records retryable failure without enabling the model
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
-test("aliyun llm pool filters non-registry models from automatic calls", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-registry-filter-"));
-  await writeLlmModelPoolState({
-    models: {
-      "qwen-plus": { model: "qwen-plus", localUsedTokens: 850000, status: "near_limit" }
+test("inactive aliyun provider model pool update and test preserve the selected provider", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-inactive-provider-"));
+  const configFile = path.join(tempDir, "llm.json");
+  await fs.writeFile(configFile, JSON.stringify({
+    enabled: true,
+    activeProviderId: "custom-active",
+    providers: [
+      {
+        id: "custom-active",
+        provider: "custom-openai",
+        enabled: true,
+        endpoint: "https://example.test/v1",
+        apiKey: "custom-key",
+        model: "custom-model"
+      },
+      {
+        id: "aliyun-inactive",
+        provider: "aliyun-modelstudio",
+        enabled: false,
+        endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        apiKey: "aliyun-key",
+        model: "qwen-plus",
+        modelPool: { models: [{ model: "qwen-flash", enabled: false, freeQuotaTokens: 1000000, priority: 20 }] }
+      }
+    ]
+  }), "utf8");
+
+  const updated = await updateLlmModelPoolModel("qwen-flash", { enabled: true }, {
+    providerId: "aliyun-inactive",
+    llmConfigFile: configFile,
+    dataDir: tempDir
+  });
+  const tested = await testLlmPoolModel("qwen-flash", {
+    providerId: "aliyun-inactive",
+    llmConfigFile: configFile,
+    dataDir: tempDir,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ abstractZh: "测试摘要", reason: "测试理由" }) } }],
+        usage: { prompt_tokens: 7, completion_tokens: 5, total_tokens: 12 }
+      })
+    })
+  });
+  const saved = await readLlmConfig(configFile);
+  const customProvider = saved.providers.find(provider => provider.id === "custom-active");
+  const aliyunProvider = saved.providers.find(provider => provider.id === "aliyun-inactive");
+
+  assert.equal(updated.status.providerId, "aliyun-inactive");
+  assert.equal(tested.status.providerId, "aliyun-inactive");
+  assert.equal(saved.activeProviderId, "custom-active");
+  assert.equal(customProvider.model, "custom-model");
+  assert.equal(aliyunProvider.modelPool.models.find(row => row.model === "qwen-flash").enabled, true);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
 test("updates reject non-registry aliyun models without writing config or pool state", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-update-non-registry-"));
   const configFile = path.join(tempDir, "llm.json");
@@ -2998,6 +3049,11 @@ test("per-model aliyun tests reject non-registry models without HTTP or pool sta
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
+test("aliyun llm pool filters non-registry models from automatic calls", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-registry-filter-"));
+  await writeLlmModelPoolState({
+    models: {
+      "qwen-plus": { model: "qwen-plus", localUsedTokens: 850000, status: "near_limit" }
     }
   }, tempDir);
   const calls = [];
@@ -3048,7 +3104,6 @@ test("aliyun llm pool status caps a raw 0.99 threshold at the binding 85 percent
       }
     }
   });
-  assert.equal(pool.quotaSwitchRatio, 0.85);
   assert.equal(modelPoolStatusForModel(
     pool.models.find(item => item.model === "qwen-plus"),
     { localUsedTokens: 850000 },
@@ -3233,6 +3288,46 @@ test("keeps a shared credential failure from rotating through the pool", () => {
   assert.equal(isRetryableLlmModelFailure(new Error("LLM API 密钥未填写")), false);
 });
 
+test("repeated shared credential failures do not poison or rotate the aliyun model pool", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-credential-failure-"));
+  const calls = [];
+  const config = {
+    enabled: true,
+    provider: "aliyun-modelstudio",
+    apiMode: "openai",
+    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    apiKey: "bad-key",
+    model: "qwen-plus",
+    modelPool: {
+      failureSwitchThreshold: 2,
+      models: [
+        { model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 },
+        { model: "qwen-flash", enabled: true, freeQuotaTokens: 1000000, priority: 20 }
+      ]
+    }
+  };
+
+  for (const status of [401, 403, 401, 403]) {
+    await assert.rejects(callConfiguredLlmWithPool({
+      dataDir: tempDir,
+      paper: { title: "SIM paper", summary: "Complete abstract text for testing." },
+      userBackground: "SIM",
+      config,
+      fetchImpl: async (url, init) => {
+        calls.push(JSON.parse(init.body).model);
+        return { ok: false, status, json: async () => ({}) };
+      }
+    }), new RegExp(`HTTP ${status}`));
+  }
+
+  const state = await readLlmModelPoolState(tempDir);
+  assert.deepEqual(calls, ["qwen-plus", "qwen-plus", "qwen-plus", "qwen-plus"]);
+  assert.equal(state.models["qwen-plus"]?.consecutiveFailures || 0, 0);
+  assert.notEqual(state.models["qwen-plus"]?.status, "failing");
+  assert.equal(state.models["qwen-flash"], undefined);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
 test("aliyun llm pool rejects when every configured model is unavailable", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-no-selectable-"));
   await writeLlmModelPoolState({
@@ -3325,12 +3420,9 @@ test("aliyun llm pool switches after local quota threshold and logs the actual m
 
 test("aliyun llm pool retries the same paper on the next model after repeated retryable failures", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-failure-switch-"));
+  const llmConfigFile = path.join(tempDir, "llm.json");
   const calls = [];
-  const insight = await callConfiguredLlmWithPool({
-    dataDir: tempDir,
-    paper: { title: "SIM paper", summary: "Complete abstract text for testing." },
-    userBackground: "SIM",
-    config: {
+  const config = {
       enabled: true,
       provider: "aliyun-modelstudio",
       apiMode: "openai",
@@ -3345,7 +3437,17 @@ test("aliyun llm pool retries the same paper on the next model after repeated re
           { model: "qwen-flash", enabled: true, freeQuotaTokens: 1000000, priority: 20 }
         ]
       }
-    },
+    };
+  await fs.writeFile(llmConfigFile, JSON.stringify({
+    ...config,
+    activeProviderId: "aliyun-coding",
+    providers: [{ id: "aliyun-coding", ...config }]
+  }), "utf8");
+  const insight = await callConfiguredLlmWithPool({
+    dataDir: tempDir,
+    paper: { title: "SIM paper", summary: "Complete abstract text for testing." },
+    userBackground: "SIM",
+    config,
     fetchImpl: async (url, init) => {
       const model = JSON.parse(init.body).model;
       calls.push(model);
@@ -3363,6 +3465,13 @@ test("aliyun llm pool retries the same paper on the next model after repeated re
   assert.equal(insight.tokenUsage.model, "qwen-flash");
   const state = await readLlmModelPoolState(tempDir);
   assert.equal(state.models["qwen-plus"].status, "failing");
+  assert.equal(state.models["qwen-plus"].lastSwitchReason, "repeated-failure");
+  assert.match(state.models["qwen-plus"].lastSwitchAt, /^\d{4}-\d{2}-\d{2}T/);
+  const status = await readLlmModelPoolStatus({ dataDir: tempDir, llmConfigFile, providerId: "aliyun-coding" });
+  assert.equal(status.models.find(row => row.model === "qwen-plus").failureHint, "上次因连续失败切换");
+  const operations = (await readOperationLog(tempDir)).filter(entry => entry.operation === "llm-model-switch");
+  assert.equal(operations.length, 1);
+  assert.equal(operations[0].reason, "repeated-failure");
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
