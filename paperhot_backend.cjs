@@ -2580,6 +2580,115 @@ async function readLlmModelPoolStatus(options = {}) {
   };
 }
 
+function activeAliyunProviderFromConfig(config = {}) {
+  return (config.providers || []).find(item => item.id === config.activeProviderId && item.provider === "aliyun-modelstudio")
+    || (config.providers || []).find(item => item.provider === "aliyun-modelstudio")
+    || null;
+}
+
+function patchLlmPoolModel(pool = DEFAULT_ALIYUN_MODEL_POOL, model, patch = {}) {
+  const cleanModel = compactText(model);
+  const registryEntry = readAliyunTextModelRegistry().find(item => item.model === cleanModel) || { model: cleanModel, displayName: cleanModel, family: "Aliyun Text", priority: 9990, freeQuotaTokens: 1000000 };
+  const cleanPool = cleanLlmModelPool(pool);
+  const rows = new Map(cleanPool.models.map(item => [item.model, item]));
+  const current = rows.get(cleanModel) || registryEntry;
+  rows.set(cleanModel, cleanLlmModelPoolEntry({
+    ...current,
+    enabled: typeof patch.enabled === "boolean" ? patch.enabled : current.enabled,
+    freeQuotaTokens: patch.freeQuotaTokens === undefined ? current.freeQuotaTokens : Number(patch.freeQuotaTokens)
+  }, rows.size));
+  return { ...cleanPool, models: [...rows.values()].filter(Boolean).sort((left, right) => left.priority - right.priority) };
+}
+
+async function updateLlmModelPoolModel(model, patch = {}, options = {}) {
+  const cleanModel = compactText(model);
+  if (!cleanModel) throw new Error("模型名称不能为空");
+  const configFile = options.llmConfigFile || options.configFile || LLM_CONFIG_FILE;
+  const config = await readLlmConfig(configFile);
+  const provider = activeAliyunProviderFromConfig(config);
+  if (!provider) throw new Error("未找到阿里百炼 LLM 配置");
+  provider.modelPool = patchLlmPoolModel(provider.modelPool, cleanModel, patch);
+  await writeJsonFile(configFile, cleanLlmConfig(config));
+  return { ok: true, status: await readLlmModelPoolStatus({ ...options, llmConfigFile: configFile }) };
+}
+
+async function testLlmPoolModel(model, options = {}) {
+  const cleanModel = compactText(model);
+  if (!cleanModel) throw new Error("模型名称不能为空");
+  const configFile = options.llmConfigFile || options.configFile || LLM_CONFIG_FILE;
+  const dataDir = options.dataDir || DATA_DIR;
+  const config = await readLlmConfig(configFile);
+  const provider = activeAliyunProviderFromConfig(config);
+  if (!provider) throw new Error("未找到阿里百炼 LLM 配置");
+  if (!provider.endpoint) throw new Error("LLM Endpoint 未填写");
+  if (!provider.apiKey && provider.apiMode !== "local") throw new Error("LLM API 密钥未填写");
+  const state = await readLlmModelPoolState(dataDir);
+  const previous = state.models[cleanModel] || {};
+  try {
+    const insight = await callConfiguredLlm({
+      paper: {
+        title: "Aliyun model pool connectivity test",
+        summary: "This is a short PaperHot connectivity test for one Aliyun text chat model.",
+        reason: "模型池单模型测试",
+        journal: "paperHOT test",
+        doi: ""
+      },
+      userBackground: provider.userBackground || config.userBackground || DEFAULT_USER_BACKGROUND,
+      config: { ...provider, enabled: true, model: cleanModel },
+      fetchImpl: options.fetchImpl || fetch
+    });
+    const usage = insight?.tokenUsage || {};
+    state.models[cleanModel] = cleanLlmModelPoolStateEntry({
+      ...previous,
+      model: cleanModel,
+      status: "available",
+      localUsedTokens: Number(previous.localUsedTokens || 0) + Number(usage.total || 0),
+      consecutiveFailures: 0,
+      lastSuccessAt: new Date().toISOString(),
+      lastTestAt: new Date().toISOString(),
+      lastTestStatus: "passed",
+      lastTestMessage: "测试成功"
+    });
+    await writeLlmModelPoolState(state, dataDir);
+    await updateLlmModelPoolModel(cleanModel, { enabled: true }, { ...options, llmConfigFile: configFile, dataDir });
+    await appendOperationLogSafe({
+      action: "test",
+      operation: "llm-model-pool-test",
+      model: cleanModel,
+      result: "passed",
+      llm: summarizeLlmLog([{
+        model: cleanModel,
+        prompt: Number(usage.prompt || 0),
+        completion: Number(usage.completion || 0),
+        total: Number(usage.total || Number(usage.prompt || 0) + Number(usage.completion || 0))
+      }])
+    }, dataDir);
+    return { ok: true, model: cleanModel, enabled: true, tokenUsage: usage, status: await readLlmModelPoolStatus({ ...options, llmConfigFile: configFile, dataDir }) };
+  } catch (error) {
+    const consecutiveFailures = Number(previous.consecutiveFailures || 0) + (isRetryableLlmModelFailure(error) ? 1 : 0);
+    state.models[cleanModel] = cleanLlmModelPoolStateEntry({
+      ...previous,
+      model: cleanModel,
+      status: consecutiveFailures >= Number((provider.modelPool || {}).failureSwitchThreshold || DEFAULT_ALIYUN_MODEL_POOL.failureSwitchThreshold) ? "failing" : previous.status,
+      consecutiveFailures,
+      lastFailureAt: new Date().toISOString(),
+      lastFailureMessage: error.message,
+      lastTestAt: new Date().toISOString(),
+      lastTestStatus: "failed",
+      lastTestMessage: error.message
+    });
+    await writeLlmModelPoolState(state, dataDir);
+    await appendOperationLogSafe({
+      action: "test",
+      operation: "llm-model-pool-test",
+      model: cleanModel,
+      result: "failed",
+      error: error.message
+    }, dataDir);
+    return { ok: false, model: cleanModel, enabled: false, error: error.message, status: await readLlmModelPoolStatus({ ...options, llmConfigFile: configFile, dataDir }) };
+  }
+}
+
 function llmModelPoolStatusLabel(status) {
   if (status === "near_limit") return "低于 15%";
   if (status === "exhausted") return "已用尽";
@@ -7263,6 +7372,8 @@ module.exports = {
   isRetryableLlmModelFailure,
   callConfiguredLlmWithPool,
   readLlmModelPoolStatus,
+  updateLlmModelPoolModel,
+  testLlmPoolModel,
   resetLlmModelPoolState,
   readLlmModelPoolState,
   writeLlmModelPoolState,

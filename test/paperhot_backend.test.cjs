@@ -57,6 +57,8 @@ const {
   readAliyunTextModelRegistry,
   readLlmModelPoolState,
   readLlmModelPoolStatus,
+  updateLlmModelPoolModel,
+  testLlmPoolModel,
   writeLlmModelPoolState,
   cleanLlmModelPool,
   modelPoolStatusForModel,
@@ -2827,6 +2829,107 @@ test("llm config includes a cleaned aliyun model pool with safe defaults", async
   assert.equal(pool.failureSwitchThreshold, 3);
   assert.equal(pool.models.some(item => item.model === "qwen-flash"), true);
   assert.equal(pool.models.find(item => item.model === "qwen-flash").freeQuotaTokens, 1000000);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("updates one aliyun pool model enabled flag and quota without touching secrets", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-update-model-"));
+  const configFile = path.join(tempDir, "llm.json");
+  await fs.writeFile(configFile, JSON.stringify({
+    enabled: true,
+    activeProviderId: "aliyun-coding",
+    providers: [{
+      id: "aliyun-coding",
+      provider: "aliyun-modelstudio",
+      enabled: true,
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "secret-key",
+      model: "qwen-plus",
+      modelPool: { models: [{ model: "qwen-flash", enabled: false, freeQuotaTokens: 1000000, priority: 20 }] }
+    }]
+  }), "utf8");
+
+  const result = await updateLlmModelPoolModel("qwen-flash", { enabled: true, freeQuotaTokens: 123456 }, { llmConfigFile: configFile, dataDir: tempDir });
+  const saved = await readLlmConfig(configFile);
+  const provider = saved.providers.find(item => item.id === "aliyun-coding");
+  const row = provider.modelPool.models.find(item => item.model === "qwen-flash");
+  assert.equal(result.ok, true);
+  assert.equal(row.enabled, true);
+  assert.equal(row.freeQuotaTokens, 123456);
+  assert.equal(provider.apiKey, "secret-key");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("per-model aliyun test calls only the requested model and enables it on success", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-test-model-"));
+  const configFile = path.join(tempDir, "llm.json");
+  await fs.writeFile(configFile, JSON.stringify({
+    enabled: true,
+    activeProviderId: "aliyun-coding",
+    providers: [{
+      id: "aliyun-coding",
+      provider: "aliyun-modelstudio",
+      enabled: true,
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "secret-key",
+      model: "qwen-plus",
+      modelPool: { models: [{ model: "qwen-flash", enabled: false, freeQuotaTokens: 1000000, priority: 20 }] }
+    }]
+  }), "utf8");
+  const calls = [];
+  const result = await testLlmPoolModel("qwen-flash", {
+    llmConfigFile: configFile,
+    dataDir: tempDir,
+    fetchImpl: async (url, init) => {
+      calls.push(JSON.parse(init.body).model);
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ abstractZh: "测试摘要", reason: "测试理由" }) } }],
+          usage: { prompt_tokens: 7, completion_tokens: 5, total_tokens: 12 }
+        })
+      };
+    }
+  });
+  const saved = await readLlmConfig(configFile);
+  const row = saved.providers[0].modelPool.models.find(item => item.model === "qwen-flash");
+  const state = await readLlmModelPoolState(tempDir);
+  assert.deepEqual(calls, ["qwen-flash"]);
+  assert.equal(result.ok, true);
+  assert.equal(row.enabled, true);
+  assert.equal(state.models["qwen-flash"].lastTestStatus, "passed");
+  assert.equal(state.models["qwen-flash"].consecutiveFailures, 0);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("per-model aliyun test records retryable failure without enabling the model", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-test-failure-"));
+  const configFile = path.join(tempDir, "llm.json");
+  await fs.writeFile(configFile, JSON.stringify({
+    enabled: true,
+    activeProviderId: "aliyun-coding",
+    providers: [{
+      id: "aliyun-coding",
+      provider: "aliyun-modelstudio",
+      enabled: true,
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "secret-key",
+      model: "qwen-plus",
+      modelPool: { models: [{ model: "qwen-flash", enabled: false, freeQuotaTokens: 1000000, priority: 20 }] }
+    }]
+  }), "utf8");
+  const result = await testLlmPoolModel("qwen-flash", {
+    llmConfigFile: configFile,
+    dataDir: tempDir,
+    fetchImpl: async () => ({ ok: false, status: 429, json: async () => ({}) })
+  });
+  const saved = await readLlmConfig(configFile);
+  const row = saved.providers[0].modelPool.models.find(item => item.model === "qwen-flash");
+  const state = await readLlmModelPoolState(tempDir);
+  assert.equal(result.ok, false);
+  assert.equal(row.enabled, false);
+  assert.equal(state.models["qwen-flash"].lastTestStatus, "failed");
+  assert.equal(state.models["qwen-flash"].consecutiveFailures, 1);
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 

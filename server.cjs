@@ -31,9 +31,12 @@ const {
   retryFailedFetchLogEnrichment,
   resetGoogleRollingCursors,
   resetLlmModelPoolState,
+  readLlmModelPoolStatus,
   testLlmConfig,
+  testLlmPoolModel,
   testFirecrawlConfig,
   updateFavoritePaper,
+  updateLlmModelPoolModel,
   updatePaperNote,
   writeIntegrationConfigs,
   writeUserConfig
@@ -455,6 +458,28 @@ async function handleApi(req, res, url) {
     const body = await collectRequestBody(req);
     try {
       sendJson(res, 200, await resetLlmModelPoolState(body.model));
+    } catch (error) {
+      sendJson(res, 400, { ok: false, error: error.message });
+    }
+    return true;
+  }
+  if (req.method === "GET" && pathname === "/api/integrations/llm/model-pool") {
+    sendJson(res, 200, { ok: true, modelPool: await readLlmModelPoolStatus() });
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/integrations/llm/model-pool/test") {
+    const body = await collectRequestBody(req);
+    try {
+      sendJson(res, 200, await testLlmPoolModel(body.model));
+    } catch (error) {
+      sendJson(res, 400, { ok: false, error: error.message });
+    }
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/integrations/llm/model-pool/model") {
+    const body = await collectRequestBody(req);
+    try {
+      sendJson(res, 200, await updateLlmModelPoolModel(body.model, body));
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
     }
