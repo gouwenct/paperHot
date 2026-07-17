@@ -7557,7 +7557,7 @@ test("imports local research data from zip through a whitelist", async () => {
     });
 
     assert.equal(imported.ok, true);
-    assert.deepEqual(imported.imported.sort(), ["archive", "favorites", "fetchLog", "googleRollingCursors", "journalMetricsCache", "notes", "operationLog", "userConfig", "userProfile", "webOfScienceUsage"].sort());
+    assert.deepEqual(imported.imported.sort(), ["archive", "favorites", "fetchLog", "googleRollingCursors", "journalMetricsCache", "llmModelPoolState", "notes", "operationLog", "userConfig", "userProfile", "webOfScienceUsage"].sort());
     assert.equal((await readArchivePayload({ dataDir: targetDir })).papers[0].doi, "10.1000/importzip");
     assert.equal((await readPaperNotesPayload({ dataDir: targetDir })).notes[0].shortTitle, "2026@RIM");
     assert.equal((await readUserState({ configFile: path.join(targetUserDir, "config.json"), profileFile: path.join(targetUserDir, "profile.json") })).config.keywords.primary[0].text, "RIM");
