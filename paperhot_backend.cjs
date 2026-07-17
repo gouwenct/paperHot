@@ -155,16 +155,62 @@ const DEFAULT_ALIYUN_MODEL_POOL_MODELS = [
   "qwen3.7-plus",
   "qwen3-coder-plus"
 ];
+const ALIYUN_TEXT_MODEL_REGISTRY = [
+  ["qwen-plus", "Qwen Plus", "Qwen"],
+  ["qwen-flash", "Qwen Flash", "Qwen"],
+  ["qwen-turbo", "Qwen Turbo", "Qwen"],
+  ["qwen-long", "Qwen Long", "Qwen"],
+  ["qwen-max", "Qwen Max", "Qwen"],
+  ["qwen-max-latest", "Qwen Max Latest", "Qwen"],
+  ["qwen-plus-latest", "Qwen Plus Latest", "Qwen"],
+  ["qwen-turbo-latest", "Qwen Turbo Latest", "Qwen"],
+  ["qwen3-coder-plus", "Qwen3 Coder Plus", "Qwen Coder"],
+  ["qwen3-coder-flash", "Qwen3 Coder Flash", "Qwen Coder"],
+  ["qwen3-coder-plus-latest", "Qwen3 Coder Plus Latest", "Qwen Coder"],
+  ["qwen3.5-flash", "Qwen3.5 Flash", "Qwen"],
+  ["qwen3.7-plus", "Qwen3.7 Plus", "Qwen"],
+  ["qwen3-235b-a22b", "Qwen3 235B A22B", "Qwen"],
+  ["qwen3-32b", "Qwen3 32B", "Qwen"],
+  ["qwen3-30b-a3b", "Qwen3 30B A3B", "Qwen"],
+  ["qwen3-14b", "Qwen3 14B", "Qwen"],
+  ["qwen3-8b", "Qwen3 8B", "Qwen"],
+  ["qwen3-4b", "Qwen3 4B", "Qwen"],
+  ["qwen3-1.7b", "Qwen3 1.7B", "Qwen"],
+  ["qwen2.5-72b-instruct", "Qwen2.5 72B Instruct", "Qwen"],
+  ["qwen2.5-32b-instruct", "Qwen2.5 32B Instruct", "Qwen"],
+  ["qwen2.5-14b-instruct", "Qwen2.5 14B Instruct", "Qwen"],
+  ["qwen2.5-7b-instruct", "Qwen2.5 7B Instruct", "Qwen"],
+  ["qwen2.5-coder-32b-instruct", "Qwen2.5 Coder 32B Instruct", "Qwen Coder"],
+  ["qwen2.5-coder-14b-instruct", "Qwen2.5 Coder 14B Instruct", "Qwen Coder"],
+  ["qwen2.5-coder-7b-instruct", "Qwen2.5 Coder 7B Instruct", "Qwen Coder"],
+  ["deepseek-v3", "DeepSeek V3", "DeepSeek"],
+  ["deepseek-r1", "DeepSeek R1", "DeepSeek"],
+  ["deepseek-r1-distill-qwen-32b", "DeepSeek R1 Distill Qwen 32B", "DeepSeek"],
+  ["deepseek-r1-distill-qwen-14b", "DeepSeek R1 Distill Qwen 14B", "DeepSeek"]
+].map(([model, displayName, family], index) => ({
+  model,
+  displayName,
+  family,
+  enabled: index < DEFAULT_ALIYUN_MODEL_POOL_MODELS.length,
+  freeQuotaTokens: 1000000,
+  priority: (index + 1) * 10,
+  source: "aliyun-modelstudio-text-generation",
+  notes: "Text chat model for PaperHot summary and recommendation prompts."
+}));
 const DEFAULT_ALIYUN_MODEL_POOL = {
   quotaMode: "official-first",
   quotaFallback: "local",
   quotaSwitchRatio: 0.85,
   failureSwitchThreshold: 3,
-  models: DEFAULT_ALIYUN_MODEL_POOL_MODELS.map((model, index) => ({
-    model,
-    enabled: true,
-    freeQuotaTokens: 1000000,
-    priority: (index + 1) * 10
+  models: ALIYUN_TEXT_MODEL_REGISTRY.map(item => ({
+    model: item.model,
+    displayName: item.displayName,
+    family: item.family,
+    enabled: DEFAULT_ALIYUN_MODEL_POOL_MODELS.includes(item.model),
+    freeQuotaTokens: item.freeQuotaTokens,
+    priority: item.priority,
+    source: item.source,
+    notes: item.notes
   }))
 };
 const DEFAULT_LLM_CONFIG = {
@@ -1701,10 +1747,36 @@ function cleanLlmModelPoolEntry(value = {}, index = 0) {
   const priority = Number(value.priority);
   return {
     model,
+    displayName: compactText(value.displayName || value.name || model),
+    family: compactText(value.family || "Aliyun Text"),
     enabled: value.enabled !== false,
     freeQuotaTokens: Number.isFinite(quota) && quota > 0 ? Math.round(quota) : 1000000,
-    priority: Number.isFinite(priority) ? priority : (index + 1) * 10
+    priority: Number.isFinite(priority) ? priority : (index + 1) * 10,
+    source: compactText(value.source || "aliyun-modelstudio-text-generation"),
+    notes: compactText(value.notes)
   };
+}
+
+function cleanAliyunTextModelRegistryEntry(value = {}, index = 0) {
+  const model = compactText(value.model);
+  if (!model) return null;
+  if (/embedding|embed|rerank|ocr|audio|image|video|vision|speech/i.test(model)) return null;
+  return {
+    model,
+    displayName: compactText(value.displayName || value.name || model),
+    family: compactText(value.family || "Aliyun Text"),
+    enabled: value.enabled === true,
+    freeQuotaTokens: Math.max(1, Math.round(Number(value.freeQuotaTokens || 1000000))),
+    priority: Number.isFinite(Number(value.priority)) ? Number(value.priority) : (index + 1) * 10,
+    source: "aliyun-modelstudio-text-generation",
+    notes: compactText(value.notes || "Text chat model for PaperHot summary and recommendation prompts.")
+  };
+}
+
+function readAliyunTextModelRegistry() {
+  return ALIYUN_TEXT_MODEL_REGISTRY
+    .map((item, index) => cleanAliyunTextModelRegistryEntry(item, index))
+    .filter(Boolean);
 }
 
 function cleanLlmModelPool(value = {}) {
@@ -2388,7 +2460,10 @@ function cleanLlmModelPoolStateEntry(value = {}) {
     lastFailureAt: compactText(value.lastFailureAt),
     lastFailureMessage: compactText(value.lastFailureMessage),
     lastSwitchAt: compactText(value.lastSwitchAt),
-    lastSwitchReason: compactText(value.lastSwitchReason)
+    lastSwitchReason: compactText(value.lastSwitchReason),
+    lastTestAt: compactText(value.lastTestAt),
+    lastTestStatus: ["passed", "failed", ""].includes(value.lastTestStatus) ? compactText(value.lastTestStatus) : "",
+    lastTestMessage: compactText(value.lastTestMessage)
   };
 }
 
@@ -2424,27 +2499,25 @@ function modelPoolStatusForModel(modelConfig, stateEntry = {}, pool = DEFAULT_AL
   if (!modelConfig.enabled) return "disabled";
   const used = Number(stateEntry.localUsedTokens || 0);
   const quota = Number(modelConfig.freeQuotaTokens || 1000000);
-  if (stateEntry.status === "exhausted") return "exhausted";
+  const threshold = quota * Number(pool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio);
+  if (stateEntry.status === "exhausted" || used >= quota) return "exhausted";
   if (stateEntry.status === "failing") return "failing";
-  if (used >= quota) return "exhausted";
-  if (used >= quota * Number(pool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio)) return "near_limit";
+  if (used >= threshold) return "near_limit";
   return "available";
 }
 
 function selectLlmPoolModel({ pool, state = {}, attempted = new Set() }) {
   const cleanPool = cleanLlmModelPool(pool);
-  const enabled = cleanPool.models.filter(model => model.enabled && !attempted.has(model.model));
-  const rows = enabled.map(model => {
+  const rows = cleanPool.models
+    .filter(model => !attempted.has(model.model))
+    .map(model => {
     const entry = state.models?.[model.model] || {};
-    const used = Number(entry.localUsedTokens || 0);
-    const threshold = Number(model.freeQuotaTokens || 1000000) * Number(cleanPool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio);
-    const blocked = entry.status === "exhausted" || used >= threshold || entry.status === "failing";
-    return { ...model, state: entry, blocked, used };
+    const status = modelPoolStatusForModel(model, entry, cleanPool);
+    return { ...model, state: entry, status };
   });
-  const available = rows.find(row => !row.blocked);
+  const available = rows.find(row => row.status === "available");
   if (available) return { ...available, reason: "available" };
-  const fallback = rows.find(row => row.state.status !== "exhausted") || rows[0] || null;
-  return fallback ? { ...fallback, reason: "fallback" } : null;
+  return null;
 }
 
 function isRetryableLlmModelFailure(error) {
@@ -2467,25 +2540,47 @@ async function readLlmModelPoolStatus(options = {}) {
   const state = await readLlmModelPoolState(options.dataDir || DATA_DIR);
   const provider = (config.providers || []).find(item => item.id === config.activeProviderId) || {};
   const pool = cleanLlmModelPool(activeProviderModelPool(provider) || activeProviderModelPool(config) || DEFAULT_ALIYUN_MODEL_POOL);
+  const registry = readAliyunTextModelRegistry();
+  const savedRows = new Map(pool.models.map(item => [item.model, item]));
+  const allModels = registry.map(item => ({ ...item, ...(savedRows.get(item.model) || {}) }));
   return {
     activeModel: state.activeModel || config.model || provider.model || "",
     quotaMode: pool.quotaMode,
     quotaFallback: pool.quotaFallback,
     quotaSwitchRatio: pool.quotaSwitchRatio,
     failureSwitchThreshold: pool.failureSwitchThreshold,
-    models: pool.models.map(model => {
+    models: allModels.map(model => {
       const entry = state.models[model.model] || {};
+      const status = modelPoolStatusForModel(model, entry, pool);
       const localUsedTokens = Number(entry.localUsedTokens || 0);
+      const freeQuotaTokens = Number(model.freeQuotaTokens || 1000000);
+      const estimatedRemainingTokens = Math.max(0, freeQuotaTokens - localUsedTokens);
+      const usageRatio = freeQuotaTokens > 0 ? Math.min(1, localUsedTokens / freeQuotaTokens) : 0;
       return {
         ...model,
         ...entry,
         model: model.model,
-        status: modelPoolStatusForModel(model, entry, pool),
-        estimatedRemainingTokens: Math.max(0, Number(model.freeQuotaTokens || 0) - localUsedTokens),
-        thresholdTokens: Math.round(Number(model.freeQuotaTokens || 0) * Number(pool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio))
+        status,
+        statusLabel: llmModelPoolStatusLabel(status),
+        selectable: status === "available",
+        greyed: status !== "available",
+        failureHint: entry.lastSwitchReason === "repeated-failure" ? "上次因连续失败切换" : "",
+        localUsedTokens,
+        estimatedRemainingTokens,
+        usageRatio,
+        remainingRatio: Math.max(0, 1 - usageRatio),
+        thresholdTokens: Math.round(freeQuotaTokens * Number(pool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio))
       };
     })
   };
+}
+
+function llmModelPoolStatusLabel(status) {
+  if (status === "near_limit") return "低于 15%";
+  if (status === "exhausted") return "已用尽";
+  if (status === "failing") return "响应失败";
+  if (status === "disabled") return "未启用";
+  return "额度充足";
 }
 
 async function resetLlmModelPoolState(model, options = {}) {
@@ -7155,6 +7250,8 @@ module.exports = {
   readJournalMetricsConfig,
   readJournalMetricsCache,
   readLlmConfig,
+  readAliyunTextModelRegistry,
+  cleanAliyunTextModelRegistryEntry,
   cleanLlmModelPool,
   modelPoolStatusForModel,
   selectLlmPoolModel,

@@ -54,7 +54,9 @@ const {
   testLlmConfig,
   testFirecrawlConfig,
   readLlmConfig,
+  readAliyunTextModelRegistry,
   readLlmModelPoolState,
+  readLlmModelPoolStatus,
   writeLlmModelPoolState,
   cleanLlmModelPool,
   selectLlmPoolModel,
@@ -2825,6 +2827,83 @@ test("llm config includes a cleaned aliyun model pool with safe defaults", async
   assert.deepEqual(pool.models.map(item => item.model), ["qwen-flash", "qwen-plus"]);
   assert.equal(pool.models[0].freeQuotaTokens, 1000000);
   await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("aliyun text model registry exposes only chat-compatible text models", () => {
+  const models = readAliyunTextModelRegistry();
+  assert.ok(models.length >= 25);
+  assert.ok(models.some(item => item.model === "qwen-plus"));
+  assert.ok(models.some(item => item.model === "qwen-flash"));
+  assert.equal(models.some(item => /embedding|embed|rerank|ocr|audio|image|video/i.test(item.model)), false);
+  assert.equal(models.every(item => item.source === "aliyun-modelstudio-text-generation"), true);
+});
+
+test("llm model pool status greys out near-limit exhausted failing and disabled models", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-derived-status-"));
+  const llmConfigFile = path.join(tempDir, "llm.json");
+  await fs.writeFile(llmConfigFile, JSON.stringify({
+    enabled: true,
+    activeProviderId: "aliyun-coding",
+    providers: [{
+      id: "aliyun-coding",
+      provider: "aliyun-modelstudio",
+      enabled: true,
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "test-key",
+      model: "qwen-plus",
+      modelPool: {
+        quotaSwitchRatio: 0.85,
+        failureSwitchThreshold: 3,
+        models: [
+          { model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 },
+          { model: "qwen-flash", enabled: true, freeQuotaTokens: 1000000, priority: 20 },
+          { model: "qwen-turbo", enabled: false, freeQuotaTokens: 1000000, priority: 30 },
+          { model: "qwen-long", enabled: true, freeQuotaTokens: 1000000, priority: 40 }
+        ]
+      }
+    }]
+  }), "utf8");
+  await writeLlmModelPoolState({
+    models: {
+      "qwen-plus": { model: "qwen-plus", localUsedTokens: 850000, status: "near_limit" },
+      "qwen-flash": { model: "qwen-flash", localUsedTokens: 1000, status: "failing", lastSwitchReason: "repeated-failure" },
+      "qwen-long": { model: "qwen-long", localUsedTokens: 1000000, status: "exhausted" }
+    }
+  }, tempDir);
+
+  const status = await readLlmModelPoolStatus({ dataDir: tempDir, llmConfigFile });
+  const byModel = new Map(status.models.map(item => [item.model, item]));
+  assert.equal(byModel.get("qwen-plus").greyed, true);
+  assert.equal(byModel.get("qwen-plus").selectable, false);
+  assert.equal(byModel.get("qwen-plus").status, "near_limit");
+  assert.equal(byModel.get("qwen-flash").greyed, true);
+  assert.equal(byModel.get("qwen-flash").failureHint, "上次因连续失败切换");
+  assert.equal(byModel.get("qwen-turbo").status, "disabled");
+  assert.equal(byModel.get("qwen-long").status, "exhausted");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("aliyun llm pool selection skips greyed failing disabled and near-limit models", () => {
+  const pool = cleanLlmModelPool({
+    quotaSwitchRatio: 0.85,
+    models: [
+      { model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 },
+      { model: "qwen-flash", enabled: true, freeQuotaTokens: 1000000, priority: 20 },
+      { model: "qwen-turbo", enabled: false, freeQuotaTokens: 1000000, priority: 30 },
+      { model: "qwen-long", enabled: true, freeQuotaTokens: 1000000, priority: 40 }
+    ]
+  });
+  const selected = selectLlmPoolModel({
+    pool,
+    state: {
+      models: {
+        "qwen-plus": { model: "qwen-plus", localUsedTokens: 850000, status: "near_limit" },
+        "qwen-flash": { model: "qwen-flash", localUsedTokens: 1000, status: "failing" }
+      }
+    }
+  });
+  assert.equal(selected.model, "qwen-long");
+  assert.equal(selected.reason, "available");
 });
 
 test("llm model pool state defaults to empty model records", async () => {

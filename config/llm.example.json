@@ -337,22 +337,166 @@
             "priority": 40
           },
           {
-            "model": "qwen3.5-flash",
-            "enabled": true,
+            "model": "qwen-max",
+            "enabled": false,
             "freeQuotaTokens": 1000000,
             "priority": 50
           },
           {
-            "model": "qwen3.7-plus",
-            "enabled": true,
+            "model": "qwen-max-latest",
+            "enabled": false,
             "freeQuotaTokens": 1000000,
             "priority": 60
+          },
+          {
+            "model": "qwen-plus-latest",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 70
+          },
+          {
+            "model": "qwen-turbo-latest",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 80
           },
           {
             "model": "qwen3-coder-plus",
             "enabled": true,
             "freeQuotaTokens": 1000000,
-            "priority": 70
+            "priority": 90
+          },
+          {
+            "model": "qwen3-coder-flash",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 100
+          },
+          {
+            "model": "qwen3-coder-plus-latest",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 110
+          },
+          {
+            "model": "qwen3.5-flash",
+            "enabled": true,
+            "freeQuotaTokens": 1000000,
+            "priority": 120
+          },
+          {
+            "model": "qwen3.7-plus",
+            "enabled": true,
+            "freeQuotaTokens": 1000000,
+            "priority": 130
+          },
+          {
+            "model": "qwen3-235b-a22b",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 140
+          },
+          {
+            "model": "qwen3-32b",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 150
+          },
+          {
+            "model": "qwen3-30b-a3b",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 160
+          },
+          {
+            "model": "qwen3-14b",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 170
+          },
+          {
+            "model": "qwen3-8b",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 180
+          },
+          {
+            "model": "qwen3-4b",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 190
+          },
+          {
+            "model": "qwen3-1.7b",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 200
+          },
+          {
+            "model": "qwen2.5-72b-instruct",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 210
+          },
+          {
+            "model": "qwen2.5-32b-instruct",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 220
+          },
+          {
+            "model": "qwen2.5-14b-instruct",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 230
+          },
+          {
+            "model": "qwen2.5-7b-instruct",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 240
+          },
+          {
+            "model": "qwen2.5-coder-32b-instruct",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 250
+          },
+          {
+            "model": "qwen2.5-coder-14b-instruct",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 260
+          },
+          {
+            "model": "qwen2.5-coder-7b-instruct",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 270
+          },
+          {
+            "model": "deepseek-v3",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 280
+          },
+          {
+            "model": "deepseek-r1",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 290
+          },
+          {
+            "model": "deepseek-r1-distill-qwen-32b",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 300
+          },
+          {
+            "model": "deepseek-r1-distill-qwen-14b",
+            "enabled": false,
+            "freeQuotaTokens": 1000000,
+            "priority": 310
           }
         ]
       },
