@@ -2496,6 +2496,23 @@ async function writeLlmModelPoolState(state, dataDir = DATA_DIR) {
   return clean;
 }
 
+// ponytail: serialized only within this process; use an atomic datastore if model-pool writers become multi-process.
+const llmModelPoolStateUpdateQueues = new Map();
+
+function queueLlmModelPoolStateUpdate(dataDir, operation) {
+  const key = path.resolve(dataDir, LLM_MODEL_POOL_STATE_NAME);
+  const update = (llmModelPoolStateUpdateQueues.get(key) || Promise.resolve())
+    .catch(() => {})
+    .then(operation);
+  llmModelPoolStateUpdateQueues.set(key, update);
+  update.then(() => {
+    if (llmModelPoolStateUpdateQueues.get(key) === update) llmModelPoolStateUpdateQueues.delete(key);
+  }, () => {
+    if (llmModelPoolStateUpdateQueues.get(key) === update) llmModelPoolStateUpdateQueues.delete(key);
+  });
+  return update;
+}
+
 function modelPoolStatusForModel(modelConfig, stateEntry = {}, pool = DEFAULT_ALIYUN_MODEL_POOL) {
   if (!modelConfig.enabled) return "disabled";
   const used = Number(stateEntry.localUsedTokens || 0);
@@ -2533,11 +2550,12 @@ function isRetryableLlmModelFailure(error) {
 }
 
 function activeProviderModelPool(config = {}) {
+  const provider = Array.isArray(config.providers)
+    ? config.providers.find(item => item.id === config.activeProviderId)
+    : null;
+  if (provider) return provider.provider === "aliyun-modelstudio" ? provider.modelPool || null : null;
   if (config.provider === "aliyun-modelstudio") return config.modelPool || null;
-  if (!Array.isArray(config.providers)) return null;
-  const provider = config.providers.find(item => item.id === config.activeProviderId);
-  if (provider?.provider !== "aliyun-modelstudio") return null;
-  return provider.modelPool || null;
+  return null;
 }
 
 async function readLlmModelPoolStatus(options = {}) {
@@ -4275,118 +4293,133 @@ async function callConfiguredLlmWithSelectedPoolModel({
   fetchImpl,
   dataDir,
   pool,
-  state,
   selected,
-  attempted,
-  switchAlreadyLogged = false
+  attempted
 }) {
-  const previousModel = compactText(config.model);
   const selectedConfig = { ...config, model: selected.model };
-  if (!switchAlreadyLogged && previousModel && previousModel !== selected.model) {
-    const previousPoolModel = cleanLlmModelPool(pool).models.find(model => model.model === previousModel);
-    const previousState = state.models[previousModel] || {};
-    const previousThreshold = Number(previousPoolModel?.freeQuotaTokens || 1000000) * Number(pool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio);
-    const switchReason = previousState.status === "near_limit" || Number(previousState.localUsedTokens || 0) >= previousThreshold
-      ? "quota-threshold"
-      : "manual";
-    await appendOperationLogSafe({
-      action: "modify",
-      operation: "llm-model-switch",
-      fromModel: previousModel,
-      toModel: selected.model,
-      reason: switchReason,
-      localUsedTokens: Number(previousState.localUsedTokens || 0),
-      freeQuotaTokens: previousPoolModel?.freeQuotaTokens || selected.freeQuotaTokens,
-      officialQuotaStatus: previousState.officialQuotaStatus || "unavailable"
-    }, dataDir);
-  }
 
   try {
     const insight = await callConfiguredLlm({ paper, userBackground, config: selectedConfig, fetchImpl });
     const usage = insight?.tokenUsage || {};
-    const current = state.models[selected.model] || {};
-    const entry = cleanLlmModelPoolStateEntry({
-      ...current,
-      model: selected.model,
-      status: "available",
-      localUsedTokens: Number(current.localUsedTokens || 0) + Number(usage.total || 0),
-      consecutiveFailures: 0,
-      lastSuccessAt: new Date().toISOString()
+    await queueLlmModelPoolStateUpdate(dataDir, async () => {
+      const state = await readLlmModelPoolState(dataDir);
+      const current = state.models[selected.model] || {};
+      const entry = cleanLlmModelPoolStateEntry({
+        ...current,
+        model: selected.model,
+        status: "available",
+        localUsedTokens: Number(current.localUsedTokens || 0) + Number(usage.total || 0),
+        consecutiveFailures: 0,
+        lastSuccessAt: new Date().toISOString()
+      });
+      if (entry.localUsedTokens >= selected.freeQuotaTokens * pool.quotaSwitchRatio) entry.status = "near_limit";
+      state.models[selected.model] = entry;
+      await writeLlmModelPoolState(state, dataDir);
     });
-    if (entry.localUsedTokens >= selected.freeQuotaTokens * pool.quotaSwitchRatio) entry.status = "near_limit";
-    state.activeModel = selected.model;
-    state.models[selected.model] = entry;
-    await writeLlmModelPoolState(state, dataDir);
     return insight;
   } catch (error) {
     if (!isRetryableLlmModelFailure(error)) throw error;
-    const current = state.models[selected.model] || {};
-    const failureAt = new Date().toISOString();
-    const entry = cleanLlmModelPoolStateEntry({
-      ...current,
-      model: selected.model,
-      consecutiveFailures: Number(current.consecutiveFailures || 0) + 1,
-      lastFailureAt: failureAt,
-      lastFailureMessage: error.message
-    });
-    const failureThreshold = Number(pool.failureSwitchThreshold || DEFAULT_ALIYUN_MODEL_POOL.failureSwitchThreshold);
-    if (entry.consecutiveFailures < failureThreshold) {
-      state.models[selected.model] = entry;
-      await writeLlmModelPoolState(state, dataDir);
-      throw error;
-    }
-    entry.status = "failing";
-    state.models[selected.model] = entry;
-    attempted.add(selected.model);
-    const next = selectLlmPoolModel({ pool, state, attempted });
-    if (next && next.model !== selected.model) {
-      entry.lastSwitchAt = failureAt;
-      entry.lastSwitchReason = "repeated-failure";
-      state.models[selected.model] = entry;
-      await writeLlmModelPoolState(state, dataDir);
-      await appendOperationLogSafe({
-        action: "modify",
-        operation: "llm-model-switch",
-        fromModel: selected.model,
-        toModel: next.model,
-        reason: "repeated-failure",
-        localUsedTokens: Number(entry.localUsedTokens || 0),
-        freeQuotaTokens: selected.freeQuotaTokens,
-        officialQuotaStatus: entry.officialQuotaStatus || "unavailable"
-      }, dataDir);
-      return callConfiguredLlmWithSelectedPoolModel({
-        paper,
-        userBackground,
-        config,
-        fetchImpl,
-        dataDir,
-        pool,
-        state,
-        selected: next,
-        attempted,
-        switchAlreadyLogged: true
+    const next = await queueLlmModelPoolStateUpdate(dataDir, async () => {
+      const state = await readLlmModelPoolState(dataDir);
+      const current = state.models[selected.model] || {};
+      const failureAt = new Date().toISOString();
+      const entry = cleanLlmModelPoolStateEntry({
+        ...current,
+        model: selected.model,
+        consecutiveFailures: Number(current.consecutiveFailures || 0) + 1,
+        lastFailureAt: failureAt,
+        lastFailureMessage: error.message
       });
-    }
-    await writeLlmModelPoolState(state, dataDir);
-    throw error;
+      const failureThreshold = Number(pool.failureSwitchThreshold || DEFAULT_ALIYUN_MODEL_POOL.failureSwitchThreshold);
+      state.models[selected.model] = entry;
+      if (entry.consecutiveFailures < failureThreshold) {
+        await writeLlmModelPoolState(state, dataDir);
+        return null;
+      }
+
+      entry.status = "failing";
+      attempted.add(selected.model);
+      const nextModel = selectLlmPoolModel({ pool, state, attempted });
+      if (nextModel && nextModel.model !== selected.model) {
+        const previousModel = compactText(state.activeModel || selected.model);
+        entry.lastSwitchAt = failureAt;
+        entry.lastSwitchReason = "repeated-failure";
+        state.activeModel = nextModel.model;
+        await writeLlmModelPoolState(state, dataDir);
+        if (previousModel && previousModel !== nextModel.model) {
+          const previousPoolModel = cleanLlmModelPool(pool).models.find(model => model.model === previousModel);
+          const previousState = state.models[previousModel] || {};
+          await appendOperationLogSafe({
+            action: "modify",
+            operation: "llm-model-switch",
+            fromModel: previousModel,
+            toModel: nextModel.model,
+            reason: "repeated-failure",
+            localUsedTokens: Number(previousState.localUsedTokens || 0),
+            freeQuotaTokens: previousPoolModel?.freeQuotaTokens || nextModel.freeQuotaTokens,
+            officialQuotaStatus: previousState.officialQuotaStatus || "unavailable"
+          }, dataDir);
+        }
+        return nextModel;
+      }
+      await writeLlmModelPoolState(state, dataDir);
+      return null;
+    });
+    if (!next) throw error;
+    return callConfiguredLlmWithSelectedPoolModel({
+      paper,
+      userBackground,
+      config,
+      fetchImpl,
+      dataDir,
+      pool,
+      selected: next,
+      attempted
+    });
   }
 }
 
 async function callConfiguredLlmWithPool({ paper, userBackground, config, fetchImpl, dataDir = DATA_DIR }) {
   const pool = activeProviderModelPool(config);
   if (!pool) return callConfiguredLlm({ paper, userBackground, config, fetchImpl });
-  const state = await readLlmModelPoolState(dataDir);
+  const cleanPool = cleanLlmModelPool(pool);
   const attempted = new Set();
-  const selected = selectLlmPoolModel({ pool, state, attempted });
-  if (!selected) throw new Error("LLM 模型池中没有可用模型，请重置状态或启用其他模型");
+  const selected = await queueLlmModelPoolStateUpdate(dataDir, async () => {
+    const state = await readLlmModelPoolState(dataDir);
+    const selectedModel = selectLlmPoolModel({ pool: cleanPool, state, attempted });
+    if (!selectedModel) throw new Error("LLM 模型池中没有可用模型，请重置状态或启用其他模型");
+    const previousModel = compactText(state.activeModel || config.model);
+    if (state.activeModel !== selectedModel.model) {
+      state.activeModel = selectedModel.model;
+      await writeLlmModelPoolState(state, dataDir);
+    }
+    if (previousModel && previousModel !== selectedModel.model) {
+      const previousPoolModel = cleanPool.models.find(model => model.model === previousModel);
+      const previousState = state.models[previousModel] || {};
+      const previousThreshold = Number(previousPoolModel?.freeQuotaTokens || 1000000) * Number(cleanPool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio);
+      const switchReason = previousState.status === "near_limit" || Number(previousState.localUsedTokens || 0) >= previousThreshold
+        ? "quota-threshold"
+        : "manual";
+      await appendOperationLogSafe({
+        action: "modify",
+        operation: "llm-model-switch",
+        fromModel: previousModel,
+        toModel: selectedModel.model,
+        reason: switchReason,
+        localUsedTokens: Number(previousState.localUsedTokens || 0),
+        freeQuotaTokens: previousPoolModel?.freeQuotaTokens || selectedModel.freeQuotaTokens,
+        officialQuotaStatus: previousState.officialQuotaStatus || "unavailable"
+      }, dataDir);
+    }
+    return selectedModel;
+  });
   return callConfiguredLlmWithSelectedPoolModel({
     paper,
     userBackground,
     config,
     fetchImpl,
     dataDir,
-    pool: cleanLlmModelPool(pool),
-    state,
+    pool: cleanPool,
     selected,
     attempted
   });

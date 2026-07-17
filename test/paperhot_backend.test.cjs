@@ -3418,6 +3418,166 @@ test("aliyun llm pool switches after local quota threshold and logs the actual m
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
+test("aliyun llm pool uses the active provider pool from readLlmConfig output", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-read-config-"));
+  const llmConfigFile = path.join(tempDir, "llm.json");
+  await fs.writeFile(llmConfigFile, JSON.stringify({
+    enabled: true,
+    activeProviderId: "aliyun-coding",
+    providers: [{
+      id: "aliyun-coding",
+      provider: "aliyun-modelstudio",
+      enabled: true,
+      apiMode: "openai",
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "test",
+      model: "qwen-plus",
+      modelPool: {
+        quotaSwitchRatio: 0.85,
+        models: [
+          { model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 },
+          { model: "qwen-flash", enabled: true, freeQuotaTokens: 1000000, priority: 20 }
+        ]
+      }
+    }]
+  }), "utf8");
+  await writeLlmModelPoolState({
+    activeModel: "qwen-plus",
+    models: {
+      "qwen-plus": { model: "qwen-plus", localUsedTokens: 850000, status: "near_limit" }
+    }
+  }, tempDir);
+  const config = await readLlmConfig(llmConfigFile);
+  const calls = [];
+
+  const insight = await callConfiguredLlmWithPool({
+    dataDir: tempDir,
+    paper: { title: "SIM paper", summary: "Complete abstract text for testing." },
+    userBackground: "SIM",
+    config,
+    fetchImpl: async (url, init) => {
+      calls.push(JSON.parse(init.body).model);
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ abstractZh: "中文摘要", reason: "推荐理由" }) } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+        })
+      };
+    }
+  });
+
+  const state = await readLlmModelPoolState(tempDir);
+  assert.deepEqual(calls, ["qwen-flash"]);
+  assert.equal(insight.tokenUsage.model, "qwen-flash");
+  assert.equal(state.activeModel, "qwen-flash");
+  assert.equal(state.models["qwen-flash"].localUsedTokens, 15);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("aliyun llm pool preserves token and failure increments across concurrent requests", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-concurrent-state-"));
+  const config = {
+    enabled: true,
+    provider: "aliyun-modelstudio",
+    apiMode: "openai",
+    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    apiKey: "test",
+    model: "qwen-plus",
+    modelPool: {
+      failureSwitchThreshold: 5,
+      models: [{ model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 }]
+    }
+  };
+  const paper = { title: "SIM paper", summary: "Complete abstract text for testing." };
+  const successFetch = async () => {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    return {
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ abstractZh: "中文摘要", reason: "推荐理由" }) } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+      })
+    };
+  };
+
+  const successes = await Promise.all([
+    callConfiguredLlmWithPool({ dataDir: tempDir, paper, userBackground: "SIM", config, fetchImpl: successFetch }),
+    callConfiguredLlmWithPool({ dataDir: tempDir, paper, userBackground: "SIM", config, fetchImpl: successFetch })
+  ]);
+  assert.equal(successes.length, 2);
+  let state = await readLlmModelPoolState(tempDir);
+  assert.equal(state.models["qwen-plus"].localUsedTokens, 30);
+
+  const failureFetch = async () => {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+  const failures = await Promise.allSettled([
+    callConfiguredLlmWithPool({ dataDir: tempDir, paper, userBackground: "SIM", config, fetchImpl: failureFetch }),
+    callConfiguredLlmWithPool({ dataDir: tempDir, paper, userBackground: "SIM", config, fetchImpl: failureFetch })
+  ]);
+  assert.deepEqual(failures.map(result => result.status), ["rejected", "rejected"]);
+  state = await readLlmModelPoolState(tempDir);
+  assert.equal(state.models["qwen-plus"].localUsedTokens, 30);
+  assert.equal(state.models["qwen-plus"].consecutiveFailures, 2);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("aliyun llm pool logs a persisted model switch only once across requests", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-persisted-switch-"));
+  await writeLlmModelPoolState({
+    activeModel: "qwen-plus",
+    models: {
+      "qwen-plus": { model: "qwen-plus", localUsedTokens: 850000, status: "near_limit" },
+      "qwen-flash": { model: "qwen-flash", localUsedTokens: 0, status: "available" }
+    }
+  }, tempDir);
+  const config = {
+    enabled: true,
+    provider: "aliyun-modelstudio",
+    apiMode: "openai",
+    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    apiKey: "test",
+    model: "qwen-plus",
+    modelPool: {
+      quotaSwitchRatio: 0.85,
+      models: [
+        { model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 },
+        { model: "qwen-flash", enabled: true, freeQuotaTokens: 1000000, priority: 20 }
+      ]
+    }
+  };
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => ({
+      choices: [{ message: { content: JSON.stringify({ abstractZh: "中文摘要", reason: "推荐理由" }) } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    })
+  });
+
+  await callConfiguredLlmWithPool({
+    dataDir: tempDir,
+    paper: { title: "First paper", summary: "Complete abstract text for testing." },
+    userBackground: "SIM",
+    config,
+    fetchImpl
+  });
+  await callConfiguredLlmWithPool({
+    dataDir: tempDir,
+    paper: { title: "Second paper", summary: "Another complete abstract text for testing." },
+    userBackground: "SIM",
+    config,
+    fetchImpl
+  });
+
+  const operations = (await readOperationLog(tempDir)).filter(entry => entry.operation === "llm-model-switch");
+  assert.equal(operations.length, 1);
+  assert.equal(operations[0].fromModel, "qwen-plus");
+  assert.equal(operations[0].toModel, "qwen-flash");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
 test("aliyun llm pool retries the same paper on the next model after repeated retryable failures", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-failure-switch-"));
   const llmConfigFile = path.join(tempDir, "llm.json");
