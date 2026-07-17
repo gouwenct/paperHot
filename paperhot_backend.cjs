@@ -2420,6 +2420,48 @@ async function writeLlmModelPoolState(state, dataDir = DATA_DIR) {
   return clean;
 }
 
+function modelPoolStatusForModel(modelConfig, stateEntry = {}, pool = DEFAULT_ALIYUN_MODEL_POOL) {
+  if (!modelConfig.enabled) return "disabled";
+  const used = Number(stateEntry.localUsedTokens || 0);
+  const quota = Number(modelConfig.freeQuotaTokens || 1000000);
+  if (stateEntry.status === "exhausted") return "exhausted";
+  if (stateEntry.status === "failing") return "failing";
+  if (used >= quota) return "exhausted";
+  if (used >= quota * Number(pool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio)) return "near_limit";
+  return "available";
+}
+
+function selectLlmPoolModel({ pool, state = {}, attempted = new Set() }) {
+  const cleanPool = cleanLlmModelPool(pool);
+  const enabled = cleanPool.models.filter(model => model.enabled && !attempted.has(model.model));
+  const rows = enabled.map(model => {
+    const entry = state.models?.[model.model] || {};
+    const used = Number(entry.localUsedTokens || 0);
+    const threshold = Number(model.freeQuotaTokens || 1000000) * Number(cleanPool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio);
+    const blocked = entry.status === "exhausted" || used >= threshold || entry.status === "failing";
+    return { ...model, state: entry, blocked, used };
+  });
+  const available = rows.find(row => !row.blocked);
+  if (available) return { ...available, reason: "available" };
+  const fallback = rows.find(row => row.state.status !== "exhausted") || rows[0] || null;
+  return fallback ? { ...fallback, reason: "fallback" } : null;
+}
+
+function isRetryableLlmModelFailure(error) {
+  const message = String(error?.message || error || "");
+  if (/HTTP\s*(401|403)/i.test(message)) return false;
+  if (/API 密钥未填写|Endpoint 未填写|模型未填写|invalid endpoint/i.test(message)) return false;
+  return /HTTP\s*(429|5\d\d)|timeout|network|quota|rate limit|insufficient|额度|限流/i.test(message);
+}
+
+function activeProviderModelPool(config = {}) {
+  if (config.provider === "aliyun-modelstudio") return config.modelPool || null;
+  if (!Array.isArray(config.providers)) return null;
+  const provider = config.providers.find(item => item.id === config.activeProviderId);
+  if (provider?.provider !== "aliyun-modelstudio") return null;
+  return provider.modelPool || null;
+}
+
 // ponytail: serialized only within this process; use an atomic datastore if multi-process fetches are introduced.
 let webOfScienceUsageWriteQueue = Promise.resolve();
 
@@ -3955,6 +3997,120 @@ async function callConfiguredLlm({ paper, userBackground, config, fetchImpl }) {
   };
 }
 
+async function callConfiguredLlmWithSelectedPoolModel({
+  paper,
+  userBackground,
+  config,
+  fetchImpl,
+  dataDir,
+  pool,
+  state,
+  selected,
+  attempted
+}) {
+  const previousModel = compactText(config.model);
+  const selectedConfig = { ...config, model: selected.model };
+  if (previousModel && previousModel !== selected.model) {
+    const previousPoolModel = cleanLlmModelPool(pool).models.find(model => model.model === previousModel);
+    const previousState = state.models[previousModel] || {};
+    const previousThreshold = Number(previousPoolModel?.freeQuotaTokens || 1000000) * Number(pool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio);
+    const switchReason = previousState.status === "near_limit" || Number(previousState.localUsedTokens || 0) >= previousThreshold
+      ? "quota-threshold"
+      : "manual";
+    await appendOperationLogSafe({
+      action: "modify",
+      operation: "llm-model-switch",
+      fromModel: previousModel,
+      toModel: selected.model,
+      reason: switchReason,
+      localUsedTokens: Number(previousState.localUsedTokens || 0),
+      freeQuotaTokens: previousPoolModel?.freeQuotaTokens || selected.freeQuotaTokens,
+      officialQuotaStatus: previousState.officialQuotaStatus || "unavailable"
+    }, dataDir);
+  }
+
+  try {
+    const insight = await callConfiguredLlm({ paper, userBackground, config: selectedConfig, fetchImpl });
+    const usage = insight?.tokenUsage || {};
+    const current = state.models[selected.model] || {};
+    const entry = cleanLlmModelPoolStateEntry({
+      ...current,
+      model: selected.model,
+      status: "available",
+      localUsedTokens: Number(current.localUsedTokens || 0) + Number(usage.total || 0),
+      consecutiveFailures: 0,
+      lastSuccessAt: new Date().toISOString()
+    });
+    if (entry.localUsedTokens >= selected.freeQuotaTokens * pool.quotaSwitchRatio) entry.status = "near_limit";
+    state.activeModel = selected.model;
+    state.models[selected.model] = entry;
+    await writeLlmModelPoolState(state, dataDir);
+    return insight;
+  } catch (error) {
+    const current = state.models[selected.model] || {};
+    const entry = cleanLlmModelPoolStateEntry({
+      ...current,
+      model: selected.model,
+      consecutiveFailures: Number(current.consecutiveFailures || 0) + 1,
+      lastFailureAt: new Date().toISOString(),
+      lastFailureMessage: error.message
+    });
+    if (entry.consecutiveFailures >= Number(pool.failureSwitchThreshold || DEFAULT_ALIYUN_MODEL_POOL.failureSwitchThreshold)) {
+      entry.status = "failing";
+    }
+    state.models[selected.model] = entry;
+    await writeLlmModelPoolState(state, dataDir);
+    attempted.add(selected.model);
+    if (isRetryableLlmModelFailure(error)) {
+      const next = selectLlmPoolModel({ pool, state, attempted });
+      if (next && next.model !== selected.model) {
+        await appendOperationLogSafe({
+          action: "modify",
+          operation: "llm-model-switch",
+          fromModel: selected.model,
+          toModel: next.model,
+          reason: "repeated-failure",
+          localUsedTokens: Number(entry.localUsedTokens || 0),
+          freeQuotaTokens: selected.freeQuotaTokens,
+          officialQuotaStatus: entry.officialQuotaStatus || "unavailable"
+        }, dataDir);
+        return callConfiguredLlmWithSelectedPoolModel({
+          paper,
+          userBackground,
+          config,
+          fetchImpl,
+          dataDir,
+          pool,
+          state,
+          selected: next,
+          attempted
+        });
+      }
+    }
+    throw error;
+  }
+}
+
+async function callConfiguredLlmWithPool({ paper, userBackground, config, fetchImpl, dataDir = DATA_DIR }) {
+  const pool = activeProviderModelPool(config);
+  if (!pool) return callConfiguredLlm({ paper, userBackground, config, fetchImpl });
+  const state = await readLlmModelPoolState(dataDir);
+  const attempted = new Set();
+  const selected = selectLlmPoolModel({ pool, state, attempted });
+  if (!selected) return callConfiguredLlm({ paper, userBackground, config, fetchImpl });
+  return callConfiguredLlmWithSelectedPoolModel({
+    paper,
+    userBackground,
+    config,
+    fetchImpl,
+    dataDir,
+    pool: cleanLlmModelPool(pool),
+    state,
+    selected,
+    attempted
+  });
+}
+
 async function testLlmConfig(payload = {}, options = {}) {
   const previous = await readLlmConfig(options.configFile);
   const config = mergeLlmConfig(previous, payload.llm || payload);
@@ -3962,7 +4118,7 @@ async function testLlmConfig(payload = {}, options = {}) {
   if (!config.endpoint) throw new Error("LLM Endpoint 未填写");
   if (!config.model) throw new Error("LLM 模型未填写");
   if (!config.apiKey && config.apiMode !== "local") throw new Error("LLM API 密钥未填写");
-  const insight = await callConfiguredLlm({
+  const insight = await callConfiguredLlmWithPool({
     paper: {
       title: "Structured illumination microscopy connectivity test",
       summary: "This is a short connection test for structured illumination microscopy paper summarization.",
@@ -3972,7 +4128,8 @@ async function testLlmConfig(payload = {}, options = {}) {
     },
     userBackground: config.userBackground || DEFAULT_USER_BACKGROUND,
     config,
-    fetchImpl: options.fetchImpl || fetch
+    fetchImpl: options.fetchImpl || fetch,
+    dataDir: options.dataDir || DATA_DIR
   });
   const usage = insight?.tokenUsage || defaultTokenUsage();
   await appendOperationLogSafe({
@@ -4050,7 +4207,7 @@ async function enrichPapersWithLlmInsights(papers, options = {}) {
     try {
       const insight = fetcher
         ? await fetcher({ paper, userBackground })
-        : await callConfiguredLlm({ paper, userBackground, config, fetchImpl });
+        : await callConfiguredLlmWithPool({ paper, userBackground, config, fetchImpl, dataDir: options.dataDir || DATA_DIR });
       if (llmLog && insight?.tokenUsage?.status === "已调用 AI") {
         const usage = insight.tokenUsage;
         const prompt = Number(usage.prompt || 0);
@@ -6947,6 +7104,10 @@ module.exports = {
   readJournalMetricsCache,
   readLlmConfig,
   cleanLlmModelPool,
+  modelPoolStatusForModel,
+  selectLlmPoolModel,
+  isRetryableLlmModelFailure,
+  callConfiguredLlmWithPool,
   readLlmModelPoolState,
   writeLlmModelPoolState,
   readOpenAlexConfig,

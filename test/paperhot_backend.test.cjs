@@ -55,6 +55,11 @@ const {
   testFirecrawlConfig,
   readLlmConfig,
   readLlmModelPoolState,
+  writeLlmModelPoolState,
+  cleanLlmModelPool,
+  selectLlmPoolModel,
+  isRetryableLlmModelFailure,
+  callConfiguredLlmWithPool,
   todayString,
   readIntegrationConfigs,
   readIntegrationSecrets,
@@ -2826,6 +2831,125 @@ test("llm model pool state defaults to empty model records", async () => {
   const state = await readLlmModelPoolState(tempDir);
   assert.deepEqual(state.models, {});
   assert.equal(state.format, "paperhot-llm-model-pool-state");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("selects the first aliyun pool model below the quota threshold", () => {
+  const pool = cleanLlmModelPool({
+    quotaSwitchRatio: 0.85,
+    models: [
+      { model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 },
+      { model: "qwen-flash", enabled: true, freeQuotaTokens: 1000000, priority: 20 }
+    ]
+  });
+  const selected = selectLlmPoolModel({
+    pool,
+    state: {
+      models: {
+        "qwen-plus": { model: "qwen-plus", status: "near_limit", localUsedTokens: 850000 },
+        "qwen-flash": { model: "qwen-flash", status: "available", localUsedTokens: 1000 }
+      }
+    }
+  });
+  assert.equal(selected.model, "qwen-flash");
+  assert.equal(selected.reason, "available");
+});
+
+test("keeps a shared credential failure from rotating through the pool", () => {
+  assert.equal(isRetryableLlmModelFailure(new Error("LLM 摘要失败：HTTP 429")), true);
+  assert.equal(isRetryableLlmModelFailure(new Error("LLM 摘要失败：HTTP 500")), true);
+  assert.equal(isRetryableLlmModelFailure(new Error("LLM 摘要失败：HTTP 401")), false);
+  assert.equal(isRetryableLlmModelFailure(new Error("LLM API 密钥未填写")), false);
+});
+
+test("aliyun llm pool switches after local quota threshold and logs the actual model", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-switch-"));
+  await writeLlmModelPoolState({
+    models: {
+      "qwen-plus": { model: "qwen-plus", localUsedTokens: 850000, status: "near_limit" },
+      "qwen-flash": { model: "qwen-flash", localUsedTokens: 0, status: "available" }
+    }
+  }, tempDir);
+  const calls = [];
+  const insight = await callConfiguredLlmWithPool({
+    dataDir: tempDir,
+    paper: { title: "SIM paper", summary: "Complete abstract text for testing." },
+    userBackground: "SIM",
+    config: {
+      enabled: true,
+      provider: "aliyun-modelstudio",
+      apiMode: "openai",
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "test",
+      model: "qwen-plus",
+      modelPool: {
+        quotaSwitchRatio: 0.85,
+        failureSwitchThreshold: 3,
+        models: [
+          { model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 },
+          { model: "qwen-flash", enabled: true, freeQuotaTokens: 1000000, priority: 20 }
+        ]
+      }
+    },
+    fetchImpl: async (url, init) => {
+      calls.push(JSON.parse(init.body).model);
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ abstractZh: "中文摘要", reason: "推荐理由" }) } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+        })
+      };
+    }
+  });
+  assert.deepEqual(calls, ["qwen-flash"]);
+  assert.equal(insight.tokenUsage.model, "qwen-flash");
+  const operations = await readOperationLog(tempDir);
+  assert.equal(operations[0].operation, "llm-model-switch");
+  assert.equal(operations[0].reason, "quota-threshold");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("aliyun llm pool retries the same paper on the next model after repeated retryable failures", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-failure-switch-"));
+  const calls = [];
+  const insight = await callConfiguredLlmWithPool({
+    dataDir: tempDir,
+    paper: { title: "SIM paper", summary: "Complete abstract text for testing." },
+    userBackground: "SIM",
+    config: {
+      enabled: true,
+      provider: "aliyun-modelstudio",
+      apiMode: "openai",
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "test",
+      model: "qwen-plus",
+      modelPool: {
+        quotaSwitchRatio: 0.85,
+        failureSwitchThreshold: 1,
+        models: [
+          { model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 },
+          { model: "qwen-flash", enabled: true, freeQuotaTokens: 1000000, priority: 20 }
+        ]
+      }
+    },
+    fetchImpl: async (url, init) => {
+      const model = JSON.parse(init.body).model;
+      calls.push(model);
+      if (model === "qwen-plus") return { ok: false, status: 429, json: async () => ({}) };
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ abstractZh: "中文摘要", reason: "推荐理由" }) } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+        })
+      };
+    }
+  });
+  assert.deepEqual(calls, ["qwen-plus", "qwen-flash"]);
+  assert.equal(insight.tokenUsage.model, "qwen-flash");
+  const state = await readLlmModelPoolState(tempDir);
+  assert.equal(state.models["qwen-plus"].status, "failing");
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
