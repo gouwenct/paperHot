@@ -7103,10 +7103,46 @@
         const response = await fetch("/api/integrations/llm/model-pool");
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
-        llmModelPoolStatus = payload.modelPool || null;
+        syncLlmModelPoolStatus(payload.modelPool || null);
       } catch (error) {
         llmModelPoolMessage = `模型池状态暂不可用：${error.message}`;
       }
+    }
+
+    function syncLlmModelPoolStatus(status) {
+      llmModelPoolStatus = status || null;
+      if (!Array.isArray(status?.models)) return;
+      const activeProviderId = integrationState.llm.activeProviderId;
+      const models = status.models.map(model => ({
+        model: model.model,
+        displayName: model.displayName,
+        family: model.family,
+        enabled: model.enabled !== false,
+        freeQuotaTokens: model.freeQuotaTokens,
+        priority: model.priority,
+        source: model.source,
+        notes: model.notes
+      }));
+      integrationState = {
+        ...integrationState,
+        llm: {
+          ...integrationState.llm,
+          providers: (integrationState.llm.providers || []).map(provider => {
+            if (provider.id !== activeProviderId || provider.provider !== "aliyun-modelstudio") return provider;
+            return {
+              ...provider,
+              modelPool: {
+                ...(provider.modelPool || defaultAliyunModelPool),
+                quotaMode: status.quotaMode,
+                quotaFallback: status.quotaFallback,
+                quotaSwitchRatio: status.quotaSwitchRatio,
+                failureSwitchThreshold: status.failureSwitchThreshold,
+                models
+              }
+            };
+          })
+        }
+      };
     }
 
     async function updateOneLlmPoolModel(model, patch) {
@@ -7117,7 +7153,7 @@
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
-      llmModelPoolStatus = payload.status || null;
+      syncLlmModelPoolStatus(payload.status || null);
       llmModelPoolMessage = `${model} 已更新`;
     }
 
@@ -7132,7 +7168,7 @@
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
-      llmModelPoolStatus = payload.status || null;
+      syncLlmModelPoolStatus(payload.status || null);
       llmModelPoolMessage = payload.ok ? `${model} 测试成功，已自动启用` : `${model} 测试失败：${payload.error || "模型未响应"}`;
     }
 

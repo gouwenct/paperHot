@@ -502,6 +502,52 @@ test("aliyun model pool manager calls per-model test and update endpoints", asyn
   assert.match(html, /updateOneLlmPoolModel/);
 });
 
+test("aliyun model pool mutations synchronize provider state for later config saves", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const syncSource = readNamedFunction(html, "syncLlmModelPoolStatus", "updateOneLlmPoolModel");
+  const updateSource = readNamedFunction(html, "updateOneLlmPoolModel", "testOneLlmPoolModel");
+  const testSource = readNamedFunction(html, "testOneLlmPoolModel", "loadIntegrationSecrets");
+  assert.match(updateSource, /syncLlmModelPoolStatus\(payload\.status \|\| null\)/);
+  assert.match(testSource, /syncLlmModelPoolStatus\(payload\.status \|\| null\)/);
+
+  const modelPool = {
+    quotaMode: "official-first",
+    quotaFallback: "local",
+    quotaSwitchRatio: 0.85,
+    failureSwitchThreshold: 3,
+    models: [{ model: "qwen-plus", enabled: false, freeQuotaTokens: 1000000, priority: 10 }]
+  };
+  const result = new Function(`
+    let llmModelPoolStatus = null;
+    const defaultAliyunModelPool = {};
+    let integrationState = {
+      llm: {
+        activeProviderId: "aliyun-coding",
+        providers: [
+          { id: "aliyun-coding", provider: "aliyun-modelstudio", modelPool: ${JSON.stringify(modelPool)} },
+          { id: "other", provider: "custom", modelPool: { models: [{ model: "unchanged" }] } }
+        ]
+      }
+    };
+    ${syncSource}
+    return { syncLlmModelPoolStatus, state: () => integrationState, status: () => llmModelPoolStatus };
+  `)();
+  const status = {
+    ...modelPool,
+    models: [
+      { model: "qwen-plus", displayName: "Qwen Plus", family: "Qwen", enabled: true, freeQuotaTokens: 1000000, priority: 10 },
+      { model: "qwen-hidden", displayName: "Qwen Hidden", family: "Qwen", enabled: true, freeQuotaTokens: 2000000, priority: 20 }
+    ]
+  };
+  result.syncLlmModelPoolStatus(status);
+  assert.equal(result.status(), status);
+  assert.deepEqual(result.state().llm.providers[0].modelPool.models.map(model => [model.model, model.enabled]), [
+    ["qwen-plus", true],
+    ["qwen-hidden", true]
+  ]);
+  assert.deepEqual(result.state().llm.providers[1].modelPool, { models: [{ model: "unchanged" }] });
+});
+
 test("OpenAlex config separates discovery from automatic field enrichment", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /title:\s*"OpenAlex"/);
