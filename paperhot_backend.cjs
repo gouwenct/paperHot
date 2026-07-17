@@ -1783,26 +1783,27 @@ function cleanLlmModelPool(value = {}) {
   const input = value && typeof value === "object" ? value : {};
   const ratio = Number(input.quotaSwitchRatio);
   const failureSwitchThreshold = Number(input.failureSwitchThreshold);
-  const sourceModels = Array.isArray(input.models) && input.models.length
-    ? input.models
-    : DEFAULT_ALIYUN_MODEL_POOL.models;
-  const seen = new Set();
-  const models = sourceModels
+  const registry = readAliyunTextModelRegistry();
+  const registryByModel = new Map(registry.map(item => [item.model.toLowerCase(), item]));
+  const savedRows = new Map();
+  (Array.isArray(input.models) ? input.models : [])
     .map((item, index) => cleanLlmModelPoolEntry(item, index))
     .filter(Boolean)
-    .sort((left, right) => left.priority - right.priority)
-    .filter(item => {
+    .forEach(item => {
       const key = item.model.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
+      if (registryByModel.has(key) && !savedRows.has(key)) savedRows.set(key, item);
     });
+  const models = registry
+    .map(item => ({ ...item, ...(savedRows.get(item.model.toLowerCase()) || {}) }))
+    .sort((left, right) => left.priority - right.priority);
   return {
     quotaMode: input.quotaMode === "official-first" ? "official-first" : DEFAULT_ALIYUN_MODEL_POOL.quotaMode,
     quotaFallback: input.quotaFallback === "local" ? "local" : DEFAULT_ALIYUN_MODEL_POOL.quotaFallback,
-    quotaSwitchRatio: Number.isFinite(ratio) && ratio > 0 && ratio <= 1 ? ratio : DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio,
+    quotaSwitchRatio: Number.isFinite(ratio) && ratio > 0
+      ? Math.min(ratio, DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio)
+      : DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio,
     failureSwitchThreshold: Number.isInteger(failureSwitchThreshold) && failureSwitchThreshold > 0 ? failureSwitchThreshold : DEFAULT_ALIYUN_MODEL_POOL.failureSwitchThreshold,
-    models: models.length ? models : DEFAULT_ALIYUN_MODEL_POOL.models
+    models
   };
 }
 

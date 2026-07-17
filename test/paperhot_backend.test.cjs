@@ -59,6 +59,7 @@ const {
   readLlmModelPoolStatus,
   writeLlmModelPoolState,
   cleanLlmModelPool,
+  modelPoolStatusForModel,
   selectLlmPoolModel,
   isRetryableLlmModelFailure,
   callConfiguredLlmWithPool,
@@ -2822,11 +2823,75 @@ test("llm config includes a cleaned aliyun model pool with safe defaults", async
   const pool = config.providers.find(provider => provider.id === "aliyun-coding").modelPool;
   assert.equal(pool.quotaMode, "official-first");
   assert.equal(pool.quotaFallback, "local");
-  assert.equal(pool.quotaSwitchRatio, 0.99);
+  assert.equal(pool.quotaSwitchRatio, 0.85);
   assert.equal(pool.failureSwitchThreshold, 3);
-  assert.deepEqual(pool.models.map(item => item.model), ["qwen-flash", "qwen-plus"]);
-  assert.equal(pool.models[0].freeQuotaTokens, 1000000);
+  assert.equal(pool.models.some(item => item.model === "qwen-flash"), true);
+  assert.equal(pool.models.find(item => item.model === "qwen-flash").freeQuotaTokens, 1000000);
   await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("aliyun llm pool filters non-registry models from automatic calls", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-registry-filter-"));
+  await writeLlmModelPoolState({
+    models: {
+      "qwen-plus": { model: "qwen-plus", localUsedTokens: 850000, status: "near_limit" }
+    }
+  }, tempDir);
+  const calls = [];
+  const insight = await callConfiguredLlmWithPool({
+    dataDir: tempDir,
+    paper: { title: "SIM paper", summary: "Complete abstract text for testing." },
+    userBackground: "SIM",
+    config: {
+      enabled: true,
+      provider: "aliyun-modelstudio",
+      apiMode: "openai",
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "test",
+      model: "qwen-plus",
+      modelPool: {
+        models: [
+          { model: "qwen-embedding-v3", enabled: true, freeQuotaTokens: 1000000, priority: 1 },
+          { model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 }
+        ]
+      }
+    },
+    fetchImpl: async (url, init) => {
+      calls.push(JSON.parse(init.body).model);
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ abstractZh: "中文摘要", reason: "推荐理由" }) } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+        })
+      };
+    }
+  });
+  assert.deepEqual(calls, ["qwen-flash"]);
+  assert.equal(insight.tokenUsage.model, "qwen-flash");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("aliyun llm pool caps a saved 0.99 threshold at the binding 85 percent limit", () => {
+  const pool = cleanLlmModelPool({
+    quotaSwitchRatio: 0.99,
+    models: [{ model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 }]
+  });
+  const selected = selectLlmPoolModel({
+    pool,
+    state: {
+      models: {
+        "qwen-plus": { model: "qwen-plus", localUsedTokens: 850000 }
+      }
+    }
+  });
+  assert.equal(pool.quotaSwitchRatio, 0.85);
+  assert.equal(modelPoolStatusForModel(
+    pool.models.find(item => item.model === "qwen-plus"),
+    { localUsedTokens: 850000 },
+    pool
+  ), "near_limit");
+  assert.notEqual(selected?.model, "qwen-plus");
 });
 
 test("aliyun text model registry exposes only chat-compatible text models", () => {
@@ -2906,6 +2971,43 @@ test("llm model pool status keeps default enabled models enabled with a partial 
   assert.equal(byModel.get("qwen3-coder-plus").status, "available");
   assert.equal(byModel.get("qwen-max").enabled, false);
   assert.equal(byModel.get("qwen-max").status, "disabled");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("aliyun llm pool rotates a partial saved pool to another enabled default", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-partial-rotation-"));
+  await writeLlmModelPoolState({
+    models: {
+      "qwen-plus": { model: "qwen-plus", localUsedTokens: 850000, status: "near_limit" }
+    }
+  }, tempDir);
+  const calls = [];
+  const insight = await callConfiguredLlmWithPool({
+    dataDir: tempDir,
+    paper: { title: "SIM paper", summary: "Complete abstract text for testing." },
+    userBackground: "SIM",
+    config: {
+      enabled: true,
+      provider: "aliyun-modelstudio",
+      apiMode: "openai",
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "test",
+      model: "qwen-plus",
+      modelPool: { models: [{ model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 }] }
+    },
+    fetchImpl: async (url, init) => {
+      calls.push(JSON.parse(init.body).model);
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ abstractZh: "中文摘要", reason: "推荐理由" }) } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+        })
+      };
+    }
+  });
+  assert.deepEqual(calls, ["qwen-flash"]);
+  assert.equal(insight.tokenUsage.model, "qwen-flash");
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -2992,7 +3094,12 @@ test("aliyun llm pool rejects when every configured model is unavailable", async
         quotaSwitchRatio: 0.85,
         models: [
           { model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 },
-          { model: "qwen-flash", enabled: true, freeQuotaTokens: 1000000, priority: 20 }
+          { model: "qwen-flash", enabled: true, freeQuotaTokens: 1000000, priority: 20 },
+          { model: "qwen-turbo", enabled: false, freeQuotaTokens: 1000000, priority: 30 },
+          { model: "qwen-long", enabled: false, freeQuotaTokens: 1000000, priority: 40 },
+          { model: "qwen3.5-flash", enabled: false, freeQuotaTokens: 1000000, priority: 120 },
+          { model: "qwen3.7-plus", enabled: false, freeQuotaTokens: 1000000, priority: 130 },
+          { model: "qwen3-coder-plus", enabled: false, freeQuotaTokens: 1000000, priority: 90 }
         ]
       }
     },
