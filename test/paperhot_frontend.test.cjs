@@ -522,7 +522,7 @@ test("aliyun model pool manager synchronizes an inactive provider state for late
     models: [{ model: "qwen-plus", enabled: false, freeQuotaTokens: 1000000, priority: 10 }]
   };
   const result = new Function(`
-    let llmModelPoolStatus = null;
+    const llmModelPoolStatusByProviderId = {};
     const defaultAliyunModelPool = {};
     let integrationState = {
       llm: {
@@ -537,9 +537,10 @@ test("aliyun model pool manager synchronizes an inactive provider state for late
     const document = { querySelector: () => null };
     ${readProviderSource}
     ${currentConfigSource}
-    return { syncLlmModelPoolStatus, currentLlmConfig, state: () => integrationState, status: () => llmModelPoolStatus };
+    return { syncLlmModelPoolStatus, currentLlmConfig, state: () => integrationState, status: providerId => llmModelPoolStatusByProviderId[providerId] };
   `)();
   const status = {
+    providerId: "aliyun-coding",
     ...modelPool,
     models: [
       { model: "qwen-plus", displayName: "Qwen Plus", family: "Qwen", enabled: true, freeQuotaTokens: 1000000, priority: 10 },
@@ -547,7 +548,7 @@ test("aliyun model pool manager synchronizes an inactive provider state for late
     ]
   };
   result.syncLlmModelPoolStatus(status, "aliyun-coding");
-  assert.equal(result.status(), status);
+  assert.equal(result.status("aliyun-coding"), status);
   assert.deepEqual(result.state().llm.providers[1].modelPool.models.map(model => [model.model, model.enabled]), [
     ["qwen-plus", true],
     ["qwen-hidden", true]
@@ -559,6 +560,52 @@ test("aliyun model pool manager synchronizes an inactive provider state for late
     ["qwen-plus", true],
     ["qwen-hidden", true]
   ]);
+});
+
+test("aliyun model pool status cache is isolated by provider id", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const syncSource = readNamedFunction(html, "syncLlmModelPoolStatus", "updateOneLlmPoolModel");
+  const rowsSource = readNamedFunction(html, "modelPoolRowsForProvider", "llmModelPoolCard");
+  const loadSource = readNamedFunction(html, "loadLlmModelPoolStatus", "syncLlmModelPoolStatus");
+  const activateSource = readNamedFunction(html, "activateLlmProvider", "toggleSecretVisibility");
+  const clickSource = readNamedFunction(html, "handleIntegrationClick", "bindLlmModelPoolManager");
+  assert.match(loadSource, /providerId=\$\{encodeURIComponent\(selectedProviderId\)\}/);
+  assert.match(activateSource, /loadLlmModelPoolStatusIfNeeded\(providerId\)/);
+  assert.match(clickSource, /loadLlmModelPoolStatusIfNeeded\(providerId\)/);
+
+  const result = new Function(`
+    const llmModelPoolStatusByProviderId = {};
+    const defaultAliyunModelPool = { models: [] };
+    let integrationState = {
+      llm: {
+        activeProviderId: "aliyun-a",
+        providers: [
+          { id: "aliyun-a", provider: "aliyun-modelstudio", modelPool: { models: [] } },
+          { id: "aliyun-b", provider: "aliyun-modelstudio", modelPool: { models: [] } }
+        ]
+      }
+    };
+    ${syncSource}
+    ${rowsSource}
+    return {
+      syncLlmModelPoolStatus,
+      modelPoolRowsForProvider,
+      provider: id => integrationState.llm.providers.find(provider => provider.id === id)
+    };
+  `)();
+  const statusA = {
+    providerId: "aliyun-a",
+    models: [{ model: "qwen-plus", localUsedTokens: 11, statusLabel: "A" }]
+  };
+  const statusB = {
+    providerId: "aliyun-b",
+    models: [{ model: "qwen-plus", localUsedTokens: 22, statusLabel: "B" }]
+  };
+  result.syncLlmModelPoolStatus(statusA, "aliyun-a");
+  result.syncLlmModelPoolStatus(statusB, "aliyun-b");
+
+  assert.equal(result.modelPoolRowsForProvider(result.provider("aliyun-a"))[0].statusLabel, "A");
+  assert.equal(result.modelPoolRowsForProvider(result.provider("aliyun-b"))[0].statusLabel, "B");
 });
 
 test("OpenAlex config separates discovery from automatic field enrichment", async () => {

@@ -7009,7 +7009,7 @@
     let expandedLlmProviderId = "";
     const llmModelPoolPageSize = 25;
     let llmModelPoolPage = 0;
-    let llmModelPoolStatus = null;
+    const llmModelPoolStatusByProviderId = {};
     let llmModelPoolMessage = "";
     const savedSecretMask = "********";
     let integrationSecrets = null;
@@ -7110,13 +7110,18 @@
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
         syncLlmModelPoolStatus(payload.modelPool || null, selectedProviderId);
+        return payload.modelPool || null;
       } catch (error) {
         llmModelPoolMessage = `模型池状态暂不可用：${error.message}`;
+        return null;
       }
     }
 
     function syncLlmModelPoolStatus(status, providerId = integrationState.llm.activeProviderId) {
-      llmModelPoolStatus = status || null;
+      const statusProviderId = status?.providerId || providerId;
+      if (!statusProviderId) return;
+      if (status) llmModelPoolStatusByProviderId[statusProviderId] = status;
+      else delete llmModelPoolStatusByProviderId[statusProviderId];
       if (!Array.isArray(status?.models)) return;
       const models = status.models.map(model => ({
         model: model.model,
@@ -7133,7 +7138,7 @@
         llm: {
           ...integrationState.llm,
           providers: (integrationState.llm.providers || []).map(provider => {
-            if (provider.id !== providerId || provider.provider !== "aliyun-modelstudio") return provider;
+            if (provider.id !== statusProviderId || provider.provider !== "aliyun-modelstudio") return provider;
             return {
               ...provider,
               modelPool: {
@@ -7148,6 +7153,17 @@
           })
         }
       };
+    }
+
+    function loadLlmModelPoolStatusIfNeeded(providerId) {
+      const provider = (integrationState.llm.providers || []).find(item => item.id === providerId);
+      const cached = llmModelPoolStatusByProviderId[providerId];
+      if (provider?.provider !== "aliyun-modelstudio" || cached?.providerId === providerId) return;
+      loadLlmModelPoolStatus(providerId).then(() => {
+        if (expandedLlmProviderId !== providerId) return;
+        renderIntegrationConfig();
+        bindIntegrationAutosave();
+      });
     }
 
     async function updateOneLlmPoolModel(providerId, model, patch) {
@@ -7535,7 +7551,8 @@
     }
 
     function modelPoolRowsForProvider(provider) {
-      const statusRows = Array.isArray(llmModelPoolStatus?.models) ? llmModelPoolStatus.models : [];
+      const status = llmModelPoolStatusByProviderId[provider.id];
+      const statusRows = status?.providerId === provider.id && Array.isArray(status.models) ? status.models : [];
       if (statusRows.length) return statusRows;
       const pool = provider.modelPool || defaultAliyunModelPool;
       return Array.isArray(pool.models) ? pool.models.map(model => ({
@@ -8084,6 +8101,7 @@
       }));
       renderIntegrationConfig();
       scheduleIntegrationSave();
+      loadLlmModelPoolStatusIfNeeded(providerId);
     }
 
     async function toggleSecretVisibility(button) {
@@ -8140,9 +8158,11 @@
       if (expand) {
         event.preventDefault();
         const providerId = expand.getAttribute("data-llm-expand");
-        expandedLlmProviderId = expandedLlmProviderId === providerId ? "" : providerId;
+        const opening = expandedLlmProviderId !== providerId;
+        expandedLlmProviderId = opening ? providerId : "";
         renderIntegrationConfig();
         bindIntegrationAutosave();
+        if (opening) loadLlmModelPoolStatusIfNeeded(providerId);
         return;
       }
       const segment = event.target.closest(".segment[data-llm-value]");

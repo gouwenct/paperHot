@@ -2902,6 +2902,170 @@ test("per-model aliyun test calls only the requested model and enables it on suc
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
+test("concurrent per-model aliyun tests preserve both runtime state and enabled config rows", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-concurrent-tests-"));
+  const configFile = path.join(tempDir, "llm.json");
+  await fs.writeFile(configFile, JSON.stringify({
+    enabled: true,
+    activeProviderId: "aliyun-coding",
+    providers: [{
+      id: "aliyun-coding",
+      provider: "aliyun-modelstudio",
+      enabled: true,
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "secret-key",
+      model: "qwen-plus",
+      modelPool: {
+        models: [
+          { model: "qwen-plus", enabled: false, freeQuotaTokens: 1000000, priority: 10 },
+          { model: "qwen-flash", enabled: false, freeQuotaTokens: 1000000, priority: 20 }
+        ]
+      }
+    }]
+  }), "utf8");
+  let started = 0;
+  let markBothStarted;
+  let releaseRequests;
+  const bothStarted = new Promise(resolve => { markBothStarted = resolve; });
+  const requestsReleased = new Promise(resolve => { releaseRequests = resolve; });
+  const fetchImpl = async () => {
+    started += 1;
+    if (started === 2) markBothStarted();
+    await requestsReleased;
+    return {
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ abstractZh: "测试摘要", reason: "测试理由" }) } }],
+        usage: { prompt_tokens: 7, completion_tokens: 5, total_tokens: 12 }
+      })
+    };
+  };
+
+  const pending = ["qwen-plus", "qwen-flash"].map(model => testLlmPoolModel(model, {
+    llmConfigFile: configFile,
+    dataDir: tempDir,
+    fetchImpl
+  }));
+  await bothStarted;
+  releaseRequests();
+  const results = await Promise.all(pending);
+  const state = await readLlmModelPoolState(tempDir);
+  const saved = await readLlmConfig(configFile);
+  const rows = saved.providers[0].modelPool.models;
+
+  assert.deepEqual(results.map(result => result.ok), [true, true]);
+  assert.equal(state.models["qwen-plus"].localUsedTokens, 12);
+  assert.equal(state.models["qwen-flash"].localUsedTokens, 12);
+  assert.equal(rows.find(row => row.model === "qwen-plus").enabled, true);
+  assert.equal(rows.find(row => row.model === "qwen-flash").enabled, true);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("per-model aliyun test does not restore state reset while HTTP is in flight", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-test-reset-race-"));
+  const configFile = path.join(tempDir, "llm.json");
+  await fs.writeFile(configFile, JSON.stringify({
+    enabled: true,
+    activeProviderId: "aliyun-coding",
+    providers: [{
+      id: "aliyun-coding",
+      provider: "aliyun-modelstudio",
+      enabled: true,
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "secret-key",
+      model: "qwen-plus",
+      modelPool: { models: [{ model: "qwen-flash", enabled: false, freeQuotaTokens: 1000000, priority: 20 }] }
+    }]
+  }), "utf8");
+  await writeLlmModelPoolState({
+    activeModel: "qwen-plus",
+    models: { "qwen-plus": { model: "qwen-plus", localUsedTokens: 42, status: "available" } }
+  }, tempDir);
+  let markStarted;
+  let releaseRequest;
+  const requestStarted = new Promise(resolve => { markStarted = resolve; });
+  const requestReleased = new Promise(resolve => { releaseRequest = resolve; });
+  const pendingTest = testLlmPoolModel("qwen-flash", {
+    llmConfigFile: configFile,
+    dataDir: tempDir,
+    fetchImpl: async () => {
+      markStarted();
+      await requestReleased;
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ abstractZh: "测试摘要", reason: "测试理由" }) } }],
+          usage: { prompt_tokens: 7, completion_tokens: 5, total_tokens: 12 }
+        })
+      };
+    }
+  });
+
+  await requestStarted;
+  await resetLlmModelPoolState("qwen-plus", { dataDir: tempDir, llmConfigFile: configFile });
+  releaseRequest();
+  await pendingTest;
+  const state = await readLlmModelPoolState(tempDir);
+
+  assert.equal(state.models["qwen-plus"], undefined);
+  assert.equal(state.models["qwen-flash"].localUsedTokens, 12);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("per-model aliyun test merges state imported while HTTP is in flight", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-test-import-race-"));
+  const configFile = path.join(tempDir, "llm.json");
+  await fs.writeFile(configFile, JSON.stringify({
+    enabled: true,
+    activeProviderId: "aliyun-coding",
+    providers: [{
+      id: "aliyun-coding",
+      provider: "aliyun-modelstudio",
+      enabled: true,
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "secret-key",
+      model: "qwen-plus",
+      modelPool: { models: [{ model: "qwen-flash", enabled: false, freeQuotaTokens: 1000000, priority: 20 }] }
+    }]
+  }), "utf8");
+  let markStarted;
+  let releaseRequest;
+  const requestStarted = new Promise(resolve => { markStarted = resolve; });
+  const requestReleased = new Promise(resolve => { releaseRequest = resolve; });
+  const pendingTest = testLlmPoolModel("qwen-flash", {
+    llmConfigFile: configFile,
+    dataDir: tempDir,
+    fetchImpl: async () => {
+      markStarted();
+      await requestReleased;
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ abstractZh: "测试摘要", reason: "测试理由" }) } }],
+          usage: { prompt_tokens: 7, completion_tokens: 5, total_tokens: 12 }
+        })
+      };
+    }
+  });
+
+  await requestStarted;
+  await importLocalData({
+    papers: {
+      llmModelPoolState: {
+        activeModel: "qwen-plus",
+        models: { "qwen-plus": { model: "qwen-plus", localUsedTokens: 42, status: "available" } }
+      }
+    }
+  }, { dataDir: tempDir });
+  releaseRequest();
+  await pendingTest;
+  const state = await readLlmModelPoolState(tempDir);
+
+  assert.equal(state.models["qwen-plus"].localUsedTokens, 42);
+  assert.equal(state.models["qwen-flash"].localUsedTokens, 12);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
 test("per-model aliyun test records retryable failure without enabling the model", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-test-failure-"));
   const configFile = path.join(tempDir, "llm.json");
