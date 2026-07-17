@@ -391,6 +391,7 @@ flowchart TD
 | `docs/superpowers/specs/2026-07-16-academic-api-contact-email-design.md` | Crossref 当前使用、OpenAlex 未来复用的学术 API 联系邮箱配置与隐私边界设计 |
 | `docs/superpowers/specs/2026-07-16-openalex-discovery-enrichment-design.md` | OpenAlex 检索、独立字段补全、配置页字段来源与优先级设计 |
 | `docs/superpowers/specs/2026-07-16-paper-list-filter-sort-design.md` | 今日论文与全部论文的分类、发表阶段和引用量 / 发表日期排序设计 |
+| `docs/superpowers/specs/2026-07-17-aliyun-llm-model-pool-design.md` | 阿里百炼免费额度优先、本地估算兜底的 LLM 模型池自动切换设计 |
 | `docs/superpowers/plans/2026-07-11-recent-paper-discovery.md` | 近期论文发现功能的分步实现、测试和验证计划 |
 | `docs/superpowers/plans/2026-07-15-archive-clear-and-existing-results.md` | 全部论文清理、收藏快照回退和今日论文已入库弱化展示的 TDD 实施计划 |
 | `docs/superpowers/plans/2026-07-15-wos-date-and-query.md` | WoS 查询和论文日期补全的 TDD 实施计划 |
