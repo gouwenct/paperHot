@@ -85,6 +85,7 @@ config/academic-apis.json
 data/papers/journal-metrics-cache.json
 data/papers/google-rolling-cursors.json
 data/papers/web-of-science-usage.json
+data/papers/llm-model-pool-state.json
 data/papers/YYYY-MM-DD.json
 data/papers/YYYY-MM-DD-recent.json
 ```
@@ -102,6 +103,8 @@ data/papers/operation-log.jsonl
 
 `data/papers/web-of-science-usage.json` 只保存 PaperHot 本地聚合请求次数、日/月计数和最后状态，不保存请求 URL、查询表达式、Header 或 API Key。它只在 `includeStats=true` 时进入 ZIP，并通过导入白名单恢复。旧 v1 备份没有该可选文件时继续正常导入，因此备份版本保持 `1`。
 
+`data/papers/llm-model-pool-state.json` 保存阿里百炼模型池的本地 Token 估算、连续失败次数和当前状态，不保存 API Key、请求内容或阿里云控制台私有数据。它只在 `includeStats=true` 时进入 ZIP，并通过导入白名单恢复。旧 v1 备份没有该可选文件时继续正常导入，因此备份版本保持 `1`。
+
 ## Import Behavior
 
 - 导入会按白名单读取 ZIP 内文件，不会解压任意路径。
@@ -109,6 +112,7 @@ data/papers/operation-log.jsonl
 - 只有用户勾选“允许导入并覆盖本机 API Key”时，才会写入 `config/*.json`。
 - 导入本地论文库、收藏、阅读状态和日志时，会覆盖对应本地 JSON 文件。
 - 如果 ZIP 包含可选的 `data/papers/web-of-science-usage.json`，导入会恢复本地 WoS 聚合用量；缺少该文件的旧 v1 包不受影响。
+- 如果 ZIP 包含可选的 `data/papers/llm-model-pool-state.json`，导入会恢复阿里百炼模型池的本地额度估算和失败状态；缺少该文件的旧 v1 包不受影响。
 - 导入成功后会追加一条 `local-data-import` 操作日志。
 
 ## Migration Rules

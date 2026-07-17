@@ -2462,6 +2462,48 @@ function activeProviderModelPool(config = {}) {
   return provider.modelPool || null;
 }
 
+async function readLlmModelPoolStatus(options = {}) {
+  const config = await readLlmConfig(options.llmConfigFile);
+  const state = await readLlmModelPoolState(options.dataDir || DATA_DIR);
+  const provider = (config.providers || []).find(item => item.id === config.activeProviderId) || {};
+  const pool = cleanLlmModelPool(activeProviderModelPool(provider) || activeProviderModelPool(config) || DEFAULT_ALIYUN_MODEL_POOL);
+  return {
+    activeModel: state.activeModel || config.model || provider.model || "",
+    quotaMode: pool.quotaMode,
+    quotaFallback: pool.quotaFallback,
+    quotaSwitchRatio: pool.quotaSwitchRatio,
+    failureSwitchThreshold: pool.failureSwitchThreshold,
+    models: pool.models.map(model => {
+      const entry = state.models[model.model] || {};
+      const localUsedTokens = Number(entry.localUsedTokens || 0);
+      return {
+        ...model,
+        ...entry,
+        model: model.model,
+        status: modelPoolStatusForModel(model, entry, pool),
+        estimatedRemainingTokens: Math.max(0, Number(model.freeQuotaTokens || 0) - localUsedTokens),
+        thresholdTokens: Math.round(Number(model.freeQuotaTokens || 0) * Number(pool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio))
+      };
+    })
+  };
+}
+
+async function resetLlmModelPoolState(model, options = {}) {
+  const cleanModel = compactText(model);
+  if (!cleanModel) throw new Error("模型名称不能为空");
+  const dataDir = options.dataDir || DATA_DIR;
+  const state = await readLlmModelPoolState(dataDir);
+  delete state.models[cleanModel];
+  if (state.activeModel === cleanModel) state.activeModel = "";
+  await writeLlmModelPoolState(state, dataDir);
+  await appendOperationLogSafe({
+    action: "modify",
+    operation: "llm-model-pool-reset",
+    model: cleanModel
+  }, dataDir);
+  return { ok: true, status: await readLlmModelPoolStatus({ ...options, dataDir }) };
+}
+
 // ponytail: serialized only within this process; use an atomic datastore if multi-process fetches are introduced.
 let webOfScienceUsageWriteQueue = Promise.resolve();
 
@@ -2595,6 +2637,7 @@ async function exportLocalData(options = {}) {
           journalMetricsCache: await readJournalMetricsCache(dataDir),
           googleRollingCursors: await readGoogleRollingCursorsPayload(dataDir),
           webOfScienceUsage: await readWebOfScienceUsageFile(dataDir),
+          llmModelPoolState: await readLlmModelPoolState(dataDir),
           paperCacheFiles
         } : {})
       }
@@ -2656,7 +2699,8 @@ async function buildLocalDataExportFiles(options = {}) {
     files.push(
       { path: "data/papers/journal-metrics-cache.json", content: jsonText(data.papers?.journalMetricsCache || { updatedAt: "", journals: {} }) },
       { path: "data/papers/google-rolling-cursors.json", content: jsonText(data.papers?.googleRollingCursors || { cursors: {} }) },
-      { path: "data/papers/web-of-science-usage.json", content: jsonText(cleanWebOfScienceUsage(data.papers?.webOfScienceUsage)) }
+      { path: "data/papers/web-of-science-usage.json", content: jsonText(cleanWebOfScienceUsage(data.papers?.webOfScienceUsage)) },
+      { path: "data/papers/llm-model-pool-state.json", content: jsonText(cleanLlmModelPoolState(data.papers?.llmModelPoolState)) }
     );
     Object.entries(data.papers?.paperCacheFiles || {}).forEach(([fileName, content]) => {
       if (dateKeyFromCacheFile(fileName)) files.push({ path: `data/papers/${fileName}`, content: jsonText(content) });
@@ -2758,6 +2802,10 @@ async function importLocalData(payload = {}, options = {}) {
     await writeJsonFile(path.join(dataDir, WEB_OF_SCIENCE_USAGE_NAME), cleanWebOfScienceUsage(input.papers.webOfScienceUsage));
     imported.push("webOfScienceUsage");
   }
+  if (input?.papers?.llmModelPoolState) {
+    await writeLlmModelPoolState(input.papers.llmModelPoolState, dataDir);
+    imported.push("llmModelPoolState");
+  }
   if (input?.papers?.paperCacheFiles && typeof input.papers.paperCacheFiles === "object") {
     const cacheEntries = Object.entries(input.papers.paperCacheFiles)
       .filter(([fileName, payload]) => dateKeyFromCacheFile(fileName) && payload && typeof payload === "object");
@@ -2808,6 +2856,7 @@ async function importLocalDataZip(input, options = {}) {
   const journalMetricsCache = parseZipJsonEntry(entries, "data/papers/journal-metrics-cache.json");
   const googleRollingCursors = parseZipJsonEntry(entries, "data/papers/google-rolling-cursors.json");
   const webOfScienceUsage = parseZipJsonEntry(entries, "data/papers/web-of-science-usage.json");
+  const llmModelPoolState = parseZipJsonEntry(entries, "data/papers/llm-model-pool-state.json");
   const llm = parseZipJsonEntry(entries, "config/llm.json");
   const googleScholar = parseZipJsonEntry(entries, "config/google-scholar.json");
   const journalMetrics = parseZipJsonEntry(entries, "config/journal-metrics.json");
@@ -2832,6 +2881,7 @@ async function importLocalDataZip(input, options = {}) {
   if (journalMetricsCache) payload.papers.journalMetricsCache = journalMetricsCache;
   if (googleRollingCursors) payload.papers.googleRollingCursors = googleRollingCursors;
   if (webOfScienceUsage) payload.papers.webOfScienceUsage = webOfScienceUsage;
+  if (llmModelPoolState) payload.papers.llmModelPoolState = llmModelPoolState;
   if (Object.keys(paperCacheFiles).length) payload.papers.paperCacheFiles = paperCacheFiles;
   if (llm || googleScholar || journalMetrics || webOfScience || firecrawl || openAlex || academicApis) {
     payload.integrations = {};
@@ -6203,6 +6253,7 @@ async function buildTokenStats(options = {}) {
   const byModel = Array.from(modelMap.values())
     .filter(item => item.total > 0)
     .sort((a, b) => b.total - a.total || a.model.localeCompare(b.model));
+  const llmModelPool = await readLlmModelPoolStatus({ dataDir });
 
   return {
     generatedAt: new Date().toISOString(),
@@ -6211,7 +6262,8 @@ async function buildTokenStats(options = {}) {
     last7Days: last7DaysBucket,
     last30Days: last30DaysBucket,
     byModel,
-    daily
+    daily,
+    llmModelPool
   };
 }
 
@@ -7108,6 +7160,8 @@ module.exports = {
   selectLlmPoolModel,
   isRetryableLlmModelFailure,
   callConfiguredLlmWithPool,
+  readLlmModelPoolStatus,
+  resetLlmModelPoolState,
   readLlmModelPoolState,
   writeLlmModelPoolState,
   readOpenAlexConfig,

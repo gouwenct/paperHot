@@ -60,6 +60,7 @@ const {
   selectLlmPoolModel,
   isRetryableLlmModelFailure,
   callConfiguredLlmWithPool,
+  resetLlmModelPoolState,
   todayString,
   readIntegrationConfigs,
   readIntegrationSecrets,
@@ -2950,6 +2951,45 @@ test("aliyun llm pool retries the same paper on the next model after repeated re
   assert.equal(insight.tokenUsage.model, "qwen-flash");
   const state = await readLlmModelPoolState(tempDir);
   assert.equal(state.models["qwen-plus"].status, "failing");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("token stats include aliyun llm model pool state", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-stats-"));
+  await writeLlmModelPoolState({
+    activeModel: "qwen-plus",
+    models: {
+      "qwen-plus": { model: "qwen-plus", localUsedTokens: 850001, status: "near_limit" },
+      "qwen-flash": { model: "qwen-flash", localUsedTokens: 12, status: "available" }
+    }
+  }, tempDir);
+  const stats = await buildTokenStats({ dataDir: tempDir });
+  assert.equal(stats.llmModelPool.activeModel, "qwen-plus");
+  assert.equal(stats.llmModelPool.models.find(item => item.model === "qwen-plus").status, "near_limit");
+  assert.equal(stats.llmModelPool.models.find(item => item.model === "qwen-plus").estimatedRemainingTokens, 149999);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("local data export includes llm model pool state only with stats", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-export-"));
+  await writeLlmModelPoolState({ models: { "qwen-plus": { model: "qwen-plus", localUsedTokens: 42 } } }, tempDir);
+  const plain = await exportLocalData({ dataDir: tempDir, includePapers: false });
+  assert.equal(plain.data.papers.llmModelPoolState, undefined);
+  const withStats = await exportLocalData({ dataDir: tempDir, includePapers: false, includeStats: true });
+  assert.equal(withStats.data.papers.llmModelPoolState.models["qwen-plus"].localUsedTokens, 42);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("resetting an aliyun llm model pool entry clears local state and logs the reset", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-reset-"));
+  await writeLlmModelPoolState({ models: { "qwen-plus": { model: "qwen-plus", localUsedTokens: 42, status: "failing" } } }, tempDir);
+  const result = await resetLlmModelPoolState("qwen-plus", { dataDir: tempDir });
+  const state = await readLlmModelPoolState(tempDir);
+  const operations = await readOperationLog(tempDir);
+  assert.equal(result.ok, true);
+  assert.equal(state.models["qwen-plus"], undefined);
+  assert.equal(operations[0].operation, "llm-model-pool-reset");
+  assert.equal(operations[0].model, "qwen-plus");
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
