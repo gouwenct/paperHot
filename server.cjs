@@ -457,7 +457,7 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && pathname === "/api/integrations/llm/model-pool/reset") {
     const body = await collectRequestBody(req);
     try {
-      sendJson(res, 200, await resetLlmModelPoolState(body.model));
+      sendJson(res, 200, await resetLlmModelPoolState(body.model, { providerId: body.providerId }));
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
     }

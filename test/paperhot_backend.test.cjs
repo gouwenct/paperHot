@@ -110,6 +110,8 @@ const {
   restoreOpenAlexAbstract
 } = require("../paperhot_backend.cjs");
 
+const llmPoolStateKey = (providerId, model) => `${providerId}::${model}`;
+
 function matchingAbstractSources(value, onCall = () => {}) {
   const load = async paper => {
     onCall(paper);
@@ -2897,8 +2899,8 @@ test("per-model aliyun test calls only the requested model and enables it on suc
   assert.deepEqual(calls, ["qwen-flash"]);
   assert.equal(result.ok, true);
   assert.equal(row.enabled, true);
-  assert.equal(state.models["qwen-flash"].lastTestStatus, "passed");
-  assert.equal(state.models["qwen-flash"].consecutiveFailures, 0);
+  assert.equal(state.models[llmPoolStateKey("aliyun-coding", "qwen-flash")].lastTestStatus, "passed");
+  assert.equal(state.models[llmPoolStateKey("aliyun-coding", "qwen-flash")].consecutiveFailures, 0);
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -2954,8 +2956,8 @@ test("concurrent per-model aliyun tests preserve both runtime state and enabled 
   const rows = saved.providers[0].modelPool.models;
 
   assert.deepEqual(results.map(result => result.ok), [true, true]);
-  assert.equal(state.models["qwen-plus"].localUsedTokens, 12);
-  assert.equal(state.models["qwen-flash"].localUsedTokens, 12);
+  assert.equal(state.models[llmPoolStateKey("aliyun-coding", "qwen-plus")].localUsedTokens, 12);
+  assert.equal(state.models[llmPoolStateKey("aliyun-coding", "qwen-flash")].localUsedTokens, 12);
   assert.equal(rows.find(row => row.model === "qwen-plus").enabled, true);
   assert.equal(rows.find(row => row.model === "qwen-flash").enabled, true);
   await fs.rm(tempDir, { recursive: true, force: true });
@@ -3008,7 +3010,7 @@ test("per-model aliyun test does not restore state reset while HTTP is in flight
   const state = await readLlmModelPoolState(tempDir);
 
   assert.equal(state.models["qwen-plus"], undefined);
-  assert.equal(state.models["qwen-flash"].localUsedTokens, 12);
+  assert.equal(state.models[llmPoolStateKey("aliyun-coding", "qwen-flash")].localUsedTokens, 12);
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -3062,7 +3064,7 @@ test("per-model aliyun test merges state imported while HTTP is in flight", asyn
   const state = await readLlmModelPoolState(tempDir);
 
   assert.equal(state.models["qwen-plus"].localUsedTokens, 42);
-  assert.equal(state.models["qwen-flash"].localUsedTokens, 12);
+  assert.equal(state.models[llmPoolStateKey("aliyun-coding", "qwen-flash")].localUsedTokens, 12);
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -3092,8 +3094,8 @@ test("per-model aliyun test records retryable failure without enabling the model
   const state = await readLlmModelPoolState(tempDir);
   assert.equal(result.ok, false);
   assert.equal(row.enabled, false);
-  assert.equal(state.models["qwen-flash"].lastTestStatus, "failed");
-  assert.equal(state.models["qwen-flash"].consecutiveFailures, 1);
+  assert.equal(state.models[llmPoolStateKey("aliyun-coding", "qwen-flash")].lastTestStatus, "failed");
+  assert.equal(state.models[llmPoolStateKey("aliyun-coding", "qwen-flash")].consecutiveFailures, 1);
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -3150,6 +3152,68 @@ test("inactive aliyun provider model pool update and test preserve the selected 
   assert.equal(saved.activeProviderId, "custom-active");
   assert.equal(customProvider.model, "custom-model");
   assert.equal(aliyunProvider.modelPool.models.find(row => row.model === "qwen-flash").enabled, true);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("aliyun providers with the same model keep model pool state isolated", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-llm-pool-provider-scoped-"));
+  const configFile = path.join(tempDir, "llm.json");
+  await fs.writeFile(configFile, JSON.stringify({
+    enabled: true,
+    activeProviderId: "aliyun-a",
+    providers: [
+      {
+        id: "aliyun-a",
+        provider: "aliyun-modelstudio",
+        enabled: true,
+        endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        apiKey: "aliyun-a-key",
+        model: "qwen-plus",
+        modelPool: { models: [{ model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 }] }
+      },
+      {
+        id: "aliyun-b",
+        provider: "aliyun-modelstudio",
+        enabled: true,
+        endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        apiKey: "aliyun-b-key",
+        model: "qwen-plus",
+        modelPool: { models: [{ model: "qwen-plus", enabled: true, freeQuotaTokens: 1000000, priority: 10 }] }
+      }
+    ]
+  }), "utf8");
+
+  await testLlmPoolModel("qwen-plus", {
+    providerId: "aliyun-a",
+    llmConfigFile: configFile,
+    dataDir: tempDir,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ abstractZh: "测试摘要", reason: "测试理由" }) } }],
+        usage: { prompt_tokens: 7, completion_tokens: 5, total_tokens: 12 }
+      })
+    })
+  });
+  const updated = await updateLlmModelPoolModel("qwen-plus", { freeQuotaTokens: 123456 }, {
+    providerId: "aliyun-a",
+    llmConfigFile: configFile,
+    dataDir: tempDir
+  });
+  const state = await readLlmModelPoolState(tempDir);
+  const saved = await readLlmConfig(configFile);
+  const statusA = await readLlmModelPoolStatus({ dataDir: tempDir, llmConfigFile: configFile, providerId: "aliyun-a" });
+  const statusB = await readLlmModelPoolStatus({ dataDir: tempDir, llmConfigFile: configFile, providerId: "aliyun-b" });
+  const providerA = saved.providers.find(provider => provider.id === "aliyun-a");
+  const providerB = saved.providers.find(provider => provider.id === "aliyun-b");
+
+  assert.equal(updated.status.providerId, "aliyun-a");
+  assert.equal(state.models[llmPoolStateKey("aliyun-a", "qwen-plus")].localUsedTokens, 12);
+  assert.equal(state.models[llmPoolStateKey("aliyun-b", "qwen-plus")], undefined);
+  assert.equal(statusA.models.find(row => row.model === "qwen-plus").localUsedTokens, 12);
+  assert.equal(statusB.models.find(row => row.model === "qwen-plus").localUsedTokens, 0);
+  assert.equal(providerA.modelPool.models.find(row => row.model === "qwen-plus").freeQuotaTokens, 123456);
+  assert.equal(providerB.modelPool.models.find(row => row.model === "qwen-plus").freeQuotaTokens, 1000000);
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -3634,8 +3698,8 @@ test("aliyun llm pool uses the active provider pool from readLlmConfig output", 
   const state = await readLlmModelPoolState(tempDir);
   assert.deepEqual(calls, ["qwen-flash"]);
   assert.equal(insight.tokenUsage.model, "qwen-flash");
-  assert.equal(state.activeModel, "qwen-flash");
-  assert.equal(state.models["qwen-flash"].localUsedTokens, 15);
+  assert.equal(state.activeModels["aliyun-coding"], "qwen-flash");
+  assert.equal(state.models[llmPoolStateKey("aliyun-coding", "qwen-flash")].localUsedTokens, 15);
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 

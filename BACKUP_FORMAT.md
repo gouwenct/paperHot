@@ -103,7 +103,7 @@ data/papers/operation-log.jsonl
 
 `data/papers/web-of-science-usage.json` 只保存 PaperHot 本地聚合请求次数、日/月计数和最后状态，不保存请求 URL、查询表达式、Header 或 API Key。它只在 `includeStats=true` 时进入 ZIP，并通过导入白名单恢复。旧 v1 备份没有该可选文件时继续正常导入，因此备份版本保持 `1`。
 
-`data/papers/llm-model-pool-state.json` 保存阿里百炼模型池的本地 Token 估算、连续失败次数和当前状态，不保存 API Key、请求内容或阿里云控制台私有数据。它只在 `includeStats=true` 时进入 ZIP，并通过导入白名单恢复。旧 v1 备份没有该可选文件时继续正常导入，因此备份版本保持 `1`。
+`data/papers/llm-model-pool-state.json` 保存阿里百炼模型池的本地 Token 估算、连续失败次数和当前状态，不保存 API Key、请求内容或阿里云控制台私有数据。运行时状态按 `providerId::model` 隔离，同一模型名可在多个阿里百炼 Provider 中独立计数；旧文件中的未分区模型键和 `activeModel` 仍可读取并在后续写入时兼容保留。它只在 `includeStats=true` 时进入 ZIP，并通过导入白名单恢复。旧 v1 备份没有该可选文件时继续正常导入，因此备份版本保持 `1`。
 
 ## Import Behavior
 

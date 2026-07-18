@@ -7010,7 +7010,7 @@
     const llmModelPoolPageSize = 25;
     let llmModelPoolPage = 0;
     const llmModelPoolStatusByProviderId = {};
-    let llmModelPoolMessage = "";
+    const llmModelPoolMessageByProviderId = {};
     const savedSecretMask = "********";
     let integrationSecrets = null;
 
@@ -7112,7 +7112,7 @@
         syncLlmModelPoolStatus(payload.modelPool || null, selectedProviderId);
         return payload.modelPool || null;
       } catch (error) {
-        llmModelPoolMessage = `模型池状态暂不可用：${error.message}`;
+        llmModelPoolMessageByProviderId[selectedProviderId] = `模型池状态暂不可用：${error.message}`;
         return null;
       }
     }
@@ -7175,11 +7175,11 @@
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
       syncLlmModelPoolStatus(payload.status || null, providerId);
-      llmModelPoolMessage = `${model} 已更新`;
+      llmModelPoolMessageByProviderId[providerId] = `${model} 已更新`;
     }
 
     async function testOneLlmPoolModel(providerId, model) {
-      llmModelPoolMessage = `正在测试 ${model}...`;
+      llmModelPoolMessageByProviderId[providerId] = `正在测试 ${model}...`;
       renderIntegrationConfig();
       bindIntegrationAutosave();
       const response = await fetch("/api/integrations/llm/model-pool/test", {
@@ -7190,7 +7190,7 @@
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
       syncLlmModelPoolStatus(payload.status || null, providerId);
-      llmModelPoolMessage = payload.ok ? `${model} 测试成功，已自动启用` : `${model} 测试失败：${payload.error || "模型未响应"}`;
+      llmModelPoolMessageByProviderId[providerId] = payload.ok ? `${model} 测试成功，已自动启用` : `${model} 测试失败：${payload.error || "模型未响应"}`;
     }
 
     async function loadIntegrationSecrets() {
@@ -7612,7 +7612,7 @@
             </div>
           </div>
           <div class="llm-pool-grid">${pageRows.map(model => llmModelPoolCard(provider.id, model)).join("")}</div>
-          <div class="small-text">${escapeHTML(llmModelPoolMessage || "测试成功会自动启用模型；低于 15% 剩余额度或连续失败后会灰掉并跳过。")}</div>
+          <div class="small-text">${escapeHTML(llmModelPoolMessageByProviderId[provider.id] || "测试成功会自动启用模型；低于 15% 剩余额度或连续失败后会灰掉并跳过。")}</div>
         </div>
       `;
     }
@@ -8220,7 +8220,7 @@
           try {
             await updateOneLlmPoolModel(providerId, model, { enabled: true });
           } catch (error) {
-            llmModelPoolMessage = `启用失败：${error.message}`;
+            llmModelPoolMessageByProviderId[providerId] = `启用失败：${error.message}`;
           }
           renderIntegrationConfig();
           bindIntegrationAutosave();
@@ -8234,7 +8234,7 @@
           try {
             await testOneLlmPoolModel(providerId, model);
           } catch (error) {
-            llmModelPoolMessage = `测试失败：${error.message}`;
+            llmModelPoolMessageByProviderId[providerId] = `测试失败：${error.message}`;
           }
           renderIntegrationConfig();
           bindIntegrationAutosave();

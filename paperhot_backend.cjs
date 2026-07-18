@@ -2004,14 +2004,18 @@ async function writeIntegrationConfigs(payload = {}, options = {}) {
   const firecrawlFile = options.firecrawlConfigFile || FIRECRAWL_CONFIG_FILE;
   const academicApisFile = options.academicApisConfigFile || ACADEMIC_APIS_CONFIG_FILE;
   const openAlexFile = options.openAlexConfigFile || OPENALEX_CONFIG_FILE;
-  const previousLlm = await readLlmConfig(llmFile);
   const previousGoogle = await readGoogleScholarConfig(googleFile);
   const previousJournal = await readJournalMetricsConfig(journalFile);
   const previousWebOfScience = await readWebOfScienceConfig(webOfScienceFile);
   const previousFirecrawl = await readFirecrawlConfig(firecrawlFile);
   const previousAcademicApis = await readAcademicApisConfig(academicApisFile);
   const previousOpenAlex = await readOpenAlexConfig(openAlexFile);
-  const llm = mergeLlmConfig(previousLlm, payload.llm);
+  const llmPromise = queueLlmModelPoolConfigUpdate(llmFile, async () => {
+    const previousLlm = await readLlmConfig(llmFile);
+    const llm = mergeLlmConfig(previousLlm, payload.llm);
+    await writeJsonFile(llmFile, llm);
+    return llm;
+  });
   const googleScholar = mergeSecretConfig(previousGoogle, payload.googleScholar, cleanGoogleScholarConfig);
   const journalMetrics = mergeSecretConfig(previousJournal, payload.journalMetrics, cleanJournalMetricsConfig);
   const webOfScience = mergeSecretConfig(previousWebOfScience, payload.webOfScience, cleanWebOfScienceConfig);
@@ -2022,8 +2026,8 @@ async function writeIntegrationConfigs(payload = {}, options = {}) {
     ...(payload.academicApis && typeof payload.academicApis === "object" ? payload.academicApis : {})
   });
 
-  await Promise.all([
-    writeJsonFile(llmFile, llm),
+  const [llm] = await Promise.all([
+    llmPromise,
     writeJsonFile(googleFile, googleScholar),
     writeJsonFile(journalFile, journalMetrics),
     writeJsonFile(webOfScienceFile, webOfScience),
@@ -2472,13 +2476,24 @@ function cleanLlmModelPoolState(value = {}) {
   const inputModels = value && typeof value.models === "object" && !Array.isArray(value.models) ? value.models : {};
   const models = {};
   Object.entries(inputModels).forEach(([key, entry]) => {
-    const clean = cleanLlmModelPoolStateEntry({ ...entry, model: entry?.model || key });
-    if (clean.model) models[clean.model] = clean;
+    const cleanKey = compactText(key);
+    const keyModel = cleanKey.includes("::") ? cleanKey.split("::").pop() : cleanKey;
+    const clean = cleanLlmModelPoolStateEntry({ ...entry, model: entry?.model || keyModel });
+    if (clean.model) models[cleanKey.includes("::") ? cleanKey : clean.model] = clean;
   });
+  const activeModels = {};
+  if (value && typeof value.activeModels === "object" && !Array.isArray(value.activeModels)) {
+    Object.entries(value.activeModels).forEach(([providerId, model]) => {
+      const cleanProviderId = compactText(providerId);
+      const cleanModel = compactText(model);
+      if (cleanProviderId && cleanModel) activeModels[cleanProviderId] = cleanModel;
+    });
+  }
   return {
     format: LLM_MODEL_POOL_STATE_FORMAT,
     updatedAt: compactText(value.updatedAt),
     activeModel: compactText(value.activeModel),
+    activeModels,
     models
   };
 }
@@ -2543,12 +2558,68 @@ function modelPoolStatusForModel(modelConfig, stateEntry = {}, pool = DEFAULT_AL
   return "available";
 }
 
-function selectLlmPoolModel({ pool, state = {}, attempted = new Set() }) {
+function llmModelPoolStateKey(providerId, model) {
+  const cleanProviderId = compactText(providerId);
+  const cleanModel = compactText(model);
+  return cleanProviderId ? `${cleanProviderId}::${cleanModel}` : cleanModel;
+}
+
+function llmModelPoolStateEntryForModel(state = {}, providerId = "", model = "") {
+  const scoped = state.models?.[llmModelPoolStateKey(providerId, model)];
+  if (scoped) return scoped;
+  return state.models?.[compactText(model)] || {};
+}
+
+function llmModelPoolActiveModel(state = {}, providerId = "") {
+  const cleanProviderId = compactText(providerId);
+  return cleanProviderId ? compactText(state.activeModels?.[cleanProviderId]) : compactText(state.activeModel);
+}
+
+function setLlmModelPoolActiveModel(state = {}, providerId = "", model = "") {
+  const cleanProviderId = compactText(providerId);
+  const cleanModel = compactText(model);
+  if (cleanProviderId) {
+    state.activeModels = state.activeModels && typeof state.activeModels === "object" ? state.activeModels : {};
+    if (cleanModel) state.activeModels[cleanProviderId] = cleanModel;
+    else delete state.activeModels[cleanProviderId];
+  } else {
+    state.activeModel = cleanModel;
+  }
+}
+
+function setLlmModelPoolStateEntry(state = {}, providerId = "", model = "", entry = {}) {
+  state.models = state.models && typeof state.models === "object" ? state.models : {};
+  state.models[llmModelPoolStateKey(providerId, model)] = cleanLlmModelPoolStateEntry({ ...entry, model });
+}
+
+function deleteLlmModelPoolStateEntry(state = {}, providerId = "", model = "") {
+  const cleanProviderId = compactText(providerId);
+  const cleanModel = compactText(model);
+  if (cleanProviderId) {
+    delete state.models?.[llmModelPoolStateKey(cleanProviderId, cleanModel)];
+    if (state.activeModels?.[cleanProviderId] === cleanModel) delete state.activeModels[cleanProviderId];
+    return;
+  }
+  if (state.models) {
+    delete state.models[cleanModel];
+    Object.keys(state.models)
+      .filter(key => key.endsWith(`::${cleanModel}`))
+      .forEach(key => delete state.models[key]);
+  }
+  if (state.activeModel === cleanModel) state.activeModel = "";
+  if (state.activeModels) {
+    Object.entries(state.activeModels).forEach(([key, value]) => {
+      if (value === cleanModel) delete state.activeModels[key];
+    });
+  }
+}
+
+function selectLlmPoolModel({ pool, state = {}, attempted = new Set(), providerId = "" }) {
   const cleanPool = cleanLlmModelPool(pool);
   const rows = cleanPool.models
     .filter(model => !attempted.has(model.model))
     .map(model => {
-    const entry = state.models?.[model.model] || {};
+    const entry = llmModelPoolStateEntryForModel(state, providerId, model.model);
     const status = modelPoolStatusForModel(model, entry, cleanPool);
     return { ...model, state: entry, status };
   });
@@ -2573,6 +2644,15 @@ function activeProviderModelPool(config = {}) {
   return null;
 }
 
+function activeProviderIdForModelPool(config = {}) {
+  const provider = Array.isArray(config.providers)
+    ? config.providers.find(item => item.id === config.activeProviderId)
+    : null;
+  if (provider?.provider === "aliyun-modelstudio") return compactText(provider.id);
+  if (config.provider === "aliyun-modelstudio") return compactText(config.activeProviderId || config.id);
+  return "";
+}
+
 async function readLlmModelPoolStatus(options = {}) {
   const config = await readLlmConfig(options.llmConfigFile);
   const state = await readLlmModelPoolState(options.dataDir || DATA_DIR);
@@ -2584,13 +2664,13 @@ async function readLlmModelPoolStatus(options = {}) {
   const allModels = registry.map(item => ({ ...item, ...(savedRows.get(item.model) || {}) }));
   return {
     providerId: provider.id,
-    activeModel: state.activeModel || provider.model || "",
+    activeModel: llmModelPoolActiveModel(state, provider.id) || compactText(state.activeModel) || provider.model || "",
     quotaMode: pool.quotaMode,
     quotaFallback: pool.quotaFallback,
     quotaSwitchRatio: pool.quotaSwitchRatio,
     failureSwitchThreshold: pool.failureSwitchThreshold,
     models: allModels.map(model => {
-      const entry = state.models[model.model] || {};
+      const entry = llmModelPoolStateEntryForModel(state, provider.id, model.model);
       const status = modelPoolStatusForModel(model, entry, pool);
       const localUsedTokens = Number(entry.localUsedTokens || 0);
       const freeQuotaTokens = Number(model.freeQuotaTokens || 1000000);
@@ -2687,10 +2767,10 @@ async function testLlmPoolModel(model, options = {}) {
   } catch (error) {
     await queueLlmModelPoolStateUpdate(dataDir, async () => {
       const state = await readLlmModelPoolState(dataDir);
-      const previous = state.models[cleanModel] || {};
+      const previous = llmModelPoolStateEntryForModel(state, provider.id, cleanModel);
       const consecutiveFailures = Number(previous.consecutiveFailures || 0) + (isRetryableLlmModelFailure(error) ? 1 : 0);
       const failedAt = new Date().toISOString();
-      state.models[cleanModel] = cleanLlmModelPoolStateEntry({
+      setLlmModelPoolStateEntry(state, provider.id, cleanModel, {
         ...previous,
         model: cleanModel,
         status: consecutiveFailures >= Number((provider.modelPool || {}).failureSwitchThreshold || DEFAULT_ALIYUN_MODEL_POOL.failureSwitchThreshold) ? "failing" : previous.status,
@@ -2715,9 +2795,9 @@ async function testLlmPoolModel(model, options = {}) {
   const usage = insight?.tokenUsage || {};
   await queueLlmModelPoolStateUpdate(dataDir, async () => {
     const state = await readLlmModelPoolState(dataDir);
-    const previous = state.models[cleanModel] || {};
+    const previous = llmModelPoolStateEntryForModel(state, provider.id, cleanModel);
     const passedAt = new Date().toISOString();
-    state.models[cleanModel] = cleanLlmModelPoolStateEntry({
+    setLlmModelPoolStateEntry(state, provider.id, cleanModel, {
       ...previous,
       model: cleanModel,
       status: "available",
@@ -2760,8 +2840,7 @@ async function resetLlmModelPoolState(model, options = {}) {
   const dataDir = options.dataDir || DATA_DIR;
   await queueLlmModelPoolStateUpdate(dataDir, async () => {
     const state = await readLlmModelPoolState(dataDir);
-    delete state.models[cleanModel];
-    if (state.activeModel === cleanModel) state.activeModel = "";
+    deleteLlmModelPoolStateEntry(state, options.providerId, cleanModel);
     await writeLlmModelPoolState(state, dataDir);
   });
   await appendOperationLogSafe({
@@ -4322,6 +4401,7 @@ async function callConfiguredLlmWithSelectedPoolModel({
   fetchImpl,
   dataDir,
   pool,
+  providerId = "",
   selected,
   attempted
 }) {
@@ -4332,7 +4412,7 @@ async function callConfiguredLlmWithSelectedPoolModel({
     const usage = insight?.tokenUsage || {};
     await queueLlmModelPoolStateUpdate(dataDir, async () => {
       const state = await readLlmModelPoolState(dataDir);
-      const current = state.models[selected.model] || {};
+      const current = llmModelPoolStateEntryForModel(state, providerId, selected.model);
       const entry = cleanLlmModelPoolStateEntry({
         ...current,
         model: selected.model,
@@ -4342,7 +4422,8 @@ async function callConfiguredLlmWithSelectedPoolModel({
         lastSuccessAt: new Date().toISOString()
       });
       if (entry.localUsedTokens >= selected.freeQuotaTokens * pool.quotaSwitchRatio) entry.status = "near_limit";
-      state.models[selected.model] = entry;
+      setLlmModelPoolActiveModel(state, providerId, selected.model);
+      setLlmModelPoolStateEntry(state, providerId, selected.model, entry);
       await writeLlmModelPoolState(state, dataDir);
     });
     return insight;
@@ -4350,7 +4431,7 @@ async function callConfiguredLlmWithSelectedPoolModel({
     if (!isRetryableLlmModelFailure(error)) throw error;
     const next = await queueLlmModelPoolStateUpdate(dataDir, async () => {
       const state = await readLlmModelPoolState(dataDir);
-      const current = state.models[selected.model] || {};
+      const current = llmModelPoolStateEntryForModel(state, providerId, selected.model);
       const failureAt = new Date().toISOString();
       const entry = cleanLlmModelPoolStateEntry({
         ...current,
@@ -4360,7 +4441,7 @@ async function callConfiguredLlmWithSelectedPoolModel({
         lastFailureMessage: error.message
       });
       const failureThreshold = Number(pool.failureSwitchThreshold || DEFAULT_ALIYUN_MODEL_POOL.failureSwitchThreshold);
-      state.models[selected.model] = entry;
+      setLlmModelPoolStateEntry(state, providerId, selected.model, entry);
       if (entry.consecutiveFailures < failureThreshold) {
         await writeLlmModelPoolState(state, dataDir);
         return null;
@@ -4368,16 +4449,18 @@ async function callConfiguredLlmWithSelectedPoolModel({
 
       entry.status = "failing";
       attempted.add(selected.model);
-      const nextModel = selectLlmPoolModel({ pool, state, attempted });
+      setLlmModelPoolStateEntry(state, providerId, selected.model, entry);
+      const nextModel = selectLlmPoolModel({ pool, state, attempted, providerId });
       if (nextModel && nextModel.model !== selected.model) {
-        const previousModel = compactText(state.activeModel || selected.model);
+        const previousModel = compactText(llmModelPoolActiveModel(state, providerId) || selected.model);
         entry.lastSwitchAt = failureAt;
         entry.lastSwitchReason = "repeated-failure";
-        state.activeModel = nextModel.model;
+        setLlmModelPoolStateEntry(state, providerId, selected.model, entry);
+        setLlmModelPoolActiveModel(state, providerId, nextModel.model);
         await writeLlmModelPoolState(state, dataDir);
         if (previousModel && previousModel !== nextModel.model) {
           const previousPoolModel = cleanLlmModelPool(pool).models.find(model => model.model === previousModel);
-          const previousState = state.models[previousModel] || {};
+          const previousState = llmModelPoolStateEntryForModel(state, providerId, previousModel);
           await appendOperationLogSafe({
             action: "modify",
             operation: "llm-model-switch",
@@ -4402,6 +4485,7 @@ async function callConfiguredLlmWithSelectedPoolModel({
       fetchImpl,
       dataDir,
       pool,
+      providerId,
       selected: next,
       attempted
     });
@@ -4412,19 +4496,20 @@ async function callConfiguredLlmWithPool({ paper, userBackground, config, fetchI
   const pool = activeProviderModelPool(config);
   if (!pool) return callConfiguredLlm({ paper, userBackground, config, fetchImpl });
   const cleanPool = cleanLlmModelPool(pool);
+  const providerId = activeProviderIdForModelPool(config);
   const attempted = new Set();
   const selected = await queueLlmModelPoolStateUpdate(dataDir, async () => {
     const state = await readLlmModelPoolState(dataDir);
-    const selectedModel = selectLlmPoolModel({ pool: cleanPool, state, attempted });
+    const selectedModel = selectLlmPoolModel({ pool: cleanPool, state, attempted, providerId });
     if (!selectedModel) throw new Error("LLM 模型池中没有可用模型，请重置状态或启用其他模型");
-    const previousModel = compactText(state.activeModel || config.model);
-    if (state.activeModel !== selectedModel.model) {
-      state.activeModel = selectedModel.model;
+    const previousModel = compactText(llmModelPoolActiveModel(state, providerId) || config.model);
+    if (llmModelPoolActiveModel(state, providerId) !== selectedModel.model) {
+      setLlmModelPoolActiveModel(state, providerId, selectedModel.model);
       await writeLlmModelPoolState(state, dataDir);
     }
     if (previousModel && previousModel !== selectedModel.model) {
       const previousPoolModel = cleanPool.models.find(model => model.model === previousModel);
-      const previousState = state.models[previousModel] || {};
+      const previousState = llmModelPoolStateEntryForModel(state, providerId, previousModel);
       const previousThreshold = Number(previousPoolModel?.freeQuotaTokens || 1000000) * Number(cleanPool.quotaSwitchRatio || DEFAULT_ALIYUN_MODEL_POOL.quotaSwitchRatio);
       const switchReason = previousState.status === "near_limit" || Number(previousState.localUsedTokens || 0) >= previousThreshold
         ? "quota-threshold"
@@ -4449,6 +4534,7 @@ async function callConfiguredLlmWithPool({ paper, userBackground, config, fetchI
     fetchImpl,
     dataDir,
     pool: cleanPool,
+    providerId,
     selected,
     attempted
   });
