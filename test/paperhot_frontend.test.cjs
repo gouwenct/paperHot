@@ -59,6 +59,7 @@ test("today and favorites pages expose paper search controls", async () => {
 test("paper card orders date journal metrics short title and citation controls", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /paper-source-row[\s\S]*publishedDoiControl[\s\S]*sourceLabel[\s\S]*journalMetricTags\(journalMetrics\)/);
+  assert.match(html, /精确日期：\$\{escapeHTML\(publishedLabel\)\}/);
   assert.match(html, /paper-title-row[\s\S]*paperTitleLink\(paper\)[\s\S]*citationMetric[\s\S]*<\/div>[\s\S]*paper-title-tools[\s\S]*paperShortTitleEditor\(paper\)/);
   assert.match(html, /paper-signal-row[\s\S]*paperBibliography\(paper\)/);
 });
@@ -124,7 +125,25 @@ test("today page exposes resumable source failures and per-paper AI retry", asyn
   const refreshSource = readNamedFunction(html, "refreshOnePaperLlm", "invalidateTodayCanonicalTask");
   assert.match(refreshSource, /payload\.updated !== true/);
   assert.match(refreshSource, /payload\.errors\?\.\[0\]\?\.message/);
+  assert.match(refreshSource, /没有找到这篇论文的当前卡片/);
+  assert.match(refreshSource, /keepCurrentForm/);
+  assert.match(refreshSource, /findPaperByStableKey\(key\)/);
   assert.ok(refreshSource.indexOf("payload.updated !== true") < refreshSource.indexOf("clearPaperLlmFailure"));
+  const lookupSource = readNamedFunction(html, "paperLookupKeys", "paperRetryIdentityMatches");
+  const stableSource = readNamedFunction(html, "paperStableKey", "isFavoritePaper");
+  const findSource = readNamedFunction(html, "findPaperByStableKey", "updatePaperCategories");
+  const findPaperByStableKey = new Function(`
+    const recentPapers = [{ id: "transient-id", doi: "10.1000/MANUAL", title: "Manual paper" }];
+    const todayPapers = [];
+    const favoritePapersCache = [];
+    const papers = [];
+    ${lookupSource}; ${stableSource}; ${findSource}; return findPaperByStableKey;
+  `)();
+  assert.equal(findPaperByStableKey("10.1000/manual").id, "transient-id");
+  const manualSource = readNamedFunction(html, "saveManualPaperAbstract", "invalidateTodayCanonicalTask");
+  assert.match(manualSource, /button\.disabled = true/);
+  assert.match(manualSource, /button\.textContent = "保存中"/);
+  assert.match(manualSource, /await refreshOnePaperLlm\(key, \{ manualAbstract \}, \{ keepCurrentForm: true \}\)/);
   assert.match(html, /error\.taskState = status/);
 
   const failureSource = readNamedFunction(html, "todayFailureRows", "todayDiscoveryWorkbench");
@@ -138,6 +157,31 @@ test("today page exposes resumable source failures and per-paper AI retry", asyn
   assert.match(rendered, /下页 3/);
   assert.match(rendered, /data-retry-source-page="webofscience"/);
   assert.doesNotMatch(rendered, /timeout/);
+
+  const calls = [];
+  const saveManualPaperAbstract = new Function("calls", `
+    function showToast(message) { calls.push({ toast: message }); }
+    async function refreshOnePaperLlm(key, request, ui) {
+      calls.push({ key, request, ui });
+    }
+    ${manualSource.replace(/^function/, "async function")}
+    return saveManualPaperAbstract;
+  `)(calls);
+  const button = {
+    disabled: false,
+    textContent: "保存并交给 AI",
+    isConnected: true,
+    getAttribute: () => "paper-key",
+    closest: () => ({ querySelector: () => ({ value: " Complete verified abstract. " }) })
+  };
+  await saveManualPaperAbstract(button);
+  assert.deepEqual(calls.at(-1), {
+    key: "paper-key",
+    request: { manualAbstract: "Complete verified abstract." },
+    ui: { keepCurrentForm: true }
+  });
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "保存并交给 AI");
 
   const identitySource = readNamedFunction(html, "paperRetryIdentityMatches", "paperLooksLikeGeneratedSummary");
   const removeSource = readNamedFunction(html, "removePaperLlmFailure", "paperLlmFailureForPaper");
@@ -205,14 +249,39 @@ test("all papers page supports combined filters and OR search", async () => {
   assert.match(html, /data-all-filter-keyword/);
 });
 
+test("paper pages expose daily heatmaps as temporary date filters", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /const paperHeatmapSelectedDays = \{ today: "", all: "", favorites: "" \}/);
+  assert.match(html, /function paperHeatmapPanel\(scope, list\)/);
+  assert.match(html, /class="paper-heatmap-grid"/);
+  assert.match(html, /data-paper-heatmap-day="\$\{escapeHTML\(scope\)\}"/);
+  assert.match(html, /data-paper-heatmap-clear="\$\{escapeHTML\(scope\)\}"/);
+  assert.match(html, /paperHeatmapPanel\("today", sourcePapers\)/);
+  assert.match(html, /paperHeatmapPanel\("all", recentPapers\)/);
+  assert.match(html, /paperHeatmapPanel\("favorites", sourcePapers\)/);
+  assert.match(html, /matchesPaperHeatmapDay\(paper, "today"\)/);
+  assert.match(html, /matchesPaperHeatmapDay\(paper, "all"\)/);
+  assert.match(html, /matchesPaperHeatmapDay\(paper, "favorites"\)/);
+  assert.match(html, /bindPaperHeatmap\(\)/);
+  assert.match(html, /paperHeatmapSelectedDays\[scope\] === date \? "" : date/);
+  assert.match(html, /function localDateToKey\(date\)/);
+  assert.doesNotMatch(readNamedFunction(html, "shiftDateKey", "paperHeatmapDays"), /toISOString/);
+});
+
 test("paper list common filters use OR within groups and AND between groups", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   const categorySource = readNamedFunction(html, "paperCategoryKeys", "paperCategoryLabels");
   const filterSource = readNamedFunction(html, "paperMatchesCommonFilters", "paperSortValue");
-  const paperMatchesCommonFilters = new Function(`${categorySource}; ${filterSource}; return paperMatchesCommonFilters;`)();
+  const paperMatchesCommonFilters = new Function(`
+    const paperCategoryFilterOptions = [["classic", "偏传统算法"], ["neural", "带有神经网络算法"], ["bio", "偏生物结果"], ["hardware", "偏硬件创新"], ["theory", "偏理论创新"], ["review", "综述"]];
+    function paperNoteFor(paper) { return paper.note || {}; }
+    ${categorySource}; ${filterSource}; return paperMatchesCommonFilters;
+  `)();
   const filters = { categories: new Set(["hardware", "classic"]), stages: new Set(["formal"]) };
 
   assert.equal(paperMatchesCommonFilters({ categories: ["hardware"], publicationStage: "formal" }, filters), true);
+  assert.equal(paperMatchesCommonFilters({ categories: ["bio"], note: { categories: ["hardware"] }, publicationStage: "formal" }, filters), true);
+  assert.equal(paperMatchesCommonFilters({ categories: ["hardware"], note: { categories: [] }, publicationStage: "formal" }, filters), false);
   assert.equal(paperMatchesCommonFilters({ categories: ["classic"], publicationStage: "preprint" }, filters), false);
   assert.equal(paperMatchesCommonFilters({ categories: ["bio"], publicationStage: "formal" }, filters), false);
 });
@@ -363,11 +432,12 @@ test("paper timeline stamps toggle date sorting on all paper pages", async () =>
   assert.match(html, /timelineSortDirections\[scope\] = paperTimelineSortDirection\(scope\) === "asc" \? "desc" : "asc"/);
 });
 
-test("paper card puts publication date in source row and copies DOI", async () => {
+test("paper card puts precise publication date before journal info and copies DOI", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /published-date-pill/);
   assert.match(html, /data-copy-doi/);
   assert.match(html, /paperPublishedDoiControl/);
+  assert.match(html, /paper-source-row[\s\S]*publishedDoiControl[\s\S]*sourceLabel/);
   assert.doesNotMatch(html, /paperDoiLine/);
   assert.match(html, /paper-signal-row/);
   assert.match(html, /AI Token/);
@@ -1059,6 +1129,25 @@ test("favorites page uses tabbed reading views and defaults to unread", async ()
   assert.match(html, /bindFavoriteTabs/);
 });
 
+test("favorites page exposes the common paper filter panel on the right", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /const favoriteCommonPaperFilters = \{ categories: new Set\(\), stages: new Set\(\) \}/);
+  assert.match(html, /const selectedFavoritePaperKeywords = new Set\(\)/);
+  assert.match(html, /let favoritePaperSortMode = "published"/);
+  assert.match(html, /function favoritePaperSideFilter\(sourcePapers\)/);
+  assert.match(html, /个人收藏筛选/);
+  assert.match(html, /data-favorite-filter-keyword/);
+  assert.match(html, /data-paper-common-category="favorites"/);
+  assert.match(html, /data-paper-common-stage="favorites"/);
+  assert.match(html, /data-favorite-paper-sort="citation"/);
+  assert.match(html, /data-favorite-paper-sort-direction="desc"/);
+  assert.match(html, /pageShell\("个人收藏"[\s\S]*favoritePaperSideFilter\(searchableFavorites\)/);
+  assert.match(html, /bindFavoriteSideFilters\(\)/);
+  assert.match(html, /matchesSelectedFavoritePaperKeywords/);
+  assert.match(html, /paperMatchesCommonFilters\(paper, favoriteCommonPaperFilters\)/);
+  assert.match(html, /sortPapersByMode\(list, favoritePaperSortMode, favoritePaperSortDirection\)/);
+});
+
 test("favorites page exposes mark-read and remove actions for reading workflow", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /favoritePaperWorkflowButton/);
@@ -1083,7 +1172,8 @@ test("favorites page exposes mark-read and remove actions for reading workflow",
   assert.match(html, /updatePaperNote\(paper, \{ read: true \}\)/);
   assert.match(html, /updatePaperNote\(paper, \{ read: false \}\)/);
   assert.match(html, /updateFavorite\(paper, false\)/);
-  assert.match(html, /favoritePapersCache\.find\(item => paperStableKey\(item\) === key\)/);
+  assert.match(html, /function findPaperByStableKey\(key\)/);
+  assert.match(html, /paperLookupKeys\(item\)\.includes\(normalizedTarget\)/);
 });
 
 test("paper notes use backend json persistence for short title, read, and starred state", async () => {
@@ -1092,6 +1182,11 @@ test("paper notes use backend json persistence for short title, read, and starre
   assert.match(html, /loadPaperNotesData/);
   assert.match(html, /updatePaperNote/);
   assert.match(html, /paperNoteByKey/);
+  assert.match(html, /data-remove-paper-category/);
+  assert.match(html, /data-add-paper-category/);
+  assert.match(html, /data-category-menu-toggle/);
+  assert.match(html, /function updatePaperCategories\(paper, categories\)/);
+  assert.match(html, /updatePaperNote\(paper, \{ categories \}\)/);
   assert.doesNotMatch(html, /paperhot\.shortTitles\.v1/);
 });
 

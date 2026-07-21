@@ -1169,6 +1169,88 @@
       font-size: 12px;
       font-weight: 850;
     }
+    .paper-heatmap {
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid #e6eef3;
+    }
+    .paper-heatmap-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: #51647a;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .paper-heatmap-clear {
+      border: 0;
+      background: transparent;
+      color: #356283;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .paper-heatmap-summary {
+      color: #7b8da2;
+      font-size: 11px;
+      font-weight: 750;
+      line-height: 1.4;
+    }
+    .paper-heatmap-scroll {
+      max-width: 100%;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .paper-heatmap-grid {
+      display: grid;
+      grid-template-rows: repeat(7, 11px);
+      grid-auto-flow: column;
+      grid-auto-columns: 11px;
+      gap: 3px;
+      align-items: center;
+      width: max-content;
+      min-width: 100%;
+    }
+    .paper-heatmap-day {
+      width: 11px;
+      height: 11px;
+      border: 1px solid rgba(143, 171, 189, 0.36);
+      border-radius: 2px;
+      background: #edf3f7;
+      cursor: pointer;
+    }
+    .paper-heatmap-day:hover,
+    .paper-heatmap-day.active {
+      outline: 2px solid #0fa7c6;
+      outline-offset: 1px;
+    }
+    .paper-heatmap-day.level-0 { background: #edf3f7; }
+    .paper-heatmap-day.level-1 { background: #c7edf0; }
+    .paper-heatmap-day.level-2 { background: #78d2da; }
+    .paper-heatmap-day.level-3 { background: #24aebd; }
+    .paper-heatmap-day.level-4 { background: #087985; }
+    .paper-heatmap-legend {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: #8291a2;
+      font-size: 10px;
+      font-weight: 750;
+    }
+    .paper-heatmap-legend span[class^="level-"] {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      border: 1px solid rgba(143, 171, 189, 0.28);
+    }
+    .paper-heatmap-legend .level-0 { background: #edf3f7; }
+    .paper-heatmap-legend .level-1 { background: #c7edf0; }
+    .paper-heatmap-legend .level-2 { background: #78d2da; }
+    .paper-heatmap-legend .level-3 { background: #24aebd; }
+    .paper-heatmap-legend .level-4 { background: #087985; }
     .paper-summary {
       margin: 0;
       color: #65758b;
@@ -1274,6 +1356,7 @@
     .token-usage {
       display: flex;
       flex-wrap: wrap;
+      align-items: center;
       gap: 8px;
       margin-top: 8px;
       color: #7b899a;
@@ -1291,6 +1374,106 @@
       background: #eefcff;
       color: #0b92ad;
       font-weight: 850;
+    }
+    .paper-category-list {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    .paper-category-chip {
+      position: relative;
+      min-height: 24px;
+      padding: 3px 8px;
+      border: 1px solid #e0e7ed;
+      border-radius: 12px;
+      background: #f7fafb;
+      color: #66778a;
+      font: inherit;
+      font-weight: 760;
+      cursor: pointer;
+    }
+    .paper-category-chip::after {
+      content: "-";
+      position: absolute;
+      top: -8px;
+      right: -7px;
+      display: grid;
+      place-items: center;
+      width: 15px;
+      height: 15px;
+      border: 1px solid #f3b5ad;
+      border-radius: 999px;
+      background: #fff6f4;
+      color: #c83b2b;
+      font-size: 12px;
+      font-weight: 900;
+      line-height: 1;
+      opacity: 0;
+      transform: scale(.88);
+      transition: opacity .12s ease, transform .12s ease;
+      pointer-events: none;
+    }
+    .paper-category-chip:hover::after,
+    .paper-category-chip:focus-visible::after {
+      opacity: 1;
+      transform: scale(1);
+    }
+    .paper-category-picker {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+    .paper-category-add {
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: 1px dashed #b8c7d3;
+      border-radius: 999px;
+      background: #fbfdfe;
+      color: #607284;
+      font-size: 17px;
+      font-weight: 850;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .paper-category-add:hover,
+    .paper-category-add:focus-visible {
+      border-color: #0ea5b7;
+      color: #0b95a6;
+      background: #eefcff;
+    }
+    .paper-category-menu {
+      position: absolute;
+      z-index: 8;
+      top: 30px;
+      right: 0;
+      display: grid;
+      gap: 4px;
+      min-width: 136px;
+      padding: 6px;
+      border: 1px solid #dce7ed;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 12px 26px rgba(33,58,82,.14);
+    }
+    .paper-category-menu[hidden] { display: none; }
+    .paper-category-option {
+      width: 100%;
+      padding: 6px 8px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: #475a70;
+      font-size: 12px;
+      font-weight: 800;
+      text-align: left;
+      cursor: pointer;
+    }
+    .paper-category-option:hover,
+    .paper-category-option:focus-visible {
+      background: #f1f7fa;
+      color: #0b95a6;
     }
     .paper-signal-row {
       display: flex;
@@ -2238,8 +2421,13 @@
     const publicationStageFilterOptions = [["formal", "正式发表"], ["preprint", "预印本"]];
     const allCommonPaperFilters = { categories: new Set(), stages: new Set() };
     const todayCommonPaperFilters = { categories: new Set(), stages: new Set() };
+    const favoriteCommonPaperFilters = { categories: new Set(), stages: new Set() };
+    const selectedFavoritePaperKeywords = new Set();
+    const paperHeatmapSelectedDays = { today: "", all: "", favorites: "" };
     let todayPaperSortMode = "published";
     let todayPaperSortDirection = "desc";
+    let favoritePaperSortMode = "published";
+    let favoritePaperSortDirection = "desc";
     const samplePapers = [
       {
         id: "p1",
@@ -2378,6 +2566,7 @@
       paperDataStatus = activeSession ? `显示 ${activeSession.label} 抓取结果` : paperDataStatus;
     }
     const favoriteKeys = new Set();
+    const favoriteAddedAtByKey = new Map();
     let favoritePapersCache = [];
     let favoriteStatus = "正在载入个人收藏...";
     let favoriteActiveTab = "reading";
@@ -3150,7 +3339,6 @@
       const stableKey = paperStableKey(paper) || paper.id || "";
       const isPendingFavoriteRead = scope === "favorites" && favoriteActiveTab === "reading" && pendingFavoriteReadTimers.has(stableKey);
       const isSavedMuted = scope !== "favorites" && (isSaved || (scope === "today" && paper.archivedBeforeFetch === true));
-      const labelList = paperCategoryLabels(paper);
       const tokenUsage = paperTokenUsage(paper);
       const journalMetrics = paperJournalMetrics(paper);
       const publishedLabel = paperPublishedDateLabel(paper);
@@ -3193,7 +3381,7 @@
           ${reasonBlock}
           <div class="token-usage">
             <span class="score-pill">评分 ${escapeHTML(paper.score)}</span>
-            ${labelList.map(label => `<span class="tag">${escapeHTML(label)}</span>`).join("")}
+            ${paperCategoryEditor(paper)}
           </div>
           <div class="paper-signal-row">
             <span class="match-pill">${escapeHTML(matchLabel)}</span>
@@ -3354,6 +3542,55 @@
       });
     }
 
+    function findPaperByStableKey(key) {
+      const target = String(key || "").trim();
+      const normalizedTarget = target.toLowerCase().replace(/\s+/g, " ");
+      return [...recentPapers, ...todayPapers, ...favoritePapersCache, ...papers]
+        .find(item => paperStableKey(item) === target || paperLookupKeys(item).includes(normalizedTarget));
+    }
+
+    async function updatePaperCategories(paper, categories) {
+      await updatePaperNote(paper, { categories });
+    }
+
+    function closePaperCategoryMenus(except = null) {
+      document.querySelectorAll("[data-category-menu]").forEach(menu => {
+        if (menu !== except) menu.hidden = true;
+      });
+    }
+
+    function bindPaperCategoryEditors() {
+      document.querySelectorAll("[data-category-menu-toggle]").forEach(button => {
+        button.addEventListener("click", event => {
+          event.stopPropagation();
+          const menu = button.closest(".paper-category-picker")?.querySelector("[data-category-menu]");
+          if (!menu) return;
+          const willOpen = menu.hidden;
+          closePaperCategoryMenus(menu);
+          menu.hidden = !willOpen;
+        });
+      });
+      document.querySelectorAll("[data-remove-paper-category]").forEach(button => {
+        button.addEventListener("click", async () => {
+          const paper = findPaperByStableKey(button.getAttribute("data-remove-paper-category"));
+          if (!paper) return;
+          const category = button.getAttribute("data-category");
+          await updatePaperCategories(paper, paperCategoryKeys(paper).filter(item => item !== category));
+        });
+      });
+      document.querySelectorAll("[data-add-paper-category]").forEach(button => {
+        button.addEventListener("click", async () => {
+          const paper = findPaperByStableKey(button.getAttribute("data-add-paper-category"));
+          if (!paper) return;
+          const category = button.getAttribute("data-category");
+          const categories = paperCategoryKeys(paper);
+          if (!category || categories.includes(category)) return;
+          await updatePaperCategories(paper, [...categories, category]);
+        });
+      });
+      document.addEventListener("click", () => closePaperCategoryMenus(), { once: true });
+    }
+
     function timelineItem(paper, scope = "") {
       const stamp = paperTimelineStamp(paper);
       const direction = paperTimelineSortDirection(scope);
@@ -3376,17 +3613,19 @@
     function paperTimelineSortDirection(scope) {
       if (scope === "all") return allPaperSortDirection;
       if (scope === "today") return todayPaperSortDirection;
+      if (scope === "favorites") return favoritePaperSortDirection;
       return timelineSortDirections[scope] || "desc";
     }
 
     function paperTimelineSortValue(paper, scope) {
-      const mode = scope === "all" ? allPaperSortMode : "fetched";
+      const mode = scope === "all" ? allPaperSortMode : scope === "favorites" ? favoritePaperSortMode : "fetched";
       return paperDateValue(paper, mode) || paperDateValue(paper, "published") || "";
     }
 
     function sortPaperTimelinePapers(list, scope) {
       if (scope === "today") return sortPapersByMode(list, todayPaperSortMode, todayPaperSortDirection);
       if (scope === "all") return sortPapersByMode(list, allPaperSortMode, allPaperSortDirection);
+      if (scope === "favorites") return sortPapersByMode(list, favoritePaperSortMode, favoritePaperSortDirection);
       const direction = paperTimelineSortDirection(scope) === "asc" ? 1 : -1;
       return list.slice().sort((a, b) => {
         const left = paperTimelineSortValue(a, scope);
@@ -3405,11 +3644,22 @@
           allPaperSortMode,
           allPaperSortDirection,
           allPaperDateFilter,
+          paperHeatmapSelectedDays.all,
           allPaperSearchQuery,
           [...selectedAllPaperKeywords].sort().join(",")
         ].join(":");
       }
-      if (base === "favorites") return `favorites:${favoriteActiveTab}:${paperTimelineSortDirection("favorites")}`;
+      if (base === "favorites") {
+        return [
+          "favorites",
+          favoriteActiveTab,
+          favoritePaperSortMode,
+          favoritePaperSortDirection,
+          paperHeatmapSelectedDays.favorites,
+          favoritePaperSearchQuery,
+          [...selectedFavoritePaperKeywords].sort().join(",")
+        ].join(":");
+      }
       return base;
     }
 
@@ -3541,11 +3791,54 @@
     }
 
     function paperCategoryKeys(paper) {
-      return Array.isArray(paper.categories) && paper.categories.length ? paper.categories : [paper.category].filter(Boolean);
+      const note = paperNoteFor(paper);
+      const rawCategories = Object.prototype.hasOwnProperty.call(note, "categories")
+        ? note.categories
+        : (Array.isArray(paper.categories) && paper.categories.length ? paper.categories : [paper.category].filter(Boolean));
+      const known = new Set(paperCategoryFilterOptions.map(([value]) => value));
+      const seen = new Set();
+      return (Array.isArray(rawCategories) ? rawCategories : [])
+        .map(category => String(category || "").trim())
+        .filter(category => {
+          if (!known.has(category) || seen.has(category)) return false;
+          seen.add(category);
+          return true;
+        });
     }
 
     function paperCategoryLabels(paper) {
+      const byKey = new Map(paperCategoryFilterOptions);
+      const labels = paperCategoryKeys(paper).map(category => byKey.get(category)).filter(Boolean);
+      if (labels.length) return labels;
+      if (Object.prototype.hasOwnProperty.call(paperNoteFor(paper), "categories")) return [];
       return Array.isArray(paper.categoryLabels) && paper.categoryLabels.length ? paper.categoryLabels : [paper.categoryLabel].filter(Boolean);
+    }
+
+    function paperCategoryEditor(paper) {
+      const key = paperStableKey(paper);
+      const selected = paperCategoryKeys(paper);
+      const selectedSet = new Set(selected);
+      const byKey = new Map(paperCategoryFilterOptions);
+      const safeKey = escapeHTML(key);
+      const chips = selected.map(category => {
+        const label = byKey.get(category) || category;
+        return `<button class="paper-category-chip" type="button" data-remove-paper-category="${safeKey}" data-category="${escapeHTML(category)}" aria-label="删除论文类型：${escapeHTML(label)}" title="点击删除 ${escapeHTML(label)}">${escapeHTML(label)}</button>`;
+      }).join("");
+      const options = paperCategoryFilterOptions
+        .filter(([value]) => !selectedSet.has(value))
+        .map(([value, label]) => `<button class="paper-category-option" type="button" data-add-paper-category="${safeKey}" data-category="${escapeHTML(value)}">${escapeHTML(label)}</button>`)
+        .join("");
+      return `
+        <div class="paper-category-list" data-paper-category-list="${safeKey}">
+          ${chips}
+          <span class="paper-category-picker">
+            <button class="paper-category-add" type="button" data-category-menu-toggle="${safeKey}" ${options ? "" : "disabled"} aria-label="增加论文类型" title="${options ? "增加论文类型" : "所有论文类型都已添加"}">+</button>
+            <div class="paper-category-menu" data-category-menu="${safeKey}" hidden>
+              ${options || `<span class="small-text">没有可添加的类型</span>`}
+            </div>
+          </span>
+        </div>
+      `;
     }
 
     function paperMatchesCommonFilters(paper, filters) {
@@ -3590,7 +3883,7 @@
       const copyAttrs = doi
         ? ` data-copy-doi="${escapeHTML(doi)}" title="${escapeHTML(title)}" aria-label="复制 DOI：${escapeHTML(doi)}"`
         : ` title="${escapeHTML(title)}" aria-label="${escapeHTML(title)}"`;
-      return `<button class="published-date-pill" type="button"${copyAttrs}>发表时间：${escapeHTML(publishedLabel)}</button>`;
+      return `<button class="published-date-pill" type="button"${copyAttrs}>精确日期：${escapeHTML(publishedLabel)}</button>`;
     }
 
     function paperCitationMetric(paper) {
@@ -3752,6 +4045,11 @@
       return [...selectedAllPaperKeywords].some(keyword => paperMatchesKeyword(paper, keyword));
     }
 
+    function matchesSelectedFavoritePaperKeywords(paper) {
+      if (!selectedFavoritePaperKeywords.size) return true;
+      return [...selectedFavoritePaperKeywords].some(keyword => paperMatchesKeyword(paper, keyword));
+    }
+
     function paperDateValue(paper, mode = allPaperSortMode) {
       if (mode === "published") return String(paper.published || paper.date || "").trim();
       return String(paper.fetchedAt || paper.date || paper.published || "").trim();
@@ -3761,6 +4059,121 @@
       const value = paperDateValue(paper, mode);
       const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
       return match ? `${match[1]}-${match[2]}-${match[3]}` : "";
+    }
+
+    function dateKeyFromValue(value) {
+      const match = String(value || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+      return match ? `${match[1]}-${match[2]}-${match[3]}` : "";
+    }
+
+    function favoritePaperAddedDateKey(paper) {
+      for (const key of paperLookupKeys(paper)) {
+        const addedAt = favoriteAddedAtByKey.get(key);
+        const dateKey = dateKeyFromValue(addedAt);
+        if (dateKey) return dateKey;
+      }
+      return dateKeyFromValue(paper.favoriteAddedAt || paper.addedAt || paper.fetchedAt || paper.date || paper.published);
+    }
+
+    function paperHeatmapDateKey(paper, scope) {
+      if (scope === "favorites") return favoritePaperAddedDateKey(paper);
+      return paperDateKey(paper, "fetched");
+    }
+
+    function matchesPaperHeatmapDay(paper, scope) {
+      const selectedDay = paperHeatmapSelectedDays[scope] || "";
+      return !selectedDay || paperHeatmapDateKey(paper, scope) === selectedDay;
+    }
+
+    function dateKeyToLocalDate(key) {
+      const date = new Date(`${key}T00:00:00`);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function localDateToKey(date) {
+      const pad = value => String(value).padStart(2, "0");
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    }
+
+    function shiftDateKey(key, offsetDays) {
+      const date = dateKeyToLocalDate(key);
+      if (!date) return "";
+      date.setDate(date.getDate() + offsetDays);
+      return localDateToKey(date);
+    }
+
+    function paperHeatmapDays(list, scope) {
+      const counts = new Map();
+      list.forEach(paper => {
+        const key = paperHeatmapDateKey(paper, scope);
+        if (key) counts.set(key, (counts.get(key) || 0) + 1);
+      });
+      const keys = [...counts.keys()].sort();
+      if (!keys.length) return [];
+      const firstDate = dateKeyToLocalDate(keys[0]);
+      let cursor = shiftDateKey(keys[0], -firstDate.getDay());
+      const startDate = dateKeyToLocalDate(cursor);
+      const end = keys[keys.length - 1];
+      const days = [];
+      while (cursor && cursor <= end) {
+        const date = dateKeyToLocalDate(cursor);
+        const week = startDate ? Math.floor((date - startDate) / 604800000) : 0;
+        days.push({
+          key: cursor,
+          count: counts.get(cursor) || 0,
+          weekday: date.getDay(),
+          week
+        });
+        cursor = shiftDateKey(cursor, 1);
+      }
+      return days;
+    }
+
+    function paperHeatmapLevel(count, maxCount) {
+      if (!count || !maxCount) return 0;
+      if (count >= maxCount) return 4;
+      if (count >= Math.ceil(maxCount * 0.66)) return 3;
+      if (count >= Math.ceil(maxCount * 0.33)) return 2;
+      return 1;
+    }
+
+    function paperHeatmapScopeLabel(scope) {
+      if (scope === "favorites") return "收藏日期";
+      return "加入日期";
+    }
+
+    function paperHeatmapPanel(scope, list) {
+      const days = paperHeatmapDays(list, scope);
+      const totalCount = list.length;
+      const selectedDay = paperHeatmapSelectedDays[scope] || "";
+      const selectedCount = selectedDay ? days.find(day => day.key === selectedDay)?.count || 0 : 0;
+      const maxCount = Math.max(0, ...days.map(day => day.count));
+      const summary = selectedDay
+        ? `${selectedDay} · ${selectedCount} 篇`
+        : `${paperHeatmapScopeLabel(scope)} · ${days.length} 天 · ${totalCount} 篇`;
+      return `
+        <div class="paper-heatmap" data-paper-heatmap="${escapeHTML(scope)}">
+          <div class="paper-heatmap-head">
+            <span>GitHub 热点图</span>
+            <button class="paper-heatmap-clear" type="button" data-paper-heatmap-clear="${escapeHTML(scope)}" ${selectedDay ? "" : "disabled"}>全部</button>
+          </div>
+          <div class="paper-heatmap-summary">${escapeHTML(summary)}</div>
+          ${days.length ? `
+            <div class="paper-heatmap-scroll">
+              <div class="paper-heatmap-grid" aria-label="${escapeHTML(paperHeatmapScopeLabel(scope))}热点图">
+                ${days.map(day => {
+                  const level = paperHeatmapLevel(day.count, maxCount);
+                  const title = `${day.key} · ${day.count} 篇`;
+                  return `<button class="paper-heatmap-day level-${level} ${selectedDay === day.key ? "active" : ""}" type="button" style="grid-column:${day.week + 1};grid-row:${day.weekday + 1}" data-paper-heatmap-day="${escapeHTML(scope)}" data-paper-heatmap-date="${escapeHTML(day.key)}" title="${escapeHTML(title)}" aria-label="${escapeHTML(title)}" aria-pressed="${selectedDay === day.key}"></button>`;
+                }).join("")}
+              </div>
+            </div>
+            <div class="paper-heatmap-legend">
+              <span>少</span><span class="level-0"></span><span class="level-1"></span><span class="level-2"></span><span class="level-3"></span><span class="level-4"></span><span>多</span>
+            </div>
+          ` : `<span class="small-text">暂无可显示日期。</span>`}
+        </div>
+      `;
     }
 
     function paperPublishedYear(paper) {
@@ -3879,6 +4292,7 @@
       return matchesSelectedAllPaperKeywords(paper)
         && paperMatchesCommonFilters(paper, allCommonPaperFilters)
         && matchesAllPaperDateFilter(paper)
+        && matchesPaperHeatmapDay(paper, "all")
         && paperMatchesSearchQuery(paper, allPaperSearchQuery);
     }
 
@@ -4021,6 +4435,62 @@
             <button class="category-btn ${allPaperSortDirection === "desc" ? "active" : ""}" type="button" data-paper-sort-direction="desc">降序</button>
           </div>
         </div>
+        ${paperHeatmapPanel("all", recentPapers)}
+      `;
+    }
+
+    function favoritePaperSideFilter(sourcePapers) {
+      const focusKeywords = [...getEnabledKeywords("primary"), ...getEnabledKeywords("secondary")];
+      const keywordChips = focusKeywords.length
+        ? focusKeywords.map(keyword => `
+            <button class="chip filter-chip ${selectedFavoritePaperKeywords.has(keyword) ? "selected" : ""}" data-favorite-filter-keyword="${escapeHTML(keyword)}">
+              ${escapeHTML(keyword)}
+            </button>
+          `).join("")
+        : `<span class="small-text">还没有启用的关注领域，请到“领域配置”中添加。</span>`;
+      return `
+        <div class="panel-head">
+          <h2>个人收藏筛选</h2>
+          <button class="edit-link" type="button" data-favorite-filter-clear>清空</button>
+        </div>
+        <div class="all-filter-section">
+          <div class="all-filter-title">关注标签</div>
+          <div class="token-row">${keywordChips}</div>
+        </div>
+        <div class="all-filter-section">
+          <div class="all-filter-title">论文类型</div>
+          <div class="today-filter-group">
+            ${paperCategoryFilterOptions.map(([value, label]) => `
+              <label class="today-filter-option">
+                <input type="checkbox" data-paper-common-category="favorites" value="${value}" ${favoriteCommonPaperFilters.categories.has(value) ? "checked" : ""}>
+                ${escapeHTML(label)}
+              </label>
+            `).join("")}
+          </div>
+        </div>
+        <div class="all-filter-section">
+          <div class="all-filter-title">发表阶段</div>
+          <div class="today-filter-group">
+            ${publicationStageFilterOptions.map(([value, label]) => `
+              <label class="today-filter-option">
+                <input type="checkbox" data-paper-common-stage="favorites" value="${value}" ${favoriteCommonPaperFilters.stages.has(value) ? "checked" : ""}>
+                ${escapeHTML(label)}
+              </label>
+            `).join("")}
+          </div>
+        </div>
+        <div class="all-filter-section">
+          <div class="all-filter-title">排序</div>
+          <div class="token-row">
+            <button class="category-btn ${favoritePaperSortMode === "citation" ? "active" : ""}" type="button" data-favorite-paper-sort="citation">引用量</button>
+            <button class="category-btn ${favoritePaperSortMode === "published" ? "active" : ""}" type="button" data-favorite-paper-sort="published">发表日期</button>
+          </div>
+          <div class="token-row">
+            <button class="category-btn ${favoritePaperSortDirection === "asc" ? "active" : ""}" type="button" data-favorite-paper-sort-direction="asc">升序</button>
+            <button class="category-btn ${favoritePaperSortDirection === "desc" ? "active" : ""}" type="button" data-favorite-paper-sort-direction="desc">降序</button>
+          </div>
+        </div>
+        ${paperHeatmapPanel("favorites", sourcePapers)}
       `;
     }
 
@@ -4101,8 +4571,96 @@
         selectedAllPaperKeywords.clear();
         allCommonPaperFilters.categories.clear();
         allCommonPaperFilters.stages.clear();
+        paperHeatmapSelectedDays.all = "";
         resetPaperVisibleLimit("all");
         renderAll();
+      });
+    }
+
+    function bindFavoriteSideFilters() {
+      document.querySelectorAll("[data-favorite-filter-keyword]").forEach(button => {
+        button.addEventListener("click", () => {
+          const keyword = button.getAttribute("data-favorite-filter-keyword");
+          if (!keyword) return;
+          toggleSetValue(selectedFavoritePaperKeywords, keyword);
+          resetPaperVisibleLimit("favorites");
+          renderFavorites();
+        });
+      });
+      document.querySelectorAll('[data-paper-common-category="favorites"]').forEach(input => {
+        input.addEventListener("change", () => {
+          toggleSetValue(favoriteCommonPaperFilters.categories, input.value);
+          resetPaperVisibleLimit("favorites");
+          renderFavorites();
+        });
+      });
+      document.querySelectorAll('[data-paper-common-stage="favorites"]').forEach(input => {
+        input.addEventListener("change", () => {
+          toggleSetValue(favoriteCommonPaperFilters.stages, input.value);
+          resetPaperVisibleLimit("favorites");
+          renderFavorites();
+        });
+      });
+      document.querySelectorAll("[data-favorite-paper-sort]").forEach(button => {
+        button.addEventListener("click", () => {
+          const nextMode = button.getAttribute("data-favorite-paper-sort") === "citation" ? "citation" : "published";
+          if (favoritePaperSortMode === nextMode) favoritePaperSortDirection = favoritePaperSortDirection === "asc" ? "desc" : "asc";
+          else {
+            favoritePaperSortMode = nextMode;
+            favoritePaperSortDirection = "desc";
+          }
+          resetPaperVisibleLimit("favorites");
+          renderFavorites();
+        });
+      });
+      document.querySelectorAll("[data-favorite-paper-sort-direction]").forEach(button => {
+        button.addEventListener("click", () => {
+          favoritePaperSortDirection = button.getAttribute("data-favorite-paper-sort-direction") === "asc" ? "asc" : "desc";
+          resetPaperVisibleLimit("favorites");
+          renderFavorites();
+        });
+      });
+      document.querySelector("[data-favorite-filter-clear]")?.addEventListener("click", () => {
+        selectedFavoritePaperKeywords.clear();
+        favoriteCommonPaperFilters.categories.clear();
+        favoriteCommonPaperFilters.stages.clear();
+        paperHeatmapSelectedDays.favorites = "";
+        resetPaperVisibleLimit("favorites");
+        renderFavorites();
+      });
+    }
+
+    function bindPaperHeatmap() {
+      const rerenderScope = scope => {
+        if (scope === "today") {
+          resetTodayLoadedCount();
+          renderToday();
+        }
+        if (scope === "all") {
+          resetPaperVisibleLimit("all");
+          renderAll();
+        }
+        if (scope === "favorites") {
+          resetPaperVisibleLimit("favorites");
+          renderFavorites();
+        }
+      };
+      document.querySelectorAll("[data-paper-heatmap-day]").forEach(button => {
+        button.addEventListener("click", () => {
+          const scope = button.getAttribute("data-paper-heatmap-day") || "";
+          const date = button.getAttribute("data-paper-heatmap-date") || "";
+          if (!scope || !Object.prototype.hasOwnProperty.call(paperHeatmapSelectedDays, scope)) return;
+          paperHeatmapSelectedDays[scope] = paperHeatmapSelectedDays[scope] === date ? "" : date;
+          rerenderScope(scope);
+        });
+      });
+      document.querySelectorAll("[data-paper-heatmap-clear]").forEach(button => {
+        button.addEventListener("click", () => {
+          const scope = button.getAttribute("data-paper-heatmap-clear") || "";
+          if (!scope || !Object.prototype.hasOwnProperty.call(paperHeatmapSelectedDays, scope)) return;
+          paperHeatmapSelectedDays[scope] = "";
+          rerenderScope(scope);
+        });
       });
     }
 
@@ -4161,6 +4719,7 @@
           const scope = button.getAttribute("data-paper-timeline-sort") || "";
           if (scope === "all") allPaperSortDirection = allPaperSortDirection === "asc" ? "desc" : "asc";
           else if (scope === "today") todayPaperSortDirection = todayPaperSortDirection === "asc" ? "desc" : "asc";
+          else if (scope === "favorites") favoritePaperSortDirection = favoritePaperSortDirection === "asc" ? "desc" : "asc";
           else timelineSortDirections[scope] = paperTimelineSortDirection(scope) === "asc" ? "desc" : "asc";
           if (scope === "today") resetTodayLoadedCount();
           else resetPaperVisibleLimit(scope);
@@ -4225,13 +4784,23 @@
 
     function applyFavoritesPayload(payload = {}) {
       favoriteKeys.clear();
+      favoriteAddedAtByKey.clear();
       (Array.isArray(payload.favorites) ? payload.favorites : []).forEach(item => {
+        const addedAt = item.addedAt || "";
         (Array.isArray(item.keys) ? item.keys : [item.key]).forEach(key => {
           const cleanKey = String(key || "").trim().toLowerCase().replace(/\s+/g, " ");
-          if (cleanKey) favoriteKeys.add(cleanKey);
+          if (cleanKey) {
+            favoriteKeys.add(cleanKey);
+            if (addedAt) favoriteAddedAtByKey.set(cleanKey, addedAt);
+          }
         });
       });
-      favoritePapersCache = Array.isArray(payload.papers) ? payload.papers.map(normalizePaperForView) : [];
+      favoritePapersCache = Array.isArray(payload.papers)
+        ? payload.papers.map(paper => {
+            const favoriteAddedAt = paperLookupKeys(paper).map(key => favoriteAddedAtByKey.get(key)).find(Boolean) || "";
+            return normalizePaperForView({ ...paper, favoriteAddedAt });
+          })
+        : [];
       favoriteStatus = `已载入个人收藏 ${favoritePapersCache.length} 篇`;
     }
 
@@ -4546,6 +5115,7 @@
     function todayResultFilterPanel() {
       const definitions = todaySourceFilterDefinitions[todaySourceTab] || [];
       const selections = todayFilterSelections[todaySourceTab] || {};
+      const sourcePapers = todayPapersForSource(todayPapers, todaySourceTab);
       return `
         <div class="today-filter-panel">
           <div class="panel-head">
@@ -4592,6 +5162,7 @@
               <button class="category-btn ${todayPaperSortDirection === "desc" ? "active" : ""}" type="button" data-today-paper-sort-direction="desc">降序</button>
             </div>
           </div>
+          ${paperHeatmapPanel("today", sourcePapers)}
         </div>
       `;
     }
@@ -4634,6 +5205,7 @@
       return sourcePapers
         .filter(paper => todayPaperMatchesFilters(paper, selections))
         .filter(paper => paperMatchesCommonFilters(paper, todayCommonPaperFilters))
+        .filter(paper => matchesPaperHeatmapDay(paper, "today"))
         .filter(paper => paperMatchesSearchQuery(paper, todayPaperSearchQuery));
     }
 
@@ -5116,19 +5688,30 @@
       }
     }
 
-    async function refreshOnePaperLlm(key, request = {}) {
-      const paper = recentPapers.find(item => paperStableKey(item) === key)
-        || todayPapers.find(item => paperStableKey(item) === key)
-        || favoritePapersCache.find(item => paperStableKey(item) === key)
-        || papers.find(item => paperStableKey(item) === key);
-      if (!paper) return;
-      if (archiveLlmRefreshingKeys.has(key)) return;
+    async function refreshOnePaperLlm(key, request = {}, ui = {}) {
+      const paper = findPaperByStableKey(key);
+      if (!paper) {
+        const message = "没有找到这篇论文的当前卡片，请刷新页面后重试";
+        recentDataStatus = message;
+        paperDataStatus = message;
+        showToast(message);
+        renderPage(location.hash.replace("#", "") || "all");
+        return null;
+      }
+      if (archiveLlmRefreshingKeys.has(key)) return null;
       if (location.protocol === "file:") {
         showToast("直接打开 HTML 时无法访问后端");
-        return;
+        return null;
       }
       archiveLlmRefreshingKeys.add(key);
-      renderPage(location.hash.replace("#", "") || "all");
+      if (ui.keepCurrentForm) {
+        const message = request.manualAbstract ? "正在保存完整摘要并交给 AI..." : "正在重新执行 LLM...";
+        recentDataStatus = message;
+        paperDataStatus = message;
+        showToast(message);
+      } else {
+        renderPage(location.hash.replace("#", "") || "all");
+      }
 
       try {
         const response = await fetch("/api/archive/llm/paper", {
@@ -5155,24 +5738,36 @@
         recentDataStatus = statusText;
         paperDataStatus = statusText;
         showToast(aiUpdated ? "LLM 已更新该论文" : "摘要已保存，AI 总结未完成");
+        return payload;
       } catch (error) {
         recentDataStatus = `单篇 LLM 失败：${error.message}`;
         paperDataStatus = recentDataStatus;
         showToast(`LLM 失败：${error.message}`);
+        return null;
       } finally {
         archiveLlmRefreshingKeys.delete(key);
+        renderPage(location.hash.replace("#", "") || "all");
       }
-      renderPage(location.hash.replace("#", "") || "all");
     }
 
-    function saveManualPaperAbstract(button) {
+    async function saveManualPaperAbstract(button) {
       const key = button.getAttribute("data-save-manual-abstract");
       const manualAbstract = button.closest("details")?.querySelector("[data-manual-abstract]")?.value.trim() || "";
       if (!manualAbstract) {
         showToast("请先填写完整摘要");
         return;
       }
-      refreshOnePaperLlm(key, { manualAbstract });
+      const previousText = button.textContent;
+      button.disabled = true;
+      button.textContent = "保存中";
+      try {
+        await refreshOnePaperLlm(key, { manualAbstract }, { keepCurrentForm: true });
+      } finally {
+        if (button.isConnected) {
+          button.disabled = false;
+          button.textContent = previousText;
+        }
+      }
     }
 
     function invalidateTodayCanonicalTask() {
@@ -5539,6 +6134,7 @@
         todayFilterSelections[todaySourceTab] = {};
         todayCommonPaperFilters.categories.clear();
         todayCommonPaperFilters.stages.clear();
+        paperHeatmapSelectedDays.today = "";
         resetTodayLoadedCount(todaySourceTab);
         renderToday();
       });
@@ -5655,7 +6251,9 @@
         button.addEventListener("click", () => refreshOnePaperLlm(button.getAttribute("data-retry-firecrawl-abstract"), { abstractMode: "firecrawl" }));
       });
       document.querySelectorAll("[data-save-manual-abstract]").forEach(button => {
-        button.addEventListener("click", () => saveManualPaperAbstract(button));
+        button.addEventListener("click", () => {
+          saveManualPaperAbstract(button);
+        });
       });
     }
 
@@ -5697,9 +6295,11 @@
       bindTodayDiscovery();
       bindPaperRefresh();
       bindPaperSearch("today");
+      bindPaperHeatmap();
       bindFavorites();
       bindStarredStatus();
       bindCitationCopy();
+      bindPaperCategoryEditors();
       bindShortTitleEditors();
       bindPaperTimelineSort();
       bindTodayAutoLoad();
@@ -5719,10 +6319,12 @@
       bindPaperSort();
       bindAllPaperSearch();
       bindAllPaperSideFilters();
+      bindPaperHeatmap();
       bindShortTitleEditors();
       bindFavorites();
       bindStarredStatus();
       bindCitationCopy();
+      bindPaperCategoryEditors();
       bindShortTitleEditors();
       bindPaperTimelineSort();
       bindLazyPaperLoading();
@@ -5733,7 +6335,11 @@
       const mergedFavorites = mergePaperPool(favoritePapersCache, fallbackPool.filter(isFavoritePaper));
       papers = mergedFavorites;
       const searchableFavorites = mergedFavorites;
-      const favoritePapers = searchableFavorites.filter(paper => paperMatchesSearchQuery(paper, favoritePaperSearchQuery));
+      const favoritePapers = searchableFavorites
+        .filter(matchesSelectedFavoritePaperKeywords)
+        .filter(paper => paperMatchesCommonFilters(paper, favoriteCommonPaperFilters))
+        .filter(paper => matchesPaperHeatmapDay(paper, "favorites"))
+        .filter(paper => paperMatchesSearchQuery(paper, favoritePaperSearchQuery));
       const unreadPapers = favoritePapers.filter(paper => !isReadPaper(paper));
       const readPaperList = favoritePapers.filter(isReadPaper);
       const starredPaperList = favoritePapers.filter(isStarredPaper);
@@ -5772,14 +6378,17 @@
           ${list}
         </section>
       `;
-      mainContent.innerHTML = pageShell("个人收藏", "保存待读论文、可复现代码和组会候选材料。", body);
+      mainContent.innerHTML = pageShell("个人收藏", "保存待读论文、可复现代码和组会候选材料。", body, favoritePaperSideFilter(searchableFavorites));
       bindPaperSearch("favorites");
       bindFavoriteTabs();
+      bindFavoriteSideFilters();
+      bindPaperHeatmap();
       bindFavorites();
       bindReadingStatus();
       bindFavoriteWorkflowActions();
       bindStarredStatus();
       bindCitationCopy();
+      bindPaperCategoryEditors();
       bindShortTitleEditors();
       bindPaperTimelineSort();
       bindLazyPaperLoading();
