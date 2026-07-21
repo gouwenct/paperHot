@@ -153,6 +153,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 - “继续抓取”“从头重抓”“开始新抓取”只依据后端返回的 canonical 任务指纹和可恢复状态显示，不根据页面已显示论文数猜测断点。预检失败时保留原结果和上一次断点信息，并禁用新抓取，避免把未确认状态破坏性降级为 `new`。
 - 结果按 Web of Science、Google Scholar、arXiv / bioRxiv、所有信源四个标签查看；每个标签初始显示 15 篇，接近底部后自动加载下一批 15 篇。
 - 右侧悬浮窗可按六类论文类型、正式发表 / 预印本筛选，并按引用量或发表日期升降序排列；同组多选为 OR，不同组与当前信源标签、信源专属筛选和搜索条件之间为 AND，未知引用量或日期始终排在末尾。
+- 右侧 GitHub 风格热点图按天显示加入全部论文的数量；点击某一天后只显示这一天的当前信源结果，再点“全部”恢复所有天。
 - Web of Science 引用量、预印本平台和版本状态等信源专属筛选继续保留；日期精度筛选项已移除，但底层日期精度数据和日期处理不变。
 - 论文卡标题右侧显示 WoS/Scholar 引用量；预印本显示 arXiv 或 bioRxiv。卡片同时显示最多 3 位作者和作者总数，不重复显示已经由右侧指标表达的信源标签。
 - 信源分页失败会在工作台下方显示失败页和“重试失败页”，相同 canonical 条件下自动以 `resume` 继续；AI 总结失败保留论文卡片，并在对应卡片显示单篇 LLM 重试。
@@ -181,13 +182,15 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 - 右侧可按引用量或发表日期升降序排列，未知引用量或日期始终排在末尾。
 - 抓取时间和发表时间可以点击切换正序或倒序。
 - 时间节点用于快速筛选某一天、某个月或某一年范围的论文。
+- 右侧 GitHub 风格热点图按天显示加入全部论文的数量；点击某一天后只显示这一天加入的论文，再点“全部”恢复所有天。
 - 每次按需加载最多 20 篇，接近底部后继续加载下一批。
-- 右侧筛选和排序均为临时页面状态，不写入论文库、用户配置或本地数据 ZIP。
+- 右侧筛选、排序和热点图选择均为临时页面状态，不写入论文库、用户配置或本地数据 ZIP。
 
 论文卡片操作：
 
 - 收藏论文。
 - 编辑短标题。
+- 手动调整论文类型标签；鼠标移到标签上可删除 AI 判断的类型，点击标签区后的加号可从剩余类型中补充人工判断，人工结果写入本地论文标注。
 - 复制引用。
 - 点击发表时间复制 DOI，悬停显示 DOI。
 - 单篇重新运行完整摘要补全和 LLM 摘要翻译、推荐理由。
@@ -217,7 +220,9 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 - 默认打开待读论文。
 - 收藏状态写入 `data/papers/favorites.json`。
 - 收藏论文已不在全部论文归档时，收藏页会回退显示 `favorites.json` 中已有的论文快照，待读、已读和备注状态不丢失。
-- 短标题、已读、标星状态写入 `data/papers/paper-notes.json`。
+- 右侧“个人收藏筛选”支持关注标签、论文类型、发表阶段和引用量 / 发表日期排序；筛选只影响当前页面显示。
+- 右侧 GitHub 风格热点图按天显示收藏论文数量；点击某一天后只显示当天收藏的论文，再点“全部”恢复所有天。
+- 短标题、已读、标星和人工论文类型标签写入 `data/papers/paper-notes.json`。
 - 点击“标记已读”后，论文在 3 秒内淡出，并出现“撤销”按钮。
 - 3 秒内点击撤销，论文保留在待读页面。
 - 3 秒后未撤销，论文进入已阅读页面。
@@ -419,7 +424,7 @@ flowchart TD
 | `data/papers/fetch-log.json` | 抓取日志和候选论文快照 |
 | `data/papers/operation-log.jsonl` | 追加式操作日志 |
 | `data/papers/favorites.json` | 收藏论文状态 |
-| `data/papers/paper-notes.json` | 短标题、已读、标星等阅读状态 |
+| `data/papers/paper-notes.json` | 短标题、已读、标星和人工论文类型标签等阅读状态 |
 | `data/papers/journal-metrics-cache.json` | EasyScholar 期刊指标缓存 |
 | `data/papers/google-rolling-cursors.json` | 旧版直接 Google adapter 调用的滚动抓取位置；近期抓取和指定论文检索不读取或更新 |
 | `data/papers/recent-fetch-cursors.json` | 近期抓取和指定论文检索的唯一短期断点；Google、WoS、arXiv 等逐信源只保存下一页和完成态，仅相同检索模式、表达式、日期和信源任务可续传，全部信源完成后清除，不进入本地数据 ZIP |
