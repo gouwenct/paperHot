@@ -53,6 +53,8 @@ data/papers/paper-notes.json
 
 `data/papers/archive.json` 的论文记录可选包含 `displayTitle`、`publishedPrecision`、`publicationStage`、`retrievalSource`、`sourceId`、`citationCount`、`citationSource`、`relatedVersions`、`abstractStatus` 和 `abstractConsensusSources`。后两个字段记录摘要是否通过完整性与论文身份校验，以及采用的信源名称；为兼容旧数据继续使用 `abstractConsensusSources` 字段名，但新记录允许只有一个信源。不包含额外全文、API Key 或运行缓存；旧备份缺少时按未确认处理，已有成功 AI 记录继续兼容显示，因此备份格式仍为版本 `1`，无需迁移。
 
+`data/papers/paper-notes.json` 可选包含用户手动覆盖的论文类型 `categories` 和 `categoryLabels`，用于在页面上删除 AI 类型判断或补充人工类型。缺少这两个字段的旧 v1 备份继续回退到论文记录中的 AI 分类；字段为空数组表示用户手动清空了该论文的类型标签，因此备份版本保持 `1`。
+
 用户手动填写并保存的完整摘要继续写入论文记录的现有 `summary` 字段，并以 `abstractConsensusSources: ["manual"]` 标记来源；Firecrawl 单篇重抓成功时使用 `"firecrawl"`。两者随 `archive.json` 正常导出和导入，不增加新文件或新字段，因此备份版本保持 `1`。
 
 勾选“包含用户资料和研究背景”时额外包含：

@@ -2123,7 +2123,7 @@ test("favorites are stored in a local json file with stable paper keys", async (
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
-test("paper notes store short title, read state, and starred state in one local json file", async () => {
+test("paper notes store short title, read state, starred state, and manual categories in one local json file", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-notes-"));
   await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
     mode: "archive",
@@ -2154,7 +2154,8 @@ test("paper notes store short title, read state, and starred state in one local 
     note: {
       shortTitle: "SIM liver",
       read: true,
-      starred: true
+      starred: true,
+      categories: ["bio", "hardware", "bio", "unknown"]
     }
   }, { dataDir: tempDir });
   const afterSave = await readPaperNotesPayload({ dataDir: tempDir });
@@ -2171,13 +2172,17 @@ test("paper notes store short title, read state, and starred state in one local 
   assert.equal(afterSave.notes[0].shortTitle, "SIM liver");
   assert.equal(afterSave.notes[0].read, true);
   assert.equal(afterSave.notes[0].starred, true);
+  assert.deepEqual(afterSave.notes[0].categories, ["bio", "hardware"]);
+  assert.deepEqual(afterSave.notes[0].categoryLabels, ["偏生物结果", "偏硬件创新"]);
   assert.equal(afterSave.notes[0].keys.includes("10.1000/note"), true);
   assert.equal(afterSave.papers[0].id, "archive-note-id");
   assert.equal(updated.notes[0].shortTitle, "");
   assert.equal(updated.notes[0].read, false);
   assert.equal(updated.notes[0].starred, true);
+  assert.deepEqual(updated.notes[0].categories, ["bio", "hardware"]);
   assert.equal(rawFile.notes.length, 1);
   assert.equal(rawFile.notes[0].shortTitle, "");
+  assert.deepEqual(rawFile.notes[0].categories, ["bio", "hardware"]);
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -4297,6 +4302,47 @@ test("single-paper LLM refresh saves a manual abstract before sending it to AI",
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
+test("manual abstract can match no-DOI archive papers when transient ids differ", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-manual-abstract-title-match-"));
+  const title = "Deep-learning-enhanced super-resolution reconstruction for negative-feedback adaptive structured illumination microscopy";
+  const authors = ["Tingting Zhou", "Xinzhu Sang"];
+  const manualAbstract = "This complete manually supplied abstract explains the deep-learning enhanced reconstruction method, negative feedback adaptive structured illumination microscopy, and experimental validation.";
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    papers: [{
+      id: "archive-stable-id",
+      title,
+      authors,
+      journal: "International Conference on Remote Sensing, Mapping, and Image Processing (RSMIP 2026)",
+      published: "2026-05-28",
+      summary: "Snippet…",
+      abstractStatus: "unconfirmed"
+    }]
+  }, null, 2)}\n`, "utf8");
+
+  const payload = await refreshArchivePaperLlmInsight({
+    id: "today-transient-id",
+    title,
+    authors,
+    manualAbstract
+  }, {
+    dataDir: tempDir,
+    fetcher: async ({ paper }) => ({
+      abstractZh: `人工摘要翻译：${paper.title}`,
+      reason: "人工摘要推荐。",
+      tokenUsage: { status: "已调用 AI", total: 8 }
+    })
+  });
+  const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+
+  assert.equal(payload.existed, true);
+  assert.equal(payload.updated, true);
+  assert.equal(archive.papers[0].id, "archive-stable-id");
+  assert.equal(archive.papers[0].summary, manualAbstract);
+  assert.equal(archive.papers[0].abstractZh, `人工摘要翻译：${title}`);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
 test("manual abstract remains saved when the following AI call fails", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-manual-abstract-ai-fail-"));
   const manualAbstract = "This complete manually supplied abstract remains available when the language model request fails.";
@@ -4318,7 +4364,7 @@ test("manual abstract remains saved when the following AI call fails", async () 
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
-test("manual abstract rejects truncated text before archive or AI changes", async () => {
+test("manual abstract bypasses automatic truncation rules and is sent to AI", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-manual-abstract-invalid-"));
   await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
     mode: "archive",
@@ -4328,13 +4374,46 @@ test("manual abstract rejects truncated text before archive or AI changes", asyn
 
   const payload = await refreshArchivePaperLlmInsight({ id: "manual-invalid", manualAbstract: "Still truncated…" }, {
     dataDir: tempDir,
-    fetcher: async () => { llmCalls += 1; }
+    fetcher: async ({ paper }) => {
+      llmCalls += 1;
+      assert.equal(paper.summary, "Still truncated…");
+      return { abstractZh: "人工摘要翻译。", reason: "人工摘要推荐。", tokenUsage: { status: "已调用 AI", total: 8 } };
+    }
   });
   const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
 
-  assert.equal(payload.updated, false);
-  assert.equal(llmCalls, 0);
-  assert.equal(archive.papers[0].summary, "Original snippet…");
+  assert.equal(payload.updated, true);
+  assert.equal(payload.aiUpdated, true);
+  assert.equal(llmCalls, 1);
+  assert.equal(archive.papers[0].summary, "Still truncated…");
+  assert.equal(archive.papers[0].abstractZh, "人工摘要翻译。");
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("manual abstract is archived even when the current card has no archive match", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-manual-abstract-new-card-"));
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({ mode: "archive", papers: [] }, null, 2)}\n`, "utf8");
+  const manualAbstract = "A manually supplied abstract must be saved before any AI request is attempted.";
+
+  const payload = await refreshArchivePaperLlmInsight({
+    id: "today-only-paper",
+    title: "Paper visible only on the current page",
+    authors: ["Test Author"],
+    published: "2026-07-18",
+    manualAbstract
+  }, {
+    dataDir: tempDir,
+    fetcher: async () => { throw new Error("AI endpoint unavailable"); }
+  });
+  const archive = JSON.parse(await fs.readFile(path.join(tempDir, "archive.json"), "utf8"));
+
+  assert.equal(payload.updated, true);
+  assert.equal(payload.aiUpdated, false);
+  assert.equal(payload.existed, false);
+  assert.equal(archive.papers.length, 1);
+  assert.equal(archive.papers[0].id, "today-only-paper");
+  assert.equal(archive.papers[0].summary, manualAbstract);
+  assert.equal(archive.papers[0].abstractStatus, "confirmed");
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 

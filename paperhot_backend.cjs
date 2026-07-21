@@ -5539,7 +5539,23 @@ function cleanPaperNotePatch(note = {}) {
   if (Object.prototype.hasOwnProperty.call(note, "starred")) {
     patch.starred = note.starred === true;
   }
+  if (Object.prototype.hasOwnProperty.call(note, "categories")) {
+    patch.categories = cleanPaperNoteCategories(note.categories);
+    patch.categoryLabels = patch.categories.map(category => CATEGORY_LABELS[category]);
+  }
   return patch;
+}
+
+function cleanPaperNoteCategories(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value
+    .map(item => compactText(item).toLowerCase())
+    .filter(item => {
+      if (!CATEGORY_LABELS[item] || seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
 }
 
 function paperNoteRecordFromPaper(paper = {}, note = {}, previous = {}) {
@@ -5547,6 +5563,8 @@ function paperNoteRecordFromPaper(paper = {}, note = {}, previous = {}) {
     ...paperFlexibleLookupKeys(paper),
     ...(Array.isArray(previous.keys) ? previous.keys : [])
   ].filter(Boolean)));
+  const hasManualCategories = Object.prototype.hasOwnProperty.call(note, "categories");
+  const categories = hasManualCategories ? cleanPaperNoteCategories(note.categories) : [];
   return {
     key: keys[0] || "",
     keys,
@@ -5554,6 +5572,10 @@ function paperNoteRecordFromPaper(paper = {}, note = {}, previous = {}) {
     shortTitle: compactText(note.shortTitle),
     read: note.read === true,
     starred: note.starred === true,
+    ...(hasManualCategories ? {
+      categories,
+      categoryLabels: categories.map(category => CATEGORY_LABELS[category])
+    } : {}),
     updatedAt: new Date().toISOString()
   };
 }
@@ -5563,6 +5585,8 @@ function cleanPaperNoteRecord(record = {}) {
   const cleanKeys = Array.from(new Set(keys
     .map(value => String(value || "").trim().toLowerCase().replace(/\s+/g, " "))
     .filter(Boolean)));
+  const hasManualCategories = Object.prototype.hasOwnProperty.call(record, "categories");
+  const categories = hasManualCategories ? cleanPaperNoteCategories(record.categories) : [];
   return {
     key: cleanKeys[0] || "",
     keys: cleanKeys,
@@ -5570,6 +5594,10 @@ function cleanPaperNoteRecord(record = {}) {
     shortTitle: compactText(record.shortTitle),
     read: record.read === true,
     starred: record.starred === true,
+    ...(hasManualCategories ? {
+      categories,
+      categoryLabels: categories.map(category => CATEGORY_LABELS[category])
+    } : {}),
     updatedAt: compactText(record.updatedAt) || new Date().toISOString()
   };
 }
@@ -5631,6 +5659,10 @@ async function updatePaperNote(input = {}, options = {}) {
     shortTitle: previous?.shortTitle || "",
     read: previous?.read === true,
     starred: previous?.starred === true,
+    ...(Object.prototype.hasOwnProperty.call(previous || {}, "categories") ? {
+      categories: previous.categories || [],
+      categoryLabels: previous.categoryLabels || []
+    } : {}),
     ...patch
   };
   const record = paperNoteRecordFromPaper(paper, mergedNote, previous);
@@ -6124,23 +6156,27 @@ function archivePaperMatchesTarget(paper, target = {}) {
   const paperSourceId = compactText(paper?.sourceId).toLowerCase();
   const targetSourceId = compactText(target?.sourceId).toLowerCase();
   if (paperSource && paperSource === targetSource && paperSourceId && paperSourceId === targetSourceId) return true;
-  if (paperId || targetId || paperSourceId || targetSourceId) return false;
 
   const paperStage = compactText(paper?.publicationStage || "formal").toLowerCase();
   const targetStage = compactText(target?.publicationStage || "formal").toLowerCase();
-  return paperStage === targetStage
+  const titleAndAuthorMatch = paperStage === targetStage
     && Boolean(normalizedTitleKey(paper?.title))
     && normalizedTitleKey(paper?.title) === normalizedTitleKey(target?.title)
     && hasMeaningfulAuthorOverlap(paper?.authors, target?.authors);
+  if (titleAndAuthorMatch) return true;
+  if (paperId || targetId || paperSourceId || targetSourceId) return false;
+  return false;
 }
 
 async function enrichArchivePapersWithLlm(papers, options = {}) {
   const errors = [];
   const llmLog = [];
-  const recoveredPapers = await recoverGeneratedSummaryPapers(papers, {
-    ...options,
-    errors
-  });
+  const recoveredPapers = options.manualAbstractTrusted
+    ? papers
+    : await recoverGeneratedSummaryPapers(papers, {
+        ...options,
+        errors
+      });
   const enriched = await enrichPapersWithLlmInsights(recoveredPapers, {
     ...(options.llm || {}),
     fetcher: options.fetcher || options.fetchers?.llm,
@@ -6148,7 +6184,7 @@ async function enrichArchivePapersWithLlm(papers, options = {}) {
     config: options.config,
     configFile: options.configFile,
     userBackground: options.userBackground,
-    requireAbstractConsensus: true,
+    requireAbstractConsensus: !options.manualAbstractTrusted,
     errors,
     llmLog
   });
@@ -6157,11 +6193,50 @@ async function enrichArchivePapersWithLlm(papers, options = {}) {
 
 async function refreshArchivePaperLlmInsight(target = {}, options = {}) {
   const dataDir = options.dataDir || DATA_DIR;
-  const archive = await readPaperArchive(dataDir);
-  const index = archive.papers.findIndex(paper => archivePaperMatchesTarget(paper, target));
-  if (index < 0) {
+  const manualAbstractProvided = Object.prototype.hasOwnProperty.call(target, "manualAbstract");
+  const manualAbstract = manualAbstractProvided ? compactText(target.manualAbstract) : "";
+  if (manualAbstractProvided && !manualAbstract) {
+    const archive = await readPaperArchive(dataDir);
+    return {
+      ok: true,
+      updated: false,
+      aiUpdated: false,
+      existed: archive.papers.some(paper => archivePaperMatchesTarget(paper, target)),
+      paper: null,
+      archive,
+      errors: [{ source: "abstract", message: "手动摘要不能为空" }],
+      llm: summarizeLlmLog([])
+    };
+  }
+
+  let archive = await readPaperArchive(dataDir);
+  let index = archive.papers.findIndex(paper => archivePaperMatchesTarget(paper, target));
+  const existed = index >= 0;
+  if (index < 0 && !manualAbstractProvided) {
     return { ok: true, updated: false, existed: false, paper: null, archive };
   }
+
+  if (index < 0) {
+    const { manualAbstract: _manualAbstract, abstractMode: _abstractMode, fetcher: _fetcher, fetchers: _fetchers, ...paperFields } = target;
+    const newPaper = completePaperRecord(paperFields);
+    archive = await queuePaperArchiveUpdate(dataDir, async () => {
+      const current = await readPaperArchive(dataDir);
+      const existingIndex = current.papers.findIndex(paper => archivePaperMatchesTarget(paper, newPaper));
+      if (existingIndex >= 0) return current;
+      const papers = [...current.papers, newPaper];
+      const nextArchive = {
+        ...current,
+        mode: "archive",
+        updatedAt: new Date().toISOString(),
+        count: papers.length,
+        papers
+      };
+      nextArchive.archiveFile = await writePaperArchive(nextArchive, dataDir);
+      return nextArchive;
+    });
+    index = archive.papers.findIndex(paper => archivePaperMatchesTarget(paper, newPaper));
+  }
+
   const original = completePaperRecord(archive.papers[index]);
   let paperForLlm = original;
   let activeArchive = archive;
@@ -6169,20 +6244,8 @@ async function refreshArchivePaperLlmInsight(target = {}, options = {}) {
   let replacementAbstract = "";
   let replacementSource = "";
 
-  if (Object.prototype.hasOwnProperty.call(target, "manualAbstract")) {
-    replacementAbstract = cleanAbstractText(target.manualAbstract);
-    if (!replacementAbstract || looksLikeTruncatedText(replacementAbstract) || isRobotChallengeText(replacementAbstract)) {
-      return {
-        ok: true,
-        updated: false,
-        aiUpdated: false,
-        existed: true,
-        paper: original,
-        archive,
-        errors: [{ source: "abstract", message: "手动摘要为空、仍被截断或是机器人验证页面" }],
-        llm: summarizeLlmLog([])
-      };
-    }
+  if (manualAbstractProvided) {
+    replacementAbstract = manualAbstract;
     replacementSource = "manual";
   } else if (target.abstractMode === "firecrawl") {
     try {
@@ -6240,6 +6303,7 @@ async function refreshArchivePaperLlmInsight(target = {}, options = {}) {
   }
   const llmOptions = {
     ...options,
+    manualAbstractTrusted: manualAbstractProvided,
     fetcher: options.fetcher || target.fetcher,
     fetchers: options.fetchers || target.fetchers
   };
@@ -6250,7 +6314,7 @@ async function refreshArchivePaperLlmInsight(target = {}, options = {}) {
       ok: true,
       updated: abstractUpdated,
       aiUpdated: false,
-      existed: true,
+      existed,
       paper: paperForLlm,
       archive: activeArchive,
       errors,
@@ -6274,7 +6338,7 @@ async function refreshArchivePaperLlmInsight(target = {}, options = {}) {
     ok: true,
     updated: true,
     aiUpdated: true,
-    existed: true,
+    existed,
     paper: nextPaper,
     archive: nextArchive,
     errors,
