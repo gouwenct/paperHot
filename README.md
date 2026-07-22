@@ -442,6 +442,7 @@ flowchart TD
 | `docs/superpowers/plans/2026-07-16-paper-list-filter-sort.md` | 今日论文与全部论文分类、发表阶段和排序功能的 TDD 实施计划 |
 | `docs/superpowers/plans/2026-07-17-aliyun-llm-model-pool.md` | 阿里百炼 LLM 模型池自动切换、状态可视化和本地额度估算的 TDD 实施计划 |
 | `docs/superpowers/plans/2026-07-17-aliyun-text-model-pool-manager.md` | 阿里百炼文本对话模型池管理器、单模型测试和 25/页卡片 UI 的 TDD 实施计划 |
+| `docs/superpowers/plans/2026-07-23-paperhot-visual-optimization.md` | 今日论文视觉令牌、结果层级、论文卡、移动端、性能测量和固定端口验收的分步实施计划 |
 | `docs/solutions/runtime-errors/paperhot-service-restart-data-permission.md` | 固定端口旧进程与受限 Node 导致旧代码、断点 `EPERM` 的诊断和重启验收 |
 | `docs/solutions/ui-bugs/hash-routed-paper-detail-survives-async-rerenders.md` | 详情 hash 路由在直接刷新、浏览器历史和异步重渲染中保持稳定的修复与防回归规则 |
 | `.superpowers/sdd/task-2-report.md` | Task 2 多信源元数据与正式版/预印本关联的实现、TDD 和验证报告 |
