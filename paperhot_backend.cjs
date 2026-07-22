@@ -5941,6 +5941,71 @@ async function readArchivePayload(options = {}) {
   };
 }
 
+function paperLookupQueryKeys(key) {
+  const raw = String(key || "").trim();
+  if (!raw) return [];
+  const normalized = raw.toLowerCase().replace(/\s+/g, " ");
+  const doi = normalizeDoi(raw);
+  return Array.from(new Set([
+    normalized,
+    compactText(raw).toLowerCase().replace(/\s+/g, " "),
+    doi ? doi.toLowerCase().replace(/\s+/g, " ") : ""
+  ].filter(Boolean)));
+}
+
+function paperMatchesLookupKey(paper, queryKeys) {
+  const keySet = queryKeys instanceof Set ? queryKeys : new Set(queryKeys || []);
+  if (!keySet.size) return false;
+  return paperFlexibleLookupKeys(paper).some(item => keySet.has(item));
+}
+
+async function readPaperByKey(key, options = {}) {
+  const dataDir = options.dataDir || DATA_DIR;
+  const queryKeys = paperLookupQueryKeys(key);
+  if (!queryKeys.length) {
+    return {
+      ok: false,
+      error: "not-found",
+      message: "缺少论文标识"
+    };
+  }
+  const queryKeySet = new Set(queryKeys);
+  const archive = await readPaperArchive(dataDir);
+  const archivePaper = (Array.isArray(archive.papers) ? archive.papers : [])
+    .find(paper => paperMatchesLookupKey(paper, queryKeySet));
+  if (archivePaper) {
+    return {
+      ok: true,
+      foundIn: "archive",
+      paper: completePaperRecord(archivePaper)
+    };
+  }
+
+  const favorites = await readFavoritesFile(dataDir);
+  for (const favorite of favorites.favorites || []) {
+    const favoriteKeys = Array.isArray(favorite.keys) ? favorite.keys : [favorite.key];
+    const favoriteHit = favoriteKeys
+      .map(item => String(item || "").trim().toLowerCase().replace(/\s+/g, " "))
+      .some(item => item && queryKeySet.has(item));
+    const snapshot = favorite.paper && typeof favorite.paper === "object" ? favorite.paper : null;
+    if (favoriteHit || (snapshot && paperMatchesLookupKey(snapshot, queryKeySet))) {
+      if (snapshot && Object.keys(snapshot).length) {
+        return {
+          ok: true,
+          foundIn: "favorites",
+          paper: completePaperRecord(snapshot)
+        };
+      }
+    }
+  }
+
+  return {
+    ok: false,
+    error: "not-found",
+    message: "未找到论文"
+  };
+}
+
 async function dedupePaperArchive(options = {}) {
   const dataDir = options.dataDir || DATA_DIR;
   const archive = await readPaperArchive(dataDir);
@@ -7587,6 +7652,7 @@ module.exports = {
   readDiscoveryTaskState,
   readRecentFetchCursors,
   readWebOfScienceUsage,
+  readPaperByKey,
   readPaperNotesPayload,
   readOperationLog,
   readArchivePayload,

@@ -56,6 +56,8 @@ Paper Hot 的主要目的只有两个：
 - 今日论文抓取。
 - 全部论文筛选、排序和管理。
 - 个人收藏和阅读流转。
+- 论文详情阅读页（`#paper/<stable-key>`），可从今日论文、全部论文和个人收藏进入。
+- 浅色 / 暗色主题一键切换（仅浏览器 localStorage 偏好）。
 - 领域关键词、信源和 API 配置。
 - Token 统计、抓取日志、候选论文入库。
 - 操作日志查看。
@@ -158,6 +160,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 - 论文卡标题右侧显示 WoS/Scholar 引用量；预印本显示 arXiv 或 bioRxiv。卡片同时显示最多 3 位作者和作者总数，不重复显示已经由右侧指标表达的信源标签。
 - 信源分页失败会在工作台下方显示失败页和“重试失败页”，相同 canonical 条件下自动以 `resume` 继续；AI 总结失败保留论文卡片，并在对应卡片显示单篇 LLM 重试。
 - 即使首次抓取在生成成功 session 前失败，页面也会按任务指纹把最小失败状态保存在浏览器本地，切换历史结果或刷新后仍可恢复；任务无错误后自动清除。该短期状态不进入本地数据 ZIP。
+- 点击论文标题进入详情阅读页；该路由可刷新恢复。
 - 关键词增删、OR 点亮和 AND 连线写回现有 `data/user/config.json` 的 `searchLogic`；“清空”只清除活动逻辑和连线，不删除关键词。指定论文输入、本次检索信源开关、结果标签、筛选和已加载数量都是临时页面状态。
 - 旧的 Google 手动起点、重置按钮和滚动开关已移除，避免与当前任务指纹分页产生两套控制。
 - 如果某些页触发反爬或失败，抓取日志会记录跳过范围，后续可以继续从后面抓。
@@ -188,6 +191,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 论文卡片操作：
 
+- 点击标题进入论文详情阅读页。
 - 收藏论文。
 - 编辑短标题。
 - 手动调整论文类型标签；鼠标移到标签上可删除 AI 判断的类型，点击标签区后的加号可从剩余类型中补充人工判断，人工结果写入本地论文标注。
@@ -203,6 +207,30 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 - 已收藏论文在今日论文和全部论文中会弱化显示；今日论文中抓取前已经存在于全部论文的结果也会弱化，帮助用户把注意力放在本轮新增论文上。
 - 全部论文页不应自动删除论文；清空未标星、删除和去重必须由用户明确触发。
+
+### 论文详情
+
+“论文详情”用于连续阅读单篇论文，不伪造缺失元数据。
+
+使用逻辑：
+
+- 路由为 `#paper/<stable-key>`；`stable-key` 使用 `encodeURIComponent` 编码，避免 DOI/URL 中的 `/`、`#`、`?` 破坏 hash。
+- 可从今日论文、全部论文、个人收藏的论文标题进入；浏览器前进/后退按 hash 历史工作，直接刷新会重新请求详情。
+- 只读接口 `GET /api/papers/by-key?key=...` 先查全部论文归档，再回退收藏快照；支持 DOI、URL、ID 和归一化标题，找不到时返回 `not-found`。该接口不修改 archive/favorites，不写操作日志。
+- 详情页展示完整标题、作者、来源/期刊、日期、DOI/原文入口、摘要、AI 中文总结/推荐理由、引用，以及收藏、标星、已读、短标题等现有阅读状态操作。
+- 缺失字段保持空白或“未记录”，不会伪造发表日期或其他元数据。
+- 找不到论文或加载失败时显示明确错误，并提供返回今日论文、全部论文、个人收藏的路径。
+
+页面重点：
+
+- 详情页复用现有字段语义和收藏 / notes API，不另建一套阅读状态。
+- 若论文只存在于收藏快照而不在归档中，详情内容以快照已有字段为准。
+
+### 主题与显示
+
+- 默认保持现有浅色主题视觉不变。
+- 侧栏顶栏提供一键浅色 / 暗色切换；偏好保存在浏览器 `localStorage` 的版本化键 `paperhot.theme.v1`，刷新后恢复。
+- 主题偏好不写入 `config.json`，不进入本地数据 ZIP 导入导出，也不改变备份格式 v1。
 
 ### 个人收藏
 
@@ -230,6 +258,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 - 删除按钮会把论文从收藏页移除。
 - 收藏页内的论文都是已收藏论文，所以不再弱化显示背景。
 - 标星论文卡片使用浅金色星纹背景，和普通白色卡片直接区分；标星状态仍写入现有 `paper-notes.json`。
+- 点击标题同样进入论文详情阅读页。
 
 页面重点：
 
@@ -384,13 +413,16 @@ flowchart TD
 
 ### 补充文档
 
-`docs/solutions/` 保存已经解决并验证的故障、踩坑经验和可复用修复方案，按问题类别组织；遇到相同症状时应先查对应分类。
+`docs/solutions/` 保存已经解决并验证的故障、踩坑经验和可复用修复方案，按问题类别组织，并用 YAML frontmatter 的 `module`、`problem_type`、`tags` 等字段支持检索；实现功能或排查同类问题时可先查对应分类。
+
+`docs/decisions/` 保存 ADR 设计决策，记录公共 API、数据边界和难以从代码直接看出的取舍；修改相关架构前应先查看现有决策及其状态。
 
 | 路径 | 用途 |
 | --- | --- |
 | `docs/easyscholar-config.md` | EasyScholar API 获取和期刊指标配置说明 |
 | `docs/google-scholar-config.md` | SerpApi / Google Scholar 配置说明 |
 | `docs/paperhot-ingestion-flow.html` | 从页面抓取按钮到归档、日志和富集流程的可视化说明 |
+| `docs/decisions/ADR-001-paper-detail-navigation-and-lookup.md` | 论文详情采用 hash 路由、只读按键查询及现有阅读状态复用的设计取舍 |
 | `docs/superpowers/specs/2026-07-11-recent-paper-discovery-design.md` | 已确认的近期论文发现、多信源检索、断点恢复和今日论文页面设计 |
 | `docs/superpowers/specs/2026-07-15-archive-clear-and-existing-results-design.md` | 全部论文清除未标星条目、保留个人状态及今日论文显示已入库结果的设计 |
 | `docs/superpowers/specs/2026-07-15-wos-date-and-query-design.md` | WoS Boolean 查询、近期收录范围与多级论文日期补全设计 |
@@ -410,6 +442,7 @@ flowchart TD
 | `docs/superpowers/plans/2026-07-17-aliyun-llm-model-pool.md` | 阿里百炼 LLM 模型池自动切换、状态可视化和本地额度估算的 TDD 实施计划 |
 | `docs/superpowers/plans/2026-07-17-aliyun-text-model-pool-manager.md` | 阿里百炼文本对话模型池管理器、单模型测试和 25/页卡片 UI 的 TDD 实施计划 |
 | `docs/solutions/runtime-errors/paperhot-service-restart-data-permission.md` | 固定端口旧进程与受限 Node 导致旧代码、断点 `EPERM` 的诊断和重启验收 |
+| `docs/solutions/ui-bugs/hash-routed-paper-detail-survives-async-rerenders.md` | 详情 hash 路由在直接刷新、浏览器历史和异步重渲染中保持稳定的修复与防回归规则 |
 | `.superpowers/sdd/task-2-report.md` | Task 2 多信源元数据与正式版/预印本关联的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-3-report.md` | Task 3 近期抓取游标与 WoS 本地请求用量的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-4-report.md` | Task 4 日期感知、断点恢复、指定论文检索及独立审查修复的 TDD 和验证报告 |

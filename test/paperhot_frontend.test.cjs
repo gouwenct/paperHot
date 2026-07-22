@@ -137,6 +137,9 @@ test("today page exposes resumable source failures and per-paper AI retry", asyn
     const todayPapers = [];
     const favoritePapersCache = [];
     const papers = [];
+    function paperLookupPools() {
+      return [...recentPapers, ...todayPapers, ...favoritePapersCache, ...papers].filter(Boolean);
+    }
     ${lookupSource}; ${stableSource}; ${findSource}; return findPaperByStableKey;
   `)();
   assert.equal(findPaperByStableKey("10.1000/manual").id, "transient-id");
@@ -1073,7 +1076,7 @@ test("all papers page exposes archive LLM refresh actions", async () => {
 
 test("today papers page exposes single paper LLM refresh actions", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
-  assert.match(html, /page !== "all" && scope !== "today" && scope !== "favorites"/);
+  assert.match(html, /page !== "all" && page !== "paper" && scope !== "today" && scope !== "favorites"/);
   assert.match(html, /renderTodayPaperTimeline\(filteredPapers\)/);
   assert.match(html, /todayPapers = mergePaperPool\(todayPapers, \[normalizePaperForView\(payload\.paper\)\]\)/);
   assert.match(html, /document\.querySelectorAll\("\[data-refresh-paper-llm\]"\)/);
@@ -1685,8 +1688,19 @@ test("config changes and returning to today invalidate the visible canonical tas
   assert.equal(invalidations, 2);
 
   const location = { hash: "#config" };
+  const encodeSource = readNamedFunction(html, "encodePaperRouteKey", "decodePaperRouteKey");
+  const decodeSource = readNamedFunction(html, "decodePaperRouteKey", "paperDetailHash");
+  const hashSource = readNamedFunction(html, "paperDetailHash", "parseLocationHash");
+  const parseSource = readNamedFunction(html, "parseLocationHash", "currentPageName");
   const navigationHarness = new Function("location", "scheduleTodayTaskPreflight", "renderPage", "window", `
     let todayKeyboardConnectFrom = "SIM";
+    function paperStableKey(paper) {
+      return String(paper.id || paper.doi || paper.url || paper.title || "").trim();
+    }
+    ${encodeSource}
+    ${decodeSource}
+    ${hashSource}
+    ${parseSource}
     ${navigationSource}
     return { handlePageHashChange, connection: () => todayKeyboardConnectFrom };
   `)(location, () => { invalidations += 1; }, page => renders.push(page), { addEventListener() {} });
@@ -1800,6 +1814,7 @@ test("today polling errors retain existing cards and reset the running state", a
     let todayTaskPreflightController = null;
     let fetchProgress = { percent: 50 };
     const fetchRange = { startDate: "2026-07-01", endDate: "2026-07-13" };
+    const renderCurrentPage = () => renderPage("today");
     async ${source}
     return {
       loadPaperData,
@@ -1930,9 +1945,135 @@ test("today page shows last fetch time and elapsed age in hero", async () => {
   assert.match(html, /loadFetchLogData/);
 });
 
+test("paper detail hash route encodes stable keys and exposes by-key API", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const serverSource = await fs.readFile(serverFile, "utf8");
+  const backendSource = await fs.readFile(backendFile, "utf8");
+
+  assert.match(backendSource, /function readPaperByKey\(/);
+  assert.match(backendSource, /readPaperByKey,/);
+  assert.match(serverSource, /pathname === "\/api\/papers\/by-key"/);
+  assert.match(serverSource, /url\.searchParams\.get\("key"\)/);
+  assert.match(serverSource, /sendJson\(res, 404/);
+  assert.match(html, /function parseLocationHash\(/);
+  assert.match(html, /function encodePaperRouteKey\(/);
+  assert.match(html, /function decodePaperRouteKey\(/);
+  assert.match(html, /function paperDetailHash\(/);
+  assert.match(html, /#paper\//);
+  assert.match(html, /\/api\/papers\/by-key\?key=/);
+  assert.match(html, /function renderPaperDetail\(/);
+  assert.match(html, /paper-detail/);
+  assert.match(html, /data-paper-detail-link|paper-detail-link|paperDetailHash\(paper\)/);
+  assert.doesNotMatch(
+    html,
+    /renderPage\(location\.hash\.replace\("#", ""\)/,
+    "async data refreshes must preserve #paper/<stable-key> through parseLocationHash"
+  );
+  assert.match(html, /function renderCurrentPage\(\)[\s\S]*parseLocationHash\(\)[\s\S]*renderPage\(page, key\)/);
+
+  const encodeSource = readNamedFunction(html, "encodePaperRouteKey", "decodePaperRouteKey");
+  const decodeSource = readNamedFunction(html, "decodePaperRouteKey", "paperDetailHash");
+  const hashSource = readNamedFunction(html, "paperDetailHash", "parseLocationHash");
+  const parseSource = readNamedFunction(html, "parseLocationHash", "currentPageName");
+  const api = new Function(`
+    function paperStableKey(paper) {
+      return String(paper.id || paper.doi || paper.url || paper.title || "").trim();
+    }
+    ${encodeSource}
+    ${decodeSource}
+    ${hashSource}
+    ${parseSource}
+    return { encodePaperRouteKey, decodePaperRouteKey, paperDetailHash, parseLocationHash };
+  `)();
+
+  const doiPaper = { doi: "10.1000/Detail/WithSlash", title: "DOI paper" };
+  const urlPaper = { url: "https://example.test/a?b=1#c", title: "URL paper" };
+  const doiHash = api.paperDetailHash(doiPaper);
+  const urlHash = api.paperDetailHash(urlPaper);
+  assert.equal(api.encodePaperRouteKey("10.1000/Detail/WithSlash"), encodeURIComponent("10.1000/Detail/WithSlash"));
+  assert.equal(doiHash, `#paper/${encodeURIComponent("10.1000/Detail/WithSlash")}`);
+  assert.equal(urlHash, `#paper/${encodeURIComponent("https://example.test/a?b=1#c")}`);
+  assert.doesNotMatch(doiHash.slice("#paper/".length), /\//);
+  assert.equal(api.decodePaperRouteKey(encodeURIComponent("10.1000/Detail/WithSlash")), "10.1000/Detail/WithSlash");
+  assert.equal(api.parseLocationHash(doiHash).page, "paper");
+  assert.equal(api.parseLocationHash(doiHash).key, "10.1000/Detail/WithSlash");
+  assert.equal(api.parseLocationHash("#today").page, "today");
+  assert.equal(api.parseLocationHash("").page, "today");
+  assert.match(html, /未找到论文|缺少论文|返回全部论文|返回今日论文/);
+  assert.match(html, /正在加载|加载论文/);
+});
+
+test("theme preference stays in versioned localStorage and covers dark mode styles", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /paperhot\.theme\.v1/);
+  assert.match(html, /data-theme-toggle/);
+  assert.match(html, /data-theme-toggle data-theme-compact/);
+  assert.match(html, /@media \(max-width: 820px\)[\s\S]*\.mobile-theme-toggle/);
+  assert.match(html, /\[data-theme="dark"\]/);
+  assert.match(html, /html\[data-theme="dark"\] \.candidate-table-wrap/);
+  assert.match(html, /html\[data-theme="dark"\] \.candidate-table td/);
+  assert.match(html, /aria-label="[^"]*(?:暗色|浅色|主题)[^"]*"/);
+  assert.match(html, /function applyThemePreference\(/);
+  assert.match(html, /function loadThemePreference\(/);
+  assert.match(html, /function saveThemePreference\(/);
+  assert.match(html, /function toggleThemePreference\(/);
+  assert.doesNotMatch(html, /paperhot\.theme\.v1[\s\S]{0,80}exportLocalData|exportLocalData[\s\S]{0,200}paperhot\.theme\.v1/);
+  assert.doesNotMatch(html, /writeUserConfig\([^\)]*theme|config\.json[^\n]*theme/i);
+
+  const loadSource = readNamedFunction(html, "loadThemePreference", "saveThemePreference");
+  const saveSource = readNamedFunction(html, "saveThemePreference", "applyThemePreference");
+  const applySource = readNamedFunction(html, "applyThemePreference", "toggleThemePreference");
+  const toggleSource = readNamedFunction(html, "toggleThemePreference", "bindThemeToggle");
+  const memory = new Map();
+  const documentElement = {
+    attrs: {},
+    setAttribute(name, value) { this.attrs[name] = value; },
+    removeAttribute(name) { delete this.attrs[name]; },
+    getAttribute(name) { return this.attrs[name]; }
+  };
+  const harness = new Function("localStorage", "document", `
+    const themeStorageKey = "paperhot.theme.v1";
+    let themePreference = "light";
+    ${loadSource}
+    ${saveSource}
+    ${applySource}
+    ${toggleSource}
+    return {
+      loadThemePreference,
+      saveThemePreference,
+      applyThemePreference,
+      toggleThemePreference,
+      get preference() { return themePreference; },
+      get attrs() { return document.documentElement.attrs; }
+    };
+  `)({
+    getItem: key => memory.get(key) || null,
+    setItem: (key, value) => memory.set(key, value)
+  }, { documentElement, querySelectorAll: () => [] });
+
+  assert.equal(harness.loadThemePreference(), "light");
+  harness.applyThemePreference("dark");
+  assert.equal(harness.preference, "dark");
+  assert.equal(harness.attrs["data-theme"], "dark");
+  assert.equal(memory.get("paperhot.theme.v1"), "dark");
+  harness.toggleThemePreference();
+  assert.equal(harness.preference, "light");
+  assert.equal(harness.attrs["data-theme"], undefined);
+  assert.equal(memory.get("paperhot.theme.v1"), "light");
+  memory.set("paperhot.theme.v1", "dark");
+  assert.equal(harness.loadThemePreference(), "dark");
+});
+
 test("frontend embedded script has valid syntax", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
-  const match = html.match(/<script>([\s\S]*)<\/script>/);
-  assert.ok(match, "expected inline script");
-  new Function(match[1]);
+  const matches = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  assert.ok(matches.length >= 1, "expected inline script");
+  matches.forEach((match, index) => {
+    try {
+      new Function(match[1]);
+    } catch (error) {
+      error.message = `script #${index + 1}: ${error.message}`;
+      throw error;
+    }
+  });
 });

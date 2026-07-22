@@ -15,6 +15,7 @@ const {
   readArchivePayload,
   readDiscoveryTaskState,
   readFavoritesPayload,
+  readPaperByKey,
   readPaperNotesPayload,
   readFetchLog,
   readGoogleRollingCursorStatus,
@@ -509,6 +510,17 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && pathname === "/api/archive") {
     const payload = await readArchivePayload();
+    sendJson(res, 200, payload);
+    return true;
+  }
+
+  if (req.method === "GET" && pathname === "/api/papers/by-key") {
+    const key = url.searchParams.get("key") || "";
+    const payload = await readPaperByKey(key);
+    if (!payload.ok) {
+      sendJson(res, 404, payload);
+      return true;
+    }
     sendJson(res, 200, payload);
     return true;
   }

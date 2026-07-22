@@ -76,6 +76,7 @@ const {
   readWebOfScienceConfig,
   readJournalMetricsCache,
   readFavoritesPayload,
+  readPaperByKey,
   readPaperNotesPayload,
   readUserState,
   addCandidatePaperToArchive,
@@ -2120,6 +2121,83 @@ test("favorites are stored in a local json file with stable paper keys", async (
   assert.equal(afterAdd.favorites[0].keys.includes("10.1000/stable"), true);
   assert.equal(removed.count, 0);
   assert.deepEqual(rawFile.favorites, []);
+  await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("readPaperByKey finds archive papers by flexible keys and falls back to favorites snapshot without writing", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-by-key-"));
+  const archivePaper = {
+    id: "archive-detail-id",
+    doi: "10.1000/Detail/WithSlash",
+    title: "Detail Route Archive Paper",
+    url: "https://example.test/papers/detail?x=1#frag",
+    authors: ["Ada Lovelace", "Grace Hopper"],
+    journal: "Nature Methods",
+    published: "2026-07-01",
+    summary: "Full abstract about structured illumination.",
+    abstractZh: "关于结构光照明的完整摘要。",
+    reason: "与当前研究背景相关。",
+    score: 91
+  };
+  const favoriteOnlyPaper = {
+    id: "favorite-only-id",
+    doi: "10.1000/favorite-only",
+    title: "Favorite Snapshot Only Paper",
+    url: "https://example.test/favorite-only",
+    journal: "Optics Express",
+    published: "2025-12"
+  };
+  await fs.writeFile(path.join(tempDir, "archive.json"), `${JSON.stringify({
+    mode: "archive",
+    count: 1,
+    papers: [archivePaper]
+  }, null, 2)}\n`, "utf8");
+  await fs.writeFile(path.join(tempDir, "favorites.json"), `${JSON.stringify({
+    mode: "favorites",
+    count: 1,
+    favorites: [
+      {
+        key: "10.1000/favorite-only",
+        keys: ["10.1000/favorite-only", "https://example.test/favorite-only", "favorite-only-id", "favorite snapshot only paper"],
+        paper: favoriteOnlyPaper,
+        addedAt: "2026-07-10T10:00:00.000Z"
+      }
+    ]
+  }, null, 2)}\n`, "utf8");
+  await fs.writeFile(path.join(tempDir, "operation-log.jsonl"), "", "utf8");
+  const archiveBefore = await fs.readFile(path.join(tempDir, "archive.json"), "utf8");
+  const favoritesBefore = await fs.readFile(path.join(tempDir, "favorites.json"), "utf8");
+
+  const byDoi = await readPaperByKey("10.1000/Detail/WithSlash", { dataDir: tempDir });
+  const byUrl = await readPaperByKey("https://example.test/papers/detail?x=1#frag", { dataDir: tempDir });
+  const byId = await readPaperByKey("archive-detail-id", { dataDir: tempDir });
+  const byTitle = await readPaperByKey("Detail Route Archive Paper", { dataDir: tempDir });
+  const byFavoriteDoi = await readPaperByKey("10.1000/favorite-only", { dataDir: tempDir });
+  const missing = await readPaperByKey("10.1000/does-not-exist", { dataDir: tempDir });
+  const empty = await readPaperByKey("   ", { dataDir: tempDir });
+
+  assert.equal(byDoi.ok, true);
+  assert.equal(byDoi.foundIn, "archive");
+  assert.equal(byDoi.paper.id, "archive-detail-id");
+  assert.equal(byDoi.paper.abstractZh, "关于结构光照明的完整摘要。");
+  assert.equal(byUrl.ok, true);
+  assert.equal(byUrl.paper.doi, "10.1000/detail/withslash");
+  assert.equal(byId.paper.title, "Detail Route Archive Paper");
+  assert.equal(byTitle.foundIn, "archive");
+  assert.equal(byFavoriteDoi.ok, true);
+  assert.equal(byFavoriteDoi.foundIn, "favorites");
+  assert.equal(byFavoriteDoi.paper.id, "favorite-only-id");
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error, "not-found");
+  assert.equal(empty.ok, false);
+  assert.equal(empty.error, "not-found");
+
+  const archiveAfter = await fs.readFile(path.join(tempDir, "archive.json"), "utf8");
+  const favoritesAfter = await fs.readFile(path.join(tempDir, "favorites.json"), "utf8");
+  const logAfter = await fs.readFile(path.join(tempDir, "operation-log.jsonl"), "utf8");
+  assert.equal(archiveAfter, archiveBefore);
+  assert.equal(favoritesAfter, favoritesBefore);
+  assert.equal(logAfter.trim(), "");
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 

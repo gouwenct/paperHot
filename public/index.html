@@ -2267,14 +2267,298 @@
       .today-source-tabs { flex-wrap: wrap; overflow-x: visible; }
       .today-source-tab { flex: 1 1 calc(50% - 2px); }
     }
+    .sidebar-top {
+      display: grid;
+      gap: 8px;
+    }
+    .theme-toggle {
+      width: 100%;
+      justify-content: center;
+    }
+    .mobile-theme-toggle { display: none; }
+    @media (max-width: 820px) {
+      .mobile-theme-toggle {
+        position: fixed;
+        z-index: 1200;
+        top: 10px;
+        right: 10px;
+        display: inline-flex;
+        width: 40px;
+        height: 40px;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border-radius: 50%;
+        box-shadow: 0 6px 18px rgba(33,58,82,0.16);
+        font-size: 18px;
+      }
+    }
+    .paper-detail {
+      padding: 18px 20px 22px;
+      border: 1px solid rgba(222,232,238,0.92);
+      border-radius: 13px;
+      background: rgba(255,255,255,0.9);
+      box-shadow: 0 10px 24px rgba(33,58,82,0.06);
+    }
+    .paper-detail-title {
+      margin: 8px 0 6px;
+      color: #1f2a40;
+      font-size: 24px;
+      font-weight: 780;
+      line-height: 1.35;
+    }
+    .paper-detail-meta {
+      display: grid;
+      gap: 6px;
+      margin: 10px 0 14px;
+      color: #65758b;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .paper-detail-meta a { color: #0b94b2; }
+    .paper-detail-section {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid #e7eef3;
+    }
+    .paper-detail-section h3 {
+      margin-bottom: 8px;
+      color: #31445f;
+      font-size: 13px;
+    }
+    .paper-detail-body {
+      margin: 0;
+      color: #3d4d64;
+      font-family: Arial, SimHei, "黑体", sans-serif;
+      font-size: 15px;
+      font-weight: 400;
+      line-height: 1.78;
+      white-space: pre-wrap;
+    }
+    .paper-detail-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 14px;
+    }
+    .paper-detail-link {
+      color: inherit;
+      text-decoration: none;
+    }
+    .paper-detail-link:hover { color: #0b94b2; text-decoration: underline; }
+    html[data-theme="dark"] body {
+      color: #d7e0ec;
+      background: linear-gradient(115deg, #10161f 0%, #121925 43%, #15131f 100%);
+    }
+    html[data-theme="dark"] .sidebar {
+      background: rgba(18, 24, 34, 0.92);
+      border-right-color: rgba(70, 86, 108, 0.7);
+    }
+    html[data-theme="dark"] .brand,
+    html[data-theme="dark"] .hero,
+    html[data-theme="dark"] .panel,
+    html[data-theme="dark"] .source-card,
+    html[data-theme="dark"] .toast,
+    html[data-theme="dark"] .paper-card,
+    html[data-theme="dark"] .paper-detail,
+    html[data-theme="dark"] .reading-card {
+      background: rgba(24, 32, 45, 0.94);
+      border-color: rgba(74, 90, 112, 0.75);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+      color: #d7e0ec;
+    }
+    html[data-theme="dark"] .brand { color: #e8eef7; }
+    html[data-theme="dark"] .brand-hot { color: #4ec7e0; }
+    html[data-theme="dark"] .nav-item { color: #9aabbf; }
+    html[data-theme="dark"] .nav-item.active {
+      color: #7ad8eb;
+      background: rgba(28, 88, 104, 0.45);
+      border-color: rgba(72, 160, 180, 0.55);
+    }
+    html[data-theme="dark"] h1,
+    html[data-theme="dark"] h2,
+    html[data-theme="dark"] h3,
+    html[data-theme="dark"] .paper-detail-title { color: #e8eef7; }
+    html[data-theme="dark"] .subtitle,
+    html[data-theme="dark"] .source,
+    html[data-theme="dark"] .paper-authors,
+    html[data-theme="dark"] .paper-summary,
+    html[data-theme="dark"] .paper-detail-meta,
+    html[data-theme="dark"] .paper-detail-body,
+    html[data-theme="dark"] .focus-label,
+    html[data-theme="dark"] .small-text,
+    html[data-theme="dark"] .empty { color: #a7b6c9; }
+    html[data-theme="dark"] .primary-btn {
+      border-color: #3e8ea0;
+      background: #1b4d59;
+      color: #b7ecf5;
+    }
+    html[data-theme="dark"] .ghost-btn,
+    html[data-theme="dark"] .theme-toggle,
+    html[data-theme="dark"] .citation-copy,
+    html[data-theme="dark"] .published-date-pill,
+    html[data-theme="dark"] .short-title-input,
+    html[data-theme="dark"] input,
+    html[data-theme="dark"] textarea,
+    html[data-theme="dark"] select {
+      border-color: #42546c;
+      background: #1a2331;
+      color: #d5deea;
+    }
+    html[data-theme="dark"] .ghost-btn:hover,
+    html[data-theme="dark"] .theme-toggle:hover,
+    html[data-theme="dark"] .citation-copy:hover,
+    html[data-theme="dark"] .published-date-pill[data-copy-doi]:hover {
+      border-color: #4ec7e0;
+      color: #8ee4f3;
+      background: #17343d;
+    }
+    html[data-theme="dark"] .ghost-btn:disabled,
+    html[data-theme="dark"] button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    html[data-theme="dark"] .chip,
+    html[data-theme="dark"] .score,
+    html[data-theme="dark"] .score-pill,
+    html[data-theme="dark"] .match-pill {
+      border-color: #356f7c;
+      background: #17353d;
+      color: #8dd7e6;
+    }
+    html[data-theme="dark"] .favorite {
+      border-color: #2f8f72;
+      background: #163f34;
+      color: #7ad7b5;
+    }
+    html[data-theme="dark"] .favorite.saved {
+      border-color: #1fad82;
+      background: #1fad82;
+      color: #06251b;
+    }
+    html[data-theme="dark"] .star-btn {
+      border-color: #8a7430;
+      background: #3a3116;
+      color: #f0d78a;
+    }
+    html[data-theme="dark"] .star-btn.starred {
+      border-color: #d4a017;
+      background: #d4a017;
+      color: #2a2106;
+    }
+    html[data-theme="dark"] .paper-card.starred,
+    html[data-theme="dark"] .paper-card.starred.saved-muted {
+      border-color: rgba(212, 160, 23, 0.5);
+      background-color: rgba(54, 45, 18, 0.95);
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 36 36'%3E%3Cpath d='M18 5.5l2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z' fill='%23d4a017' fill-opacity='.16'/%3E%3C/svg%3E");
+    }
+    html[data-theme="dark"] .paper-card.saved-muted {
+      opacity: 0.72;
+      background: rgba(24, 32, 45, 0.62);
+    }
+    html[data-theme="dark"] .paper-card.saved-muted:hover { opacity: 0.9; }
+    html[data-theme="dark"] .reason,
+    html[data-theme="dark"] .abstract-translation {
+      background: #16362f;
+      color: #7fd6b2;
+    }
+    html[data-theme="dark"] .abstract-unconfirmed {
+      background: #3a2a16;
+      color: #e0c18a;
+    }
+    html[data-theme="dark"] .paper-title-metric {
+      border-color: #42546c;
+      background: #1a2331;
+      color: #a7b6c9;
+    }
+    html[data-theme="dark"] .divider,
+    html[data-theme="dark"] .paper-detail-section { border-color: #334456; }
+    html[data-theme="dark"] .timeline-date,
+    html[data-theme="dark"] .timeline-source-type { color: #8c9db2; }
+    html[data-theme="dark"] .timeline-time { color: #e8eef7; }
+    html[data-theme="dark"] .timeline-sort-button:hover .timeline-date,
+    html[data-theme="dark"] .timeline-sort-button:hover .timeline-time,
+    html[data-theme="dark"] .timeline-sort-indicator { color: #7ad8eb; }
+    html[data-theme="dark"] .paper-heatmap-cell,
+    html[data-theme="dark"] .paper-heatmap-legend span {
+      border-color: #3a4b61;
+      background: #1a2331;
+    }
+    html[data-theme="dark"] .paper-heatmap-legend .level-1 { background: #1d4a52; }
+    html[data-theme="dark"] .paper-heatmap-legend .level-2 { background: #2a7380; }
+    html[data-theme="dark"] .paper-heatmap-legend .level-3 { background: #3ea8b7; }
+    html[data-theme="dark"] .paper-heatmap-legend .level-4 { background: #63d3e0; }
+    html[data-theme="dark"] .favorites-tab,
+    html[data-theme="dark"] .today-source-tab,
+    html[data-theme="dark"] .today-mode-button {
+      border-color: #42546c;
+      background: #1a2331;
+      color: #b7c4d6;
+    }
+    html[data-theme="dark"] .favorites-tab.active,
+    html[data-theme="dark"] .today-source-tab.active,
+    html[data-theme="dark"] .today-mode-button.active {
+      border-color: #4ec7e0;
+      background: #17343d;
+      color: #8ee4f3;
+    }
+    html[data-theme="dark"] table,
+    html[data-theme="dark"] th,
+    html[data-theme="dark"] td {
+      border-color: #3a4b61;
+      color: #d7e0ec;
+    }
+    html[data-theme="dark"] th { background: #1a2331; }
+    html[data-theme="dark"] tr:nth-child(even) td { background: rgba(20, 28, 40, 0.55); }
+    html[data-theme="dark"] .candidate-table-wrap {
+      border-color: #3a4b61;
+      background: #182231;
+    }
+    html[data-theme="dark"] .candidate-table td { background: #182231; }
+    html[data-theme="dark"] .candidate-table tr:nth-child(even) td { background: #141c28; }
+    html[data-theme="dark"] .candidate-table th {
+      border-color: #3a4b61;
+      background: #111925;
+      color: #c9d5e4;
+    }
+    html[data-theme="dark"] .candidate-title-cell,
+    html[data-theme="dark"] .candidate-meta-cell { color: #d7e0ec; }
+    html[data-theme="dark"] .modal,
+    html[data-theme="dark"] .dialog,
+    html[data-theme="dark"] .api-help-modal,
+    html[data-theme="dark"] [role="dialog"] {
+      background: rgba(24, 32, 45, 0.98);
+      border-color: #42546c;
+      color: #d7e0ec;
+    }
+    html[data-theme="dark"] a { color: #7ad8eb; }
+    html[data-theme="dark"] :focus-visible {
+      outline: 2px solid #4ec7e0;
+      outline-offset: 2px;
+    }
+    html[data-theme="dark"] .theme-toggle[aria-pressed="true"] {
+      border-color: #4ec7e0;
+      background: #17343d;
+      color: #8ee4f3;
+    }
   </style>
+  <script>
+    try {
+      const savedTheme = localStorage.getItem("paperhot.theme.v1");
+      if (savedTheme === "dark") document.documentElement.setAttribute("data-theme", "dark");
+    } catch (_) {}
+  </script>
 </head>
 <body>
   <div class="app">
     <aside class="sidebar">
-      <div class="brand">
-        <img class="brand-logo" src="/paperhot-logo.png" alt="" aria-hidden="true">
-        <span class="brand-text">PAPER<span class="brand-hot">HOT</span></span>
+      <div class="sidebar-top">
+        <div class="brand">
+          <img class="brand-logo" src="/paperhot-logo.png" alt="" aria-hidden="true">
+          <span class="brand-text">PAPER<span class="brand-hot">HOT</span></span>
+        </div>
+        <button class="ghost-btn theme-toggle" type="button" data-theme-toggle aria-label="切换为暗色模式" title="切换为暗色模式" aria-pressed="false">☾ 暗色</button>
       </div>
       <nav class="nav">
         <a class="nav-item" href="#today">⚡ 今日论文</a>
@@ -2286,6 +2570,8 @@
         <a class="nav-item" href="#about">ⓘ 关于</a>
       </nav>
     </aside>
+
+    <button class="ghost-btn mobile-theme-toggle" type="button" data-theme-toggle data-theme-compact aria-label="切换为暗色模式" title="切换为暗色模式" aria-pressed="false">☾</button>
 
     <main class="main" id="main-content">
       <section class="hero">
@@ -3194,8 +3480,48 @@
       renderToday();
     }
 
+    function encodePaperRouteKey(value) {
+      return encodeURIComponent(String(value || "").trim());
+    }
+
+    function decodePaperRouteKey(value) {
+      const raw = String(value || "");
+      try {
+        return decodeURIComponent(raw);
+      } catch {
+        return raw;
+      }
+    }
+
+    function paperDetailHash(paper) {
+      const key = paperStableKey(paper);
+      return key ? `#paper/${encodePaperRouteKey(key)}` : "";
+    }
+
+    function parseLocationHash(hash = location.hash) {
+      const raw = String(hash || "").replace(/^#/, "").trim() || "today";
+      if (raw === "paper" || raw.startsWith("paper/")) {
+        const encoded = raw === "paper" ? "" : raw.slice("paper/".length);
+        return { page: "paper", key: decodePaperRouteKey(encoded), raw };
+      }
+      return { page: raw, key: "", raw };
+    }
+
+    function currentPageName() {
+      return parseLocationHash().page;
+    }
+
+    function renderCurrentPage() {
+      const { page, key } = parseLocationHash();
+      renderPage(page, key);
+    }
+
     function paperTitleLink(paper) {
-      const title = escapeHTML(paper.title);
+      const title = escapeHTML(paper.displayTitle || paper.title || "未命名论文");
+      const detailHash = paperDetailHash(paper);
+      if (detailHash) {
+        return `<a class="paper-detail-link" href="${escapeHTML(detailHash)}" title="打开论文详情">${title}</a>`;
+      }
       const url = String(paper.url || paper.pdfUrl || "").trim();
       return url ? `<a href="${escapeHTML(url)}" target="_blank" rel="noopener">${title}</a>` : title;
     }
@@ -3266,8 +3592,8 @@
     }
 
     function paperLlmRefreshButton(paper, scope = "") {
-      const page = location.hash.replace("#", "");
-      if (page !== "all" && scope !== "today" && scope !== "favorites") return "";
+      const page = currentPageName();
+      if (page !== "all" && page !== "paper" && scope !== "today" && scope !== "favorites") return "";
       const key = paperStableKey(paper);
       if (!key) return "";
       const loading = archiveLlmRefreshingKeys.has(key);
@@ -3419,14 +3745,20 @@
       `;
     }
 
+    function activeDetailPaper() {
+      return (typeof paperDetailState !== "undefined" && paperDetailState && paperDetailState.paper) || null;
+    }
+
+    function paperLookupPools() {
+      const detail = typeof activeDetailPaper === "function" ? activeDetailPaper() : null;
+      return [...recentPapers, ...todayPapers, ...favoritePapersCache, ...papers, detail].filter(Boolean);
+    }
+
     function bindReadingStatus() {
       document.querySelectorAll("[data-read-toggle]").forEach(button => {
         button.addEventListener("click", async () => {
           const id = button.getAttribute("data-read-toggle");
-          const paper = papers.find(item => item.id === id)
-            || favoritePapersCache.find(item => item.id === id)
-            || recentPapers.find(item => item.id === id)
-            || todayPapers.find(item => item.id === id);
+          const paper = paperLookupPools().find(item => item.id === id);
           if (!paper) return;
           await updatePaperNote(paper, { read: !isReadPaper(paper) });
         });
@@ -3434,10 +3766,7 @@
     }
 
     function findPaperForFavoriteWorkflow(key) {
-      return papers.find(item => paperStableKey(item) === key || item.id === key)
-        || favoritePapersCache.find(item => paperStableKey(item) === key || item.id === key)
-        || recentPapers.find(item => paperStableKey(item) === key || item.id === key)
-        || todayPapers.find(item => paperStableKey(item) === key || item.id === key);
+      return paperLookupPools().find(item => paperStableKey(item) === key || item.id === key) || null;
     }
 
     function scheduleFavoriteMarkRead(paper) {
@@ -3535,7 +3864,7 @@
       document.querySelectorAll("[data-star-toggle]").forEach(button => {
         button.addEventListener("click", async () => {
           const id = button.getAttribute("data-star-toggle");
-          const paper = [...recentPapers, ...todayPapers, ...favoritePapersCache, ...papers].find(item => item.id === id);
+          const paper = paperLookupPools().find(item => item.id === id);
           if (!paper) return;
           await updatePaperNote(paper, { starred: !isStarredPaper(paper) });
         });
@@ -3545,7 +3874,7 @@
     function findPaperByStableKey(key) {
       const target = String(key || "").trim();
       const normalizedTarget = target.toLowerCase().replace(/\s+/g, " ");
-      return [...recentPapers, ...todayPapers, ...favoritePapersCache, ...papers]
+      return paperLookupPools()
         .find(item => paperStableKey(item) === target || paperLookupKeys(item).includes(normalizedTarget));
     }
 
@@ -4754,7 +5083,7 @@
       const key = input.getAttribute("data-short-title-input");
       if (!key) return;
       const value = input.value.trim();
-      const paper = [...recentPapers, ...todayPapers, ...favoritePapersCache, ...papers].find(item => paperStableKey(item) === key);
+      const paper = paperLookupPools().find(item => paperStableKey(item) === key);
       if (!paper) return;
       await updatePaperNote(paper, { shortTitle: value });
     }
@@ -4775,7 +5104,7 @@
       document.querySelectorAll("[data-favorite]").forEach(button => {
         button.addEventListener("click", async () => {
           const id = button.getAttribute("data-favorite");
-          const paper = [...recentPapers, ...todayPapers, ...favoritePapersCache, ...papers].find(item => item.id === id);
+          const paper = paperLookupPools().find(item => item.id === id);
           if (!paper) return;
           await updateFavorite(paper, !isFavoritePaper(paper));
         });
@@ -4828,10 +5157,11 @@
       } catch (error) {
         favoriteStatus = `个人收藏接口暂不可用：${error.message}`;
       }
-      if (location.hash.replace("#", "") === "favorites") renderFavorites();
-      const page = location.hash.replace("#", "");
+      if (currentPageName() === "favorites") renderFavorites();
+      const page = currentPageName();
       if (page === "all") renderAll();
       if (page === "favorites") renderFavorites();
+      if (page === "paper") renderCurrentPage();
     }
 
     async function loadPaperNotesData() {
@@ -4846,9 +5176,10 @@
       } catch (error) {
         paperNotesStatus = `论文标注接口暂不可用：${error.message}`;
       }
-      const page = location.hash.replace("#", "");
+      const page = currentPageName();
       if (page === "all") renderAll();
       if (page === "favorites") renderFavorites();
+      if (page === "paper") renderCurrentPage();
     }
 
     async function updateFavorite(paper, favorite) {
@@ -4870,7 +5201,7 @@
         favoriteStatus = `保存个人收藏失败：${error.message}`;
         showToast(`收藏失败：${error.message}`);
       }
-      renderPage(location.hash.replace("#", "") || "today");
+      renderCurrentPage();
     }
 
     async function updatePaperNote(paper, note) {
@@ -4891,7 +5222,7 @@
         paperNotesStatus = `保存论文标注失败：${error.message}`;
         showToast(`论文标注失败：${error.message}`);
       }
-      renderPage(location.hash.replace("#", "") || "today");
+      renderCurrentPage();
     }
 
     function getEnabledSourceNames() {
@@ -5338,7 +5669,7 @@
       if (location.protocol === "file:") {
         paperDataStatus = "直接打开 HTML 时无法访问后端，正在使用本地示例数据";
         recentDataStatus = "直接打开 HTML 时无法访问后端，正在使用本地示例数据";
-        renderPage(location.hash.replace("#", "") || "today");
+        renderCurrentPage();
         return;
       }
 
@@ -5365,7 +5696,7 @@
       } else {
         paperDataStatus = refresh ? "正在抓取论文..." : "正在载入真实论文数据...";
       }
-      renderPage(location.hash.replace("#", "") || "today");
+      renderCurrentPage();
 
       try {
         const payload = refresh
@@ -5399,7 +5730,7 @@
       if (runningTask && todayRunningTask === runningTask) todayRunningTask = null;
       fetchProgress = null;
       if (runningTask) scheduleTodayTaskPreflight(0);
-      renderPage(location.hash.replace("#", "") || "today");
+      renderCurrentPage();
     }
 
     async function fetchPaperPayloadOnce(requestMode) {
@@ -5448,7 +5779,7 @@
         counts: {},
         sources: []
       };
-      renderPage(location.hash.replace("#", "") || "today");
+      renderCurrentPage();
       const response = await fetch("/api/papers/refresh/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -5458,7 +5789,7 @@
       const started = await response.json();
       if (isRangeFetch) syncTodayRunningCanonicalState(runningTask, todayRunningTask, started);
       if (started.progress) fetchProgress = started.progress;
-      renderPage(location.hash.replace("#", "") || "today");
+      renderCurrentPage();
       while (true) {
         await wait(900);
         const statusResponse = await fetch(`/api/papers/refresh/status?id=${encodeURIComponent(started.id)}`);
@@ -5467,7 +5798,7 @@
         if (isRangeFetch) syncTodayRunningCanonicalState(runningTask, todayRunningTask, status);
         if (status.progress) {
           fetchProgress = status.progress;
-          renderPage(location.hash.replace("#", "") || "today");
+          renderCurrentPage();
         }
         if (status.status === "done") {
           if (isRangeFetch) syncTodayRunningCanonicalState(runningTask, todayRunningTask, status.result || status);
@@ -5695,7 +6026,7 @@
         recentDataStatus = message;
         paperDataStatus = message;
         showToast(message);
-        renderPage(location.hash.replace("#", "") || "all");
+        renderCurrentPage();
         return null;
       }
       if (archiveLlmRefreshingKeys.has(key)) return null;
@@ -5710,7 +6041,7 @@
         paperDataStatus = message;
         showToast(message);
       } else {
-        renderPage(location.hash.replace("#", "") || "all");
+        renderCurrentPage();
       }
 
       try {
@@ -5746,7 +6077,7 @@
         return null;
       } finally {
         archiveLlmRefreshingKeys.delete(key);
-        renderPage(location.hash.replace("#", "") || "all");
+        renderCurrentPage();
       }
     }
 
@@ -7042,6 +7373,286 @@
     function setActiveNav(page) {
       document.querySelectorAll(".nav-item").forEach(item => {
         item.classList.toggle("active", item.getAttribute("href") === `#${page}`);
+      });
+    }
+
+    let paperDetailState = { status: "idle", key: "", paper: null, error: "", requestId: 0 };
+
+    function paperExternalLinks(paper) {
+      const links = [];
+      const doi = String(paper.doi || "").trim();
+      const url = String(paper.url || "").trim();
+      const pdfUrl = String(paper.pdfUrl || "").trim();
+      if (doi) {
+        links.push(`<a href="https://doi.org/${escapeHTML(doi)}" target="_blank" rel="noopener">DOI：${escapeHTML(doi)}</a>`);
+      }
+      if (url) {
+        links.push(`<a href="${escapeHTML(url)}" target="_blank" rel="noopener">原文入口</a>`);
+      }
+      if (pdfUrl && pdfUrl !== url) {
+        links.push(`<a href="${escapeHTML(pdfUrl)}" target="_blank" rel="noopener">PDF</a>`);
+      }
+      return links.length ? links.join(" · ") : "未记录 DOI 或原文链接";
+    }
+
+    function paperDetailOriginalAbstract(paper) {
+      const summary = String(paper.summary || "").trim();
+      if (!summary) return "";
+      if (paper.abstractStatus === "unconfirmed") return "";
+      return summary;
+    }
+
+    function paperDetailBody(paper) {
+      const isSaved = isFavoritePaper(paper);
+      const isStarred = isStarredPaper(paper);
+      const isRead = isReadPaper(paper);
+      const paperId = escapeHTML(paper.id || "");
+      const publishedLabel = paperPublishedDateLabel(paper);
+      const sourceLabel = paperVisibleSourceLabel(paper);
+      const authorsLabel = paperAuthorsLabel(paper);
+      const journalMetrics = paperJournalMetrics(paper);
+      const citationMetric = paperCitationMetric(paper);
+      const originalAbstract = paperDetailOriginalAbstract(paper);
+      const abstractBlock = paperAbstractBlock(paper);
+      const reasonBlock = paperReasonBlock(paper);
+      return `
+        <article class="paper-detail">
+          <div class="paper-head">
+            <div>
+              <div class="paper-source-row">
+                ${paperPublishedDoiControl(paper, publishedLabel)}
+                ${sourceLabel ? `<span class="source">${escapeHTML(sourceLabel)}</span>` : ""}
+                ${journalMetricTags(journalMetrics)}
+              </div>
+            </div>
+            <div class="head-actions">
+              ${paperLlmRefreshButton(paper, "paper")}
+              <button class="star-btn ${isStarred ? "starred" : ""}" data-star-toggle="${paperId}">${isStarred ? "已标星" : "☆ 标星"}</button>
+              <button class="favorite ${isSaved ? "saved" : ""}" data-favorite="${paperId}">${isSaved ? "已收藏" : "♡ 加入个人收藏"}</button>
+              <button class="reading-status ${isRead ? "done" : ""}" data-read-toggle="${paperId}">${isRead ? "已读" : "待阅读"}</button>
+            </div>
+          </div>
+          <h2 class="paper-detail-title">${escapeHTML(paper.displayTitle || paper.title || "未命名论文")}</h2>
+          <div class="paper-authors">${escapeHTML(authorsLabel)}</div>
+          <div class="paper-detail-meta">
+            <div>来源 / 期刊：${escapeHTML(paper.journal || paper.source || "未记录")}</div>
+            <div>日期：${escapeHTML(publishedLabel || paper.published || paper.date || "未记录精确日期")}</div>
+            <div>${paperExternalLinks(paper)}</div>
+            ${citationMetric ? `<div>${escapeHTML(citationMetric.label)}：${escapeHTML(citationMetric.value)}</div>` : ""}
+          </div>
+          <div class="paper-title-tools">${paperShortTitleEditor(paper)}</div>
+          <div class="token-usage">
+            <span class="score-pill">评分 ${escapeHTML(paper.score || "--")}</span>
+            ${paperCategoryEditor(paper)}
+          </div>
+          ${originalAbstract ? `
+            <section class="paper-detail-section">
+              <h3>摘要</h3>
+              <p class="paper-detail-body">${escapeHTML(originalAbstract)}</p>
+            </section>
+          ` : ""}
+          ${abstractBlock ? `<section class="paper-detail-section">${abstractBlock}</section>` : ""}
+          ${reasonBlock ? `<section class="paper-detail-section">${reasonBlock}</section>` : ""}
+          <div class="paper-signal-row paper-detail-actions">
+            <span class="match-pill">${escapeHTML(paperKeywordMatchLabel(paper))}</span>
+            ${paperBibliography(paper)}
+          </div>
+        </article>
+      `;
+    }
+
+    function paperDetailBackActions() {
+      return `
+        <div class="button-row">
+          <a class="ghost-btn" href="#all">返回全部论文</a>
+          <a class="ghost-btn" href="#today">返回今日论文</a>
+          <a class="ghost-btn" href="#favorites">返回个人收藏</a>
+        </div>
+      `;
+    }
+
+    function renderPaperDetailView() {
+      const { status, paper, error, key } = paperDetailState;
+      const heroActions = paperDetailBackActions();
+      if (status === "loading") {
+        mainContent.innerHTML = pageShell(
+          "论文详情",
+          key ? `正在加载论文：${escapeHTML(key)}` : "正在加载论文…",
+          `<div class="empty">正在加载论文详情…</div>${paperDetailBackActions()}`,
+          "",
+          heroActions
+        );
+        return;
+      }
+      if (status === "error" || !paper) {
+        mainContent.innerHTML = pageShell(
+          "论文详情",
+          "未找到可阅读的论文",
+          `<div class="empty">${escapeHTML(error || "未找到论文")}</div>${paperDetailBackActions()}`,
+          "",
+          heroActions
+        );
+        return;
+      }
+      mainContent.innerHTML = pageShell(
+        "论文详情",
+        "适合连续阅读的单篇论文视图；收藏、标星、已读和短标题沿用现有本地状态。",
+        paperDetailBody(paper),
+        "",
+        heroActions
+      );
+      bindFavorites();
+      bindStarredStatus();
+      bindReadingStatus();
+      bindShortTitleEditors();
+      bindPaperCategoryEditors();
+      bindCitationCopy();
+      document.querySelectorAll("[data-refresh-paper-llm]").forEach(button => {
+        button.addEventListener("click", () => refreshOnePaperLlm(button.getAttribute("data-refresh-paper-llm")));
+      });
+      document.querySelectorAll("[data-retry-firecrawl-abstract]").forEach(button => {
+        button.addEventListener("click", () => refreshOnePaperLlm(button.getAttribute("data-retry-firecrawl-abstract"), { abstractMode: "firecrawl" }));
+      });
+      document.querySelectorAll("[data-save-manual-abstract]").forEach(button => {
+        button.addEventListener("click", () => saveManualPaperAbstract(button));
+      });
+    }
+
+    async function loadPaperDetail(key, requestId) {
+      if (location.protocol === "file:") {
+        if (paperDetailState.requestId !== requestId) return;
+        paperDetailState = {
+          status: "error",
+          key,
+          paper: null,
+          error: "直接打开 HTML 时无法读取论文详情接口",
+          requestId
+        };
+        if (currentPageName() === "paper" && parseLocationHash().key === key) renderPaperDetailView();
+        return;
+      }
+      try {
+        const response = await fetch(`/api/papers/by-key?key=${encodeURIComponent(key)}`);
+        const payload = await response.json().catch(() => ({}));
+        if (paperDetailState.requestId !== requestId) return;
+        if (!response.ok || payload.ok === false || !payload.paper) {
+          paperDetailState = {
+            status: "error",
+            key,
+            paper: null,
+            error: payload.message || payload.error || `未找到论文（HTTP ${response.status}）`,
+            requestId
+          };
+        } else {
+          paperDetailState = {
+            status: "ready",
+            key,
+            paper: normalizePaperForView(payload.paper),
+            error: "",
+            requestId
+          };
+        }
+      } catch (error) {
+        if (paperDetailState.requestId !== requestId) return;
+        paperDetailState = {
+          status: "error",
+          key,
+          paper: null,
+          error: error.message || "加载论文详情失败",
+          requestId
+        };
+      }
+      if (currentPageName() === "paper" && parseLocationHash().key === key) renderPaperDetailView();
+    }
+
+    function renderPaperDetail(key) {
+      const cleanKey = String(key || "").trim();
+      const requestId = paperDetailState.requestId + 1;
+      setActiveNav("");
+      if (!cleanKey) {
+        paperDetailState = {
+          status: "error",
+          key: "",
+          paper: null,
+          error: "缺少论文标识",
+          requestId
+        };
+        renderPaperDetailView();
+        return;
+      }
+      const cached = findPaperByStableKey(cleanKey);
+      paperDetailState = cached
+        ? {
+          status: "ready",
+          key: cleanKey,
+          paper: cached,
+          error: "",
+          requestId
+        }
+        : {
+          status: "loading",
+          key: cleanKey,
+          paper: null,
+          error: "",
+          requestId
+        };
+      renderPaperDetailView();
+      loadPaperDetail(cleanKey, requestId);
+    }
+
+    const themeStorageKey = "paperhot.theme.v1";
+    let themePreference = "light";
+
+    function loadThemePreference() {
+      try {
+        const saved = String(localStorage.getItem(themeStorageKey) || "").trim().toLowerCase();
+        if (saved === "dark" || saved === "light") {
+          themePreference = saved;
+          return themePreference;
+        }
+      } catch {}
+      themePreference = "light";
+      return themePreference;
+    }
+
+    function saveThemePreference(theme) {
+      const next = theme === "dark" ? "dark" : "light";
+      themePreference = next;
+      try {
+        localStorage.setItem(themeStorageKey, next);
+      } catch {}
+      return next;
+    }
+
+    function applyThemePreference(theme) {
+      const next = saveThemePreference(theme);
+      if (next === "dark") document.documentElement.setAttribute("data-theme", "dark");
+      else document.documentElement.removeAttribute("data-theme");
+      const buttons = typeof document.querySelectorAll === "function"
+        ? document.querySelectorAll("[data-theme-toggle]")
+        : [];
+      buttons.forEach(button => {
+        const label = next === "dark" ? "切换为浅色模式" : "切换为暗色模式";
+        button.setAttribute("aria-label", label);
+        button.setAttribute("title", label);
+        button.setAttribute("aria-pressed", next === "dark" ? "true" : "false");
+        const compact = button.hasAttribute("data-theme-compact");
+        button.textContent = compact
+          ? (next === "dark" ? "☀" : "☾")
+          : (next === "dark" ? "☀ 浅色" : "☾ 暗色");
+      });
+      return next;
+    }
+
+    function toggleThemePreference() {
+      return applyThemePreference(themePreference === "dark" ? "light" : "dark");
+    }
+
+    function bindThemeToggle() {
+      document.querySelectorAll("[data-theme-toggle]").forEach(button => {
+        if (button.dataset.boundThemeToggle === "1") return;
+        button.dataset.boundThemeToggle = "1";
+        button.addEventListener("click", () => toggleThemePreference());
       });
     }
 
@@ -8969,7 +9580,15 @@
       });
     }
 
-    function renderPage(page) {
+    function renderPage(page, paperKey = "") {
+      if (page === "paper") {
+        if (todayAutoLoadObserver) {
+          todayAutoLoadObserver.disconnect();
+          todayAutoLoadObserver = null;
+        }
+        renderPaperDetail(paperKey || parseLocationHash().key);
+        return;
+      }
       const normalized = ["today", "all", "favorites", "config", "tokens", "logs", "about"].includes(page) ? page : "today";
       if (normalized !== "today" && todayAutoLoadObserver) {
         todayAutoLoadObserver.disconnect();
@@ -8997,26 +9616,28 @@
       finishActiveKeywordEdit();
     });
     window.addEventListener("resize", () => {
-      if ((location.hash.replace("#", "") || "today") === "today") renderTodayKeywordConnections();
+      if (currentPageName() === "today") renderTodayKeywordConnections();
     });
     function handlePageHashChange() {
-      const page = location.hash.replace("#", "") || "today";
+      const { page, key } = parseLocationHash();
       if (page === "today") scheduleTodayTaskPreflight(0);
       else todayKeyboardConnectFrom = "";
-      renderPage(page);
+      renderPage(page, key);
     }
 
     window.addEventListener("hashchange", handlePageHashChange);
     async function startApp() {
+      applyThemePreference(loadThemePreference());
+      bindThemeToggle();
       bindTodayKeyboardConnectionEscape();
       await loadUserState();
       scheduleTodayTaskPreflight(0);
       await loadIntegrationConfig();
       await loadFavoritesData();
       await loadPaperNotesData();
-      renderPage(location.hash.replace("#", "") || "today");
+      renderCurrentPage();
       loadFetchLogData().then(() => {
-        if ((location.hash.replace("#", "") || "today") === "today") renderToday();
+        if (currentPageName() === "today") renderToday();
       });
       loadPaperData("today", false);
       loadArchiveData();
