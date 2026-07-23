@@ -52,3 +52,6 @@ Desktop.ini
 # Temporary files
 *.tmp
 *.temp
+
+# Isolated implementation worktrees
+.worktrees/
