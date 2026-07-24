@@ -2003,6 +2003,330 @@ test("paper detail hash route encodes stable keys and exposes by-key API", async
   assert.match(html, /正在加载|加载论文/);
 });
 
+test("paper detail return navigation uses one contextual back control and session-only restore", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+
+  // Single back control structure (no three-button row).
+  assert.match(html, /function paperDetailBackControl\(/);
+  assert.match(html, /function wrapPaperDetailPage\(/);
+  assert.match(html, /class="paper-detail-toolbar"/);
+  assert.match(html, /data-paper-detail-back/);
+  assert.match(html, /paper-detail-back:focus-visible/);
+  assert.match(html, /\.paper-detail-back\s*\{[\s\S]*min-height:\s*32px[\s\S]*min-width:\s*32px/);
+  assert.doesNotMatch(html, /function paperDetailBackActions\(/);
+  assert.doesNotMatch(html, /href="#all">返回全部论文[\s\S]*href="#today">返回今日论文[\s\S]*href="#favorites">返回个人收藏/);
+  assert.match(html, /paper-detail-page[\s\S]*paper-detail-toolbar[\s\S]*paper-detail-back/);
+
+  // Capture + restore machinery is session memory only.
+  assert.match(html, /let paperDetailReturnContext\s*=\s*null/);
+  assert.match(html, /function capturePaperDetailReturnContext\(/);
+  assert.match(html, /function applyPaperDetailReturnLimits\(/);
+  assert.match(html, /function schedulePaperDetailScrollRestore\(/);
+  assert.match(html, /function runPaperDetailScrollRestore\(/);
+  assert.match(html, /requestAnimationFrame\(\s*\(\)\s*=>\s*requestAnimationFrame\(step\)\s*\)/);
+  assert.match(html, /prepareReturnFromPaperDetail/);
+  const returnNavSources = [
+    readNamedFunction(html, "capturePaperDetailReturnContext", "applyPaperDetailReturnLimits"),
+    readNamedFunction(html, "applyPaperDetailReturnLimits", "schedulePaperDetailScrollRestore"),
+    readNamedFunction(html, "schedulePaperDetailScrollRestore", "runPaperDetailScrollRestore"),
+    readNamedFunction(html, "runPaperDetailScrollRestore", "maybeResumePaperDetailScrollRestore"),
+    readNamedFunction(html, "prepareReturnFromPaperDetail", "paperExternalLinks")
+  ].join("\n");
+  assert.doesNotMatch(returnNavSources, /localStorage/);
+  assert.doesNotMatch(returnNavSources, /exportLocalData|importLocalData/);
+
+  // Source pages capture before hash navigation; return paths cover today/all/favorites.
+  assert.match(html, /a\.paper-detail-link,\s*a\.paper-detail-action,\s*a\[href\^='#paper\/'\]/);
+  assert.match(html, /capturePaperDetailReturnContext\(page,\s*paperKey\)/);
+  assert.match(html, /page === "today" \|\| page === "all" \|\| page === "favorites"/);
+  assert.match(html, /maybeResumePaperDetailScrollRestore\("today"\)/);
+  assert.match(html, /maybeResumePaperDetailScrollRestore\("all"\)/);
+  assert.match(html, /maybeResumePaperDetailScrollRestore\("favorites"\)/);
+
+  // Filter/sort module state is not reset by return helpers.
+  const applySource = readNamedFunction(html, "applyPaperDetailReturnLimits", "schedulePaperDetailScrollRestore");
+  assert.doesNotMatch(applySource, /clearTodayTemporaryFilters|todayOverviewFilter\s*=|allCommonPaperFilters\.categories\.clear|favoriteCommonPaperFilters\.categories\.clear|selectedAllPaperKeywords\.clear|selectedFavoritePaperKeywords\.clear/);
+  assert.match(applySource, /todayLoadedCounts|paperVisibleLimits\.set/);
+
+  function escapeHTML(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  const labelSource = readNamedFunction(html, "paperDetailBackLabel", "paperDetailBackHref");
+  const hrefSource = readNamedFunction(html, "paperDetailBackHref", "paperDetailBackControl");
+  const sourcePageSource = readNamedFunction(html, "paperDetailBackSourcePage", "paperDetailBackLabel");
+  const controlSource = readNamedFunction(html, "paperDetailBackControl", "wrapPaperDetailPage");
+  const wrapSource = readNamedFunction(html, "wrapPaperDetailPage", "capturePaperDetailReturnContext");
+  const captureSource = readNamedFunction(html, "capturePaperDetailReturnContext", "applyPaperDetailReturnLimits");
+  const applyLimitsSource = readNamedFunction(html, "applyPaperDetailReturnLimits", "schedulePaperDetailScrollRestore");
+
+  const backApi = new Function("escapeHTML", "state", `
+    let paperDetailReturnContext = state.context;
+    let todaySourceTab = state.todaySourceTab;
+    let todaySourceTabUserSelected = state.todaySourceTabUserSelected;
+    const todayLoadedCounts = { ...state.todayLoadedCounts };
+    const todayPaperBatchSize = 15;
+    const paperVisibleLimits = new Map(state.visibleLimitEntries || []);
+    function paperVisibleLimitKey(scope) {
+      if (scope === "all") return "all:test-key";
+      if (scope === "favorites") return "favorites:test-key";
+      return scope;
+    }
+    function paperVisibleLimit(scope) {
+      return paperVisibleLimits.get(paperVisibleLimitKey(scope)) || 20;
+    }
+    function currentPageName() { return state.currentPage; }
+    ${sourcePageSource}
+    ${labelSource}
+    ${hrefSource}
+    ${controlSource}
+    ${wrapSource}
+    ${captureSource}
+    ${applyLimitsSource}
+    return {
+      paperDetailBackControl,
+      wrapPaperDetailPage,
+      capturePaperDetailReturnContext,
+      applyPaperDetailReturnLimits,
+      get context() { return paperDetailReturnContext; },
+      setContext(next) { paperDetailReturnContext = next; },
+      get todayLoadedCounts() { return { ...todayLoadedCounts }; },
+      get todaySourceTab() { return todaySourceTab; },
+      get visibleLimitAll() { return paperVisibleLimits.get("all:test-key"); },
+      get visibleLimitFavorites() { return paperVisibleLimits.get("favorites:test-key"); }
+    };
+  `);
+
+  // Fallback without context -> #all, single control.
+  const fallback = backApi(escapeHTML, {
+    context: null,
+    currentPage: "paper",
+    todaySourceTab: "all",
+    todaySourceTabUserSelected: false,
+    todayLoadedCounts: { webofscience: 15, googlescholar: 15, preprints: 15, all: 15 }
+  });
+  const fallbackHtml = fallback.wrapPaperDetailPage("<article class='paper-detail'>body</article>");
+  assert.equal((fallbackHtml.match(/data-paper-detail-back/g) || []).length, 1);
+  assert.match(fallbackHtml, /data-paper-detail-back="all"/);
+  assert.match(fallbackHtml, /href="#all"/);
+  assert.match(fallbackHtml, /← 返回全部论文/);
+  assert.ok(fallbackHtml.indexOf("paper-detail-toolbar") < fallbackHtml.indexOf("class='paper-detail'"));
+
+  // today / all / favorites labels and hrefs from context.
+  for (const [page, label] of [
+    ["today", "返回今日论文"],
+    ["all", "返回全部论文"],
+    ["favorites", "返回个人收藏"]
+  ]) {
+    const api = backApi(escapeHTML, {
+      context: { page, scrollY: 120 },
+      currentPage: "paper",
+      todaySourceTab: "webofscience",
+      todaySourceTabUserSelected: true,
+      todayLoadedCounts: { webofscience: 30, googlescholar: 15, preprints: 15, all: 45 }
+    });
+    const markup = api.paperDetailBackControl();
+    assert.match(markup, new RegExp(`data-paper-detail-back="${page}"`));
+    assert.match(markup, new RegExp(`href="#${page}"`));
+    assert.match(markup, new RegExp(`← ${label}`));
+    assert.equal((markup.match(/data-paper-detail-back/g) || []).length, 1);
+  }
+
+  // Capture stores route, scrollY and load counts; apply restores limits without inventing scroll.
+  const captureApi = backApi(escapeHTML, {
+    context: null,
+    currentPage: "today",
+    todaySourceTab: "webofscience",
+    todaySourceTabUserSelected: false,
+    todayLoadedCounts: { webofscience: 45, googlescholar: 15, preprints: 15, all: 60 }
+  });
+  // Fake scrollY for capture (Node has no window; production uses window/globalThis).
+  const originalScrollY = Object.getOwnPropertyDescriptor(globalThis, "scrollY");
+  Object.defineProperty(globalThis, "scrollY", { configurable: true, get: () => 640 });
+  globalThis.pageYOffset = 640;
+  const captured = captureApi.capturePaperDetailReturnContext("today");
+  if (originalScrollY) Object.defineProperty(globalThis, "scrollY", originalScrollY);
+  else delete globalThis.scrollY;
+  delete globalThis.pageYOffset;
+  assert.equal(captured.page, "today");
+  assert.equal(captured.scrollY, 640);
+  assert.equal(captured.todaySourceTab, "webofscience");
+  assert.equal(captured.todayLoadedCounts.webofscience, 45);
+  assert.equal(captured.todayLoadedCounts.all, 60);
+
+  const restoreApi = backApi(escapeHTML, {
+    context: null,
+    currentPage: "paper",
+    todaySourceTab: "all",
+    todaySourceTabUserSelected: false,
+    todayLoadedCounts: { webofscience: 15, googlescholar: 15, preprints: 15, all: 15 },
+    visibleLimitEntries: [["all:test-key", 20], ["favorites:test-key", 20]]
+  });
+  restoreApi.applyPaperDetailReturnLimits({
+    page: "today",
+    todaySourceTab: "webofscience",
+    todayLoadedCounts: { webofscience: 45, googlescholar: 15, preprints: 15, all: 60 }
+  });
+  assert.equal(restoreApi.todaySourceTab, "webofscience");
+  assert.equal(restoreApi.todayLoadedCounts.webofscience, 45);
+  restoreApi.applyPaperDetailReturnLimits({
+    page: "all",
+    visibleLimitKey: "all:test-key",
+    visibleLimit: 80
+  });
+  assert.equal(restoreApi.visibleLimitAll, 80);
+  restoreApi.applyPaperDetailReturnLimits({
+    page: "favorites",
+    visibleLimitKey: "favorites:test-key",
+    visibleLimit: 60
+  });
+  assert.equal(restoreApi.visibleLimitFavorites, 60);
+
+  // Scroll restore uses rAF chain and does not push history.
+  const scheduleSource = readNamedFunction(html, "schedulePaperDetailScrollRestore", "runPaperDetailScrollRestore");
+  const runSource = readNamedFunction(html, "runPaperDetailScrollRestore", "maybeResumePaperDetailScrollRestore");
+  assert.match(scheduleSource, /paperDetailScrollRestore\s*=/);
+  assert.match(runSource, /requestAnimationFrame/);
+  assert.doesNotMatch(html, /history\.pushState\([\s\S]{0,80}paperDetail|paperDetail[\s\S]{0,80}history\.pushState/);
+  assert.match(html, /prepareReturnFromPaperDetail\(normalized\)/);
+
+  // Entering paper route scrolls to top once; loading/ready re-renders do not, return restore stays intact.
+  assert.match(html, /function scrollPaperDetailViewToTop\(/);
+  assert.match(
+    html,
+    /function renderPage\([\s\S]*enteringPaper\s*=\s*lastRenderedPageName\s*!==\s*"paper"[\s\S]*if\s*\(\s*enteringPaper\s*\)\s*paperDetailScrollRestore\s*=\s*null[\s\S]*if\s*\(\s*enteringPaper\s*\)\s*scrollPaperDetailViewToTop\s*\(/
+  );
+  // Top scroll is gated on enteringPaper only (not every renderPaperDetailView).
+  const detailViewSource = readNamedFunction(html, "renderPaperDetailView", "loadPaperDetail");
+  assert.doesNotMatch(detailViewSource, /scrollPaperDetailViewToTop|scrollTo\s*\(\s*0\s*,\s*0\s*\)/);
+  // Return path still schedules list scroll restore independently of detail top scroll.
+  const prepareSource = readNamedFunction(html, "prepareReturnFromPaperDetail", "scrollPaperDetailViewToTop");
+  assert.match(prepareSource, /schedulePaperDetailScrollRestore\(ctx\.page,\s*ctx\.scrollY\)/);
+  assert.match(prepareSource, /setPaperDetailRecentTitle\(ctx\.page,\s*ctx\.paperKey\)/);
+  assert.doesNotMatch(prepareSource, /scrollPaperDetailViewToTop/);
+
+  // Recent title mark: per-source session state, title-link only, no persistence.
+  assert.match(html, /const paperDetailRecentTitleByPage\s*=\s*\{\s*today:\s*""\s*,\s*all:\s*""\s*,\s*favorites:\s*""\s*\}/);
+  assert.match(html, /function setPaperDetailRecentTitle\(/);
+  assert.match(html, /function isPaperDetailRecentTitle\(/);
+  assert.match(html, /paper-detail-link-recent/);
+  assert.match(html, /data-paper-detail-recent/);
+  assert.match(html, /capturePaperDetailReturnContext\(page,\s*paperKey\)/);
+  assert.match(html, /parseLocationHash\(href\)\.key/);
+  // Light theme: exact muted gray on white, always underline; compound selector beats .paper-title a.
+  assert.match(html, /\.paper-title\s+a\.paper-detail-link-recent\s*\{[\s\S]*color:\s*#8896A7[\s\S]*text-decoration:\s*underline/);
+  assert.match(html, /\.paper-title\s+a\.paper-detail-link-recent:hover[\s\S]*color:\s*#0b94b2[\s\S]*text-decoration:\s*underline/);
+  assert.match(html, /\.paper-title\s+a\.paper-detail-link-recent:focus-visible[\s\S]*color:\s*#0b94b2[\s\S]*text-decoration:\s*underline/);
+  // Dark theme: readable muted gray matching auxiliary text, always underline + accent hover/focus.
+  assert.match(html, /html\[data-theme="dark"\]\s+\.paper-title\s+a\.paper-detail-link-recent\s*\{[\s\S]*color:\s*#a7b6c9[\s\S]*text-decoration:\s*underline/);
+  assert.match(html, /html\[data-theme="dark"\]\s+\.paper-title\s+a\.paper-detail-link-recent:hover[\s\S]*text-decoration:\s*underline/);
+  assert.match(html, /html\[data-theme="dark"\]\s+\.paper-title\s+a\.paper-detail-link-recent:focus-visible[\s\S]*text-decoration:\s*underline/);
+  assert.doesNotMatch(html, /\.paper-title\s+a\.paper-detail-link-recent[^{]*\{[^}]*!important/);
+  assert.doesNotMatch(html, /\.paper-title\s+a\.paper-detail-link-recent[^{]*\{[^}]*opacity\s*:/);
+  // Low-specificity-only rule is insufficient against `.paper-title a`.
+  assert.doesNotMatch(html, /(?<!\.paper-title\s+a)\.paper-detail-link-recent\s*\{[\s\S]*color:\s*#8896A7/);
+  assert.doesNotMatch(html, /paper-card-recent|saved-muted[\s\S]{0,40}recent/);
+  // Specificity check: compound selector includes both .paper-title and .paper-detail-link-recent.
+  const recentRule = html.match(/\.paper-title\s+a\.paper-detail-link-recent\s*\{[^}]*\}/);
+  assert.ok(recentRule, "expected compound recent title rule");
+  assert.match(recentRule[0], /\.paper-title/);
+  assert.match(recentRule[0], /\.paper-detail-link-recent/);
+  assert.match(recentRule[0], /#8896A7/);
+  assert.match(recentRule[0], /text-decoration:\s*underline/);
+  assert.doesNotMatch(recentRule[0], /!important|opacity\s*:/);
+  // Target title remains 18px bold for ~3.01:1 contrast of #8896A7 on white.
+  assert.match(html, /\.paper-title\s*\{[\s\S]*font-size:\s*18px[\s\S]*font-weight:\s*850/);
+  const titleLinkSource = readNamedFunction(html, "paperTitleLink", "paperStableKey");
+  assert.match(titleLinkSource, /isPaperDetailRecentTitle\(paper\)/);
+  assert.match(titleLinkSource, /paper-detail-link-recent/);
+  assert.doesNotMatch(titleLinkSource, /paper-card|saved-muted/);
+  const recentHelpers = [
+    readNamedFunction(html, "setPaperDetailRecentTitle", "isPaperDetailRecentTitle"),
+    readNamedFunction(html, "isPaperDetailRecentTitle", "paperDetailBackSourcePage")
+  ].join("\n");
+  assert.doesNotMatch(recentHelpers, /localStorage|exportLocalData|importLocalData/);
+
+  const recentApi = new Function(`
+    const paperDetailRecentTitleByPage = { today: "", all: "", favorites: "" };
+    function paperStableKey(paper) {
+      return String(paper.id || paper.doi || paper.url || paper.title || "").trim();
+    }
+    function setPaperDetailRecentTitle(page, paperKey) {
+      const source = String(page || "").trim();
+      if (source !== "today" && source !== "all" && source !== "favorites") return;
+      paperDetailRecentTitleByPage[source] = String(paperKey || "").trim();
+    }
+    function isPaperDetailRecentTitle(paper, page) {
+      const source = String(page || "").trim();
+      if (source !== "today" && source !== "all" && source !== "favorites") return false;
+      const recent = String(paperDetailRecentTitleByPage[source] || "").trim();
+      if (!recent) return false;
+      const key = paperStableKey(paper);
+      return Boolean(key) && key === recent;
+    }
+    function paperTitleLink(paper, page) {
+      const recent = isPaperDetailRecentTitle(paper, page);
+      const recentClass = recent ? " paper-detail-link-recent" : "";
+      const recentAttr = recent ? ' data-paper-detail-recent="true"' : "";
+      return '<a class="paper-detail-link' + recentClass + '" href="#paper/x"' + recentAttr + '>T</a>';
+    }
+    function prepareReturn(ctx, targetPage) {
+      if (ctx && ctx.page === targetPage && ctx.paperKey) {
+        setPaperDetailRecentTitle(ctx.page, ctx.paperKey);
+      }
+    }
+    return {
+      setPaperDetailRecentTitle,
+      isPaperDetailRecentTitle,
+      paperTitleLink,
+      prepareReturn,
+      snapshot: () => ({ ...paperDetailRecentTitleByPage })
+    };
+  `)();
+
+  const pToday = { id: "t-1", title: "Today paper" };
+  const pAll = { id: "a-1", title: "All paper" };
+  const pFav = { id: "f-1", title: "Fav paper" };
+  const pToday2 = { id: "t-2", title: "Today paper 2" };
+
+  // Independent marks per source page.
+  recentApi.setPaperDetailRecentTitle("today", "t-1");
+  recentApi.setPaperDetailRecentTitle("all", "a-1");
+  recentApi.setPaperDetailRecentTitle("favorites", "f-1");
+  assert.equal(recentApi.isPaperDetailRecentTitle(pToday, "today"), true);
+  assert.equal(recentApi.isPaperDetailRecentTitle(pAll, "all"), true);
+  assert.equal(recentApi.isPaperDetailRecentTitle(pFav, "favorites"), true);
+  assert.equal(recentApi.isPaperDetailRecentTitle(pToday, "all"), false);
+  assert.equal(recentApi.isPaperDetailRecentTitle(pAll, "today"), false);
+  assert.deepEqual(recentApi.snapshot(), { today: "t-1", all: "a-1", favorites: "f-1" });
+
+  // Mark moves when another paper is opened on the same source.
+  recentApi.setPaperDetailRecentTitle("today", "t-2");
+  assert.equal(recentApi.isPaperDetailRecentTitle(pToday, "today"), false);
+  assert.equal(recentApi.isPaperDetailRecentTitle(pToday2, "today"), true);
+  assert.equal(recentApi.snapshot().all, "a-1", "other sources unchanged");
+
+  // Fallback / mismatched return does not set mark.
+  const before = recentApi.snapshot();
+  recentApi.prepareReturn(null, "all");
+  recentApi.prepareReturn({ page: "favorites", paperKey: "nope" }, "all");
+  assert.deepEqual(recentApi.snapshot(), before);
+
+  // Successful same-source return sets mark; title-only class (not card).
+  recentApi.prepareReturn({ page: "all", paperKey: "a-new" }, "all");
+  assert.equal(recentApi.snapshot().all, "a-new");
+  const recentMarkup = recentApi.paperTitleLink({ id: "a-new" }, "all");
+  const plainMarkup = recentApi.paperTitleLink({ id: "other" }, "all");
+  assert.match(recentMarkup, /paper-detail-link-recent/);
+  assert.match(recentMarkup, /data-paper-detail-recent="true"/);
+  assert.doesNotMatch(plainMarkup, /paper-detail-link-recent|data-paper-detail-recent/);
+  assert.doesNotMatch(recentMarkup, /paper-card|saved-muted/);
+});
+
 test("theme preference stays in versioned localStorage and covers dark mode styles", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /paperhot\.theme\.v1/);

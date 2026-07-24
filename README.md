@@ -216,10 +216,13 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 - 路由为 `#paper/<stable-key>`；`stable-key` 使用 `encodeURIComponent` 编码，避免 DOI/URL 中的 `/`、`#`、`?` 破坏 hash。
 - 可从今日论文、全部论文、个人收藏的论文标题进入；浏览器前进/后退按 hash 历史工作，直接刷新会重新请求详情。
+- 详情页左上角只显示一个上下文返回按钮；从今日论文、全部论文或个人收藏进入时，按钮返回对应来源页，直接打开详情链接时回退到全部论文。
+- 从列表进入详情后视口回到详情顶部；返回来源页时恢复进入前的筛选、排序、已加载论文数量和滚动位置，不需要重新从列表开头查找。
+- 返回后，该来源页最近打开的论文标题会在当前浏览器会话内显示为浅灰色下划线；今日论文、全部论文和个人收藏分别记录，重新打开另一篇论文时标记随之移动。该提示不等同于已读状态，也不写入本地数据或导出包。
 - 只读接口 `GET /api/papers/by-key?key=...` 先查全部论文归档，再回退收藏快照；支持 DOI、URL、ID 和归一化标题，找不到时返回 `not-found`。该接口不修改 archive/favorites，不写操作日志。
 - 详情页展示完整标题、作者、来源/期刊、日期、DOI/原文入口、摘要、AI 中文总结/推荐理由、引用，以及收藏、标星、已读、短标题等现有阅读状态操作。
 - 缺失字段保持空白或“未记录”，不会伪造发表日期或其他元数据。
-- 找不到论文或加载失败时显示明确错误，并提供返回今日论文、全部论文、个人收藏的路径。
+- 找不到论文或加载失败时显示明确错误，并保留同一个上下文返回按钮。
 
 页面重点：
 
@@ -444,7 +447,7 @@ flowchart TD
 | `docs/superpowers/plans/2026-07-17-aliyun-text-model-pool-manager.md` | 阿里百炼文本对话模型池管理器、单模型测试和 25/页卡片 UI 的 TDD 实施计划 |
 | `docs/superpowers/plans/2026-07-23-paperhot-visual-optimization.md` | 今日论文视觉令牌、结果层级、论文卡、移动端、性能测量和固定端口验收的分步实施计划 |
 | `docs/solutions/runtime-errors/paperhot-service-restart-data-permission.md` | 固定端口旧进程与受限 Node 导致旧代码、断点 `EPERM` 的诊断和重启验收 |
-| `docs/solutions/ui-bugs/hash-routed-paper-detail-survives-async-rerenders.md` | 详情 hash 路由在直接刷新、浏览器历史和异步重渲染中保持稳定的修复与防回归规则 |
+| `docs/solutions/ui-bugs/hash-routed-paper-detail-survives-async-rerenders.md` | 详情 hash 路由、上下文返回、列表状态恢复及最近标题标记的修复与防回归规则 |
 | `.superpowers/sdd/task-2-report.md` | Task 2 多信源元数据与正式版/预印本关联的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-3-report.md` | Task 3 近期抓取游标与 WoS 本地请求用量的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-4-report.md` | Task 4 日期感知、断点恢复、指定论文检索及独立审查修复的 TDD 和验证报告 |

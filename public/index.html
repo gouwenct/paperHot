@@ -971,6 +971,16 @@
     }
     .paper-title a { color: inherit; text-decoration: none; }
     .paper-title a:hover { color: #0ea5b7; text-decoration: underline; }
+    /* Session-only "just opened" title mark: compound selector must beat .paper-title a. */
+    .paper-title a.paper-detail-link-recent {
+      color: #8896A7;
+      text-decoration: underline;
+    }
+    .paper-title a.paper-detail-link-recent:hover,
+    .paper-title a.paper-detail-link-recent:focus-visible {
+      color: #0b94b2;
+      text-decoration: underline;
+    }
     .short-title-row {
       display: inline-grid;
       grid-template-columns: auto minmax(220px, 1fr);
@@ -2293,6 +2303,32 @@
         font-size: 18px;
       }
     }
+    .paper-detail-page {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+    }
+    .paper-detail-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      min-width: 0;
+    }
+    .paper-detail-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 32px;
+      min-width: 32px;
+      padding: 0 10px;
+      box-sizing: border-box;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .paper-detail-back:focus-visible {
+      outline: 2px solid #0b94b2;
+      outline-offset: 2px;
+    }
     .paper-detail {
       padding: 18px 20px 22px;
       border: 1px solid rgba(222,232,238,0.92);
@@ -2346,7 +2382,11 @@
       color: inherit;
       text-decoration: none;
     }
-    .paper-detail-link:hover { color: #0b94b2; text-decoration: underline; }
+    .paper-detail-link:hover,
+    .paper-detail-link:focus-visible {
+      color: #0b94b2;
+      text-decoration: underline;
+    }
     html[data-theme="dark"] body {
       color: #d7e0ec;
       background: linear-gradient(115deg, #10161f 0%, #121925 43%, #15131f 100%);
@@ -2389,6 +2429,18 @@
     html[data-theme="dark"] .focus-label,
     html[data-theme="dark"] .small-text,
     html[data-theme="dark"] .empty { color: #a7b6c9; }
+    html[data-theme="dark"] .paper-title a.paper-detail-link-recent {
+      color: #a7b6c9;
+      text-decoration: underline;
+    }
+    html[data-theme="dark"] .paper-title a.paper-detail-link-recent:hover,
+    html[data-theme="dark"] .paper-title a.paper-detail-link-recent:focus-visible {
+      color: #4ec7e0;
+      text-decoration: underline;
+    }
+    html[data-theme="dark"] .paper-detail-back:focus-visible {
+      outline-color: #4ec7e0;
+    }
     html[data-theme="dark"] .primary-btn {
       border-color: #3e8ea0;
       background: #1b4d59;
@@ -3520,7 +3572,10 @@
       const title = escapeHTML(paper.displayTitle || paper.title || "未命名论文");
       const detailHash = paperDetailHash(paper);
       if (detailHash) {
-        return `<a class="paper-detail-link" href="${escapeHTML(detailHash)}" title="打开论文详情">${title}</a>`;
+        const recent = isPaperDetailRecentTitle(paper);
+        const recentClass = recent ? " paper-detail-link-recent" : "";
+        const recentAttr = recent ? ` data-paper-detail-recent="true"` : "";
+        return `<a class="paper-detail-link${recentClass}" href="${escapeHTML(detailHash)}" title="打开论文详情"${recentAttr}>${title}</a>`;
       }
       const url = String(paper.url || paper.pdfUrl || "").trim();
       return url ? `<a href="${escapeHTML(url)}" target="_blank" rel="noopener">${title}</a>` : title;
@@ -6634,6 +6689,7 @@
       bindShortTitleEditors();
       bindPaperTimelineSort();
       bindTodayAutoLoad();
+      maybeResumePaperDetailScrollRestore("today");
     }
 
     function renderAll() {
@@ -6659,6 +6715,7 @@
       bindShortTitleEditors();
       bindPaperTimelineSort();
       bindLazyPaperLoading();
+      maybeResumePaperDetailScrollRestore("all");
     }
 
     function renderFavorites() {
@@ -6723,6 +6780,7 @@
       bindShortTitleEditors();
       bindPaperTimelineSort();
       bindLazyPaperLoading();
+      maybeResumePaperDetailScrollRestore("favorites");
     }
 
     function formatToken(value) {
@@ -7377,6 +7435,180 @@
     }
 
     let paperDetailState = { status: "idle", key: "", paper: null, error: "", requestId: 0 };
+    // Session-only return context for detail navigation (not localStorage / export / config).
+    let paperDetailReturnContext = null;
+    let paperDetailScrollRestore = null;
+    let lastRenderedPageName = "";
+    // Per-source recent title keys after a successful list→detail→return (session only).
+    const paperDetailRecentTitleByPage = { today: "", all: "", favorites: "" };
+
+    function setPaperDetailRecentTitle(page, paperKey) {
+      const source = String(page || "").trim();
+      if (source !== "today" && source !== "all" && source !== "favorites") return;
+      paperDetailRecentTitleByPage[source] = String(paperKey || "").trim();
+    }
+
+    function isPaperDetailRecentTitle(paper, page = currentPageName()) {
+      const source = String(page || "").trim();
+      if (source !== "today" && source !== "all" && source !== "favorites") return false;
+      const recent = String(paperDetailRecentTitleByPage[source] || "").trim();
+      if (!recent) return false;
+      const key = paperStableKey(paper);
+      return Boolean(key) && key === recent;
+    }
+
+    function paperDetailBackSourcePage(context = paperDetailReturnContext) {
+      const page = String(context?.page || "").trim();
+      return page === "today" || page === "favorites" || page === "all" ? page : "all";
+    }
+
+    function paperDetailBackLabel(page = paperDetailBackSourcePage()) {
+      if (page === "today") return "返回今日论文";
+      if (page === "favorites") return "返回个人收藏";
+      return "返回全部论文";
+    }
+
+    function paperDetailBackHref(page = paperDetailBackSourcePage()) {
+      return `#${paperDetailBackSourcePage({ page })}`;
+    }
+
+    function paperDetailBackControl() {
+      const page = paperDetailBackSourcePage();
+      const label = paperDetailBackLabel(page);
+      return `<a class="ghost-btn paper-detail-back" href="${paperDetailBackHref(page)}" data-paper-detail-back="${page}" aria-label="${escapeHTML(label)}">← ${escapeHTML(label)}</a>`;
+    }
+
+    function wrapPaperDetailPage(innerHtml) {
+      return `<div class="paper-detail-page"><div class="paper-detail-toolbar">${paperDetailBackControl()}</div>${innerHtml}</div>`;
+    }
+
+    function capturePaperDetailReturnContext(fromPage = currentPageName(), paperKey = "") {
+      const page = String(fromPage || "").trim();
+      if (page !== "today" && page !== "all" && page !== "favorites") return null;
+      const scrollRoot = typeof window !== "undefined" ? window : globalThis;
+      const context = {
+        page,
+        paperKey: String(paperKey || "").trim(),
+        scrollY: Number(scrollRoot.scrollY || scrollRoot.pageYOffset || 0) || 0,
+        visibleLimitKey: "",
+        visibleLimit: 0,
+        todaySourceTab: "",
+        todayLoadedCounts: null
+      };
+      if (page === "today") {
+        context.todaySourceTab = todaySourceTab;
+        context.todayLoadedCounts = { ...todayLoadedCounts };
+        context.visibleLimit = Number(todayLoadedCounts[todaySourceTab]) || todayPaperBatchSize;
+      } else {
+        context.visibleLimitKey = paperVisibleLimitKey(page);
+        context.visibleLimit = paperVisibleLimit(page);
+      }
+      paperDetailReturnContext = context;
+      return context;
+    }
+
+    function applyPaperDetailReturnLimits(context) {
+      if (!context || typeof context !== "object") return;
+      if (context.page === "today") {
+        if (context.todayLoadedCounts && typeof context.todayLoadedCounts === "object") {
+          Object.keys(todayLoadedCounts).forEach(tab => {
+            const value = Number(context.todayLoadedCounts[tab]);
+            if (Number.isFinite(value) && value > 0) todayLoadedCounts[tab] = value;
+          });
+        }
+        if (context.todaySourceTab && Object.prototype.hasOwnProperty.call(todayLoadedCounts, context.todaySourceTab)) {
+          todaySourceTab = context.todaySourceTab;
+          todaySourceTabUserSelected = true;
+        }
+        return;
+      }
+      if ((context.page === "all" || context.page === "favorites") && context.visibleLimitKey) {
+        const limit = Number(context.visibleLimit);
+        if (Number.isFinite(limit) && limit > 0) {
+          paperVisibleLimits.set(String(context.visibleLimitKey), limit);
+        }
+      }
+    }
+
+    function schedulePaperDetailScrollRestore(page, scrollY) {
+      const targetY = Math.max(0, Number(scrollY) || 0);
+      paperDetailScrollRestore = {
+        page,
+        scrollY: targetY,
+        expiresAt: Date.now() + 4000
+      };
+      runPaperDetailScrollRestore();
+    }
+
+    function runPaperDetailScrollRestore() {
+      const job = paperDetailScrollRestore;
+      if (!job) return;
+      if (currentPageName() !== job.page) {
+        paperDetailScrollRestore = null;
+        return;
+      }
+      if (Date.now() > job.expiresAt) {
+        paperDetailScrollRestore = null;
+        return;
+      }
+      let frames = 0;
+      const maxFrames = 24;
+      const step = () => {
+        if (paperDetailScrollRestore !== job) return;
+        if (currentPageName() !== job.page) {
+          paperDetailScrollRestore = null;
+          return;
+        }
+        const maxScroll = Math.max(0, (document.documentElement.scrollHeight || 0) - (window.innerHeight || 0));
+        const desired = Math.min(job.scrollY, maxScroll);
+        window.scrollTo(0, desired);
+        frames += 1;
+        const at = window.scrollY || window.pageYOffset || 0;
+        const closeEnough = Math.abs(at - desired) <= 1;
+        if (closeEnough && frames >= 2) {
+          if (Date.now() > job.expiresAt) paperDetailScrollRestore = null;
+          return;
+        }
+        if (frames >= maxFrames || Date.now() > job.expiresAt) {
+          paperDetailScrollRestore = null;
+          return;
+        }
+        requestAnimationFrame(step);
+      };
+      // Double rAF resists first-paint layout that is still settling.
+      requestAnimationFrame(() => requestAnimationFrame(step));
+    }
+
+    function maybeResumePaperDetailScrollRestore(page) {
+      if (paperDetailScrollRestore && paperDetailScrollRestore.page === page) {
+        runPaperDetailScrollRestore();
+      }
+    }
+
+    function prepareReturnFromPaperDetail(targetPage) {
+      const ctx = paperDetailReturnContext;
+      if (ctx && ctx.page === targetPage) {
+        applyPaperDetailReturnLimits(ctx);
+        schedulePaperDetailScrollRestore(ctx.page, ctx.scrollY);
+        // Mark recent title only after a successful captured list→detail→same-source return.
+        if (ctx.paperKey) setPaperDetailRecentTitle(ctx.page, ctx.paperKey);
+      }
+      // Consume context when leaving detail so later navigations do not forge scroll/marks.
+      paperDetailReturnContext = null;
+    }
+
+    // Scroll detail to top only when first entering the paper route (not on loading→ready re-renders).
+    function scrollPaperDetailViewToTop() {
+      const scrollRoot = typeof window !== "undefined" ? window : globalThis;
+      if (typeof scrollRoot.scrollTo === "function") {
+        scrollRoot.scrollTo(0, 0);
+        return;
+      }
+      try {
+        scrollRoot.scrollY = 0;
+        scrollRoot.pageYOffset = 0;
+      } catch {}
+    }
 
     function paperExternalLinks(paper) {
       const links = [];
@@ -7461,26 +7693,13 @@
       `;
     }
 
-    function paperDetailBackActions() {
-      return `
-        <div class="button-row">
-          <a class="ghost-btn" href="#all">返回全部论文</a>
-          <a class="ghost-btn" href="#today">返回今日论文</a>
-          <a class="ghost-btn" href="#favorites">返回个人收藏</a>
-        </div>
-      `;
-    }
-
     function renderPaperDetailView() {
       const { status, paper, error, key } = paperDetailState;
-      const heroActions = paperDetailBackActions();
       if (status === "loading") {
         mainContent.innerHTML = pageShell(
           "论文详情",
           key ? `正在加载论文：${escapeHTML(key)}` : "正在加载论文…",
-          `<div class="empty">正在加载论文详情…</div>${paperDetailBackActions()}`,
-          "",
-          heroActions
+          wrapPaperDetailPage(`<div class="empty">正在加载论文详情…</div>`)
         );
         return;
       }
@@ -7488,18 +7707,14 @@
         mainContent.innerHTML = pageShell(
           "论文详情",
           "未找到可阅读的论文",
-          `<div class="empty">${escapeHTML(error || "未找到论文")}</div>${paperDetailBackActions()}`,
-          "",
-          heroActions
+          wrapPaperDetailPage(`<div class="empty">${escapeHTML(error || "未找到论文")}</div>`)
         );
         return;
       }
       mainContent.innerHTML = pageShell(
         "论文详情",
         "适合连续阅读的单篇论文视图；收藏、标星、已读和短标题沿用现有本地状态。",
-        paperDetailBody(paper),
-        "",
-        heroActions
+        wrapPaperDetailPage(paperDetailBody(paper))
       );
       bindFavorites();
       bindStarredStatus();
@@ -9582,14 +9797,24 @@
 
     function renderPage(page, paperKey = "") {
       if (page === "paper") {
+        const enteringPaper = lastRenderedPageName !== "paper";
         if (todayAutoLoadObserver) {
           todayAutoLoadObserver.disconnect();
           todayAutoLoadObserver = null;
         }
+        // Cancel any pending list-scroll restore so it cannot fight detail top scroll.
+        if (enteringPaper) paperDetailScrollRestore = null;
         renderPaperDetail(paperKey || parseLocationHash().key);
+        // After list→detail, viewport may still be at list scrollY; pin detail to top once.
+        // loading/error/ready re-renders keep lastRenderedPageName === "paper" and must not reset user scroll.
+        if (enteringPaper) scrollPaperDetailViewToTop();
+        lastRenderedPageName = "paper";
         return;
       }
       const normalized = ["today", "all", "favorites", "config", "tokens", "logs", "about"].includes(page) ? page : "today";
+      if (lastRenderedPageName === "paper" && normalized !== "paper") {
+        prepareReturnFromPaperDetail(normalized);
+      }
       if (normalized !== "today" && todayAutoLoadObserver) {
         todayAutoLoadObserver.disconnect();
         todayAutoLoadObserver = null;
@@ -9608,6 +9833,7 @@
         loadOperationLog();
       }
       if (normalized === "about") renderAbout();
+      lastRenderedPageName = normalized;
     }
 
     document.addEventListener("click", event => {
@@ -9615,6 +9841,20 @@
       if (event.target.closest("#keyword-config-panel")) return;
       finishActiveKeywordEdit();
     });
+    // Capture list origin before hash navigation to #paper/... (title link or 查看详情).
+    document.addEventListener("click", event => {
+      if (event.defaultPrevented || event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = event.target.closest("a.paper-detail-link, a.paper-detail-action, a[href^='#paper/']");
+      if (!link) return;
+      const href = String(link.getAttribute("href") || "");
+      if (!href.startsWith("#paper/")) return;
+      const page = currentPageName();
+      if (page === "today" || page === "all" || page === "favorites") {
+        const paperKey = parseLocationHash(href).key || "";
+        capturePaperDetailReturnContext(page, paperKey);
+      }
+    }, true);
     window.addEventListener("resize", () => {
       if (currentPageName() === "today") renderTodayKeywordConnections();
     });
