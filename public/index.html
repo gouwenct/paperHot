@@ -8013,12 +8013,13 @@
           const payload = await response.json();
           lineagePaperState = { ...lineagePaperState, archiveStatus: payload.existed ? "existed" : "added" };
           showToast(payload.existed ? "这篇论文已存在于全部论文" : "已加入全部论文");
-          button.textContent = lineageArchiveButtonLabel(lineagePaperState.archiveStatus);
+          // 谱系图异步加载可能已把整个视图重渲染，捕获的 button 引用会失效；
+          // 重渲染一次让按钮按最新 archiveStatus 重新生成，而不是写入可能已过期的 DOM 节点。
+          renderLineagePaperView();
         } catch (error) {
           lineagePaperState = { ...lineagePaperState, archiveStatus: "idle" };
           showToast("加入论文库失败，请稍后重试");
-          button.disabled = false;
-          button.textContent = lineageArchiveButtonLabel("idle");
+          renderLineagePaperView();
         }
       });
     }

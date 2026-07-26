@@ -2463,6 +2463,12 @@ test("lineage archive button renders from state so async re-renders stay idempot
   assert.match(bindSource, /lineagePaperState\s*=\s*\{\s*\.\.\.lineagePaperState,\s*archiveStatus:\s*"pending"\s*\}/, "点击加入后必须把 pending 写回状态");
   assert.match(bindSource, /archiveStatus:\s*payload\.existed\s*\?\s*"existed"\s*:\s*"added"/, "成功后必须把 added/existed 写回状态");
   assert.match(bindSource, /lineagePaperState\.archiveStatus\s*!==\s*"idle"/, "非 idle 状态下再次点击必须被拦截，避免重复提交");
+  // 成功/失败分支完成后必须触发一次 renderLineagePaperView()，而不是写入闭包捕获的 button 节点——
+  // 谱系图异步加载可能已经把该节点替换掉，只写 DOM 会让按钮永久卡在“加入中…”。
+  const successBranch = bindSource.slice(bindSource.indexOf("existed"));
+  assert.match(successBranch.slice(0, successBranch.indexOf("catch")), /renderLineagePaperView\(\)/, "成功分支完成后必须重渲染而不是只写闭包捕获的 button 节点");
+  const catchBranch = bindSource.slice(bindSource.indexOf("catch"));
+  assert.match(catchBranch, /renderLineagePaperView\(\)/, "失败分支回退 idle 后也必须重渲染");
 });
 
 test("renderLineagePaper clears sidebar nav highlight and reports missing key instead of hanging on a spinner", async () => {

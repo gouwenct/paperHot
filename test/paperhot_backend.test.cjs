@@ -9690,6 +9690,51 @@ test("buildPaperLineage returns empty lineage for an unarchived OpenAlex work id
   }
 });
 
+test("buildPaperLineage ignores a well-formed pre-migration cache file lacking the version stamp and refetches", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-lineage-premigration-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "archive.json"), JSON.stringify({
+      mode: "archive", papers: [{ id: "local-main", doi: "10.1234/main", title: "Main paper" }]
+    }), "utf8");
+    await fs.mkdir(path.join(tempDir, "lineage"), { recursive: true });
+    // 模拟旧版本缓存：结构完整、ok:true、且带有已排名字段（inArchive/archiveKey），
+    // 但没有新的 version 字段。必须被当作缓存未命中处理，不能崩溃或直接返回这份陈旧数据。
+    const staleRankedPayload = {
+      ok: true,
+      center: { title: "Stale cached title", doi: "10.1234/main", key: "local-main" },
+      predecessors: [{
+        doi: "10.9/stale", openAlexId: "", semanticScholarId: "", title: "Stale predecessor",
+        year: 1999, published: "", journal: "", abstract: "stale", citationCount: 1, authors: [],
+        isInfluential: false, inArchive: false, archiveKey: ""
+      }],
+      successors: [],
+      sources: ["openalex"],
+      fetchedAt: new Date().toISOString()
+    };
+    await fs.writeFile(path.join(tempDir, "lineage", lineageCacheFileName("10.1234/main")), JSON.stringify(staleRankedPayload), "utf8");
+    const options = {
+      dataDir: tempDir,
+      config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+      academicApis: { contactEmail: "" },
+      fetchImpl: async (url) => {
+        const target = String(url instanceof URL ? url.href : url);
+        if (target.includes("semanticscholar") && target.includes("/references")) return { ok: true, status: 200, json: async () => ({ data: [
+          { isInfluential: false, citedPaper: { paperId: "p", title: "Fresh ref after migration", year: 2020, venue: "", abstract: "", citationCount: 1, externalIds: {}, authors: [] } }
+        ] }) };
+        if (target.includes("semanticscholar")) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+        return { ok: false, status: 500, json: async () => ({}) };
+      }
+    };
+    const result = await buildPaperLineage("10.1234/main", options);
+    assert.equal(result.ok, true);
+    assert.equal(result.predecessors[0].title, "Fresh ref after migration", "无 version 字段的旧格式缓存必须被忽略并重新拉取，而不是直接返回陈旧数据");
+    const rewritten = JSON.parse(await fs.readFile(path.join(tempDir, "lineage", lineageCacheFileName("10.1234/main")), "utf8"));
+    assert.equal(rewritten.version, 2, "重新拉取后写盘的缓存必须带上当前版本号");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("buildPaperLineage ignores corrupted and expired cache files", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-lineage-cache-"));
   try {
