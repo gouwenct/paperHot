@@ -179,6 +179,7 @@
 
 ### 新增功能
 
+- 论文详情页下方新增"引文谱系"点线图：上排前置论文、下排后续论文（本地论文库命中全部保留，其余按高影响力引用和被引次数补充到约 6 篇），节点悬停显示标题、期刊、年份、被引与摘要片段，点击本地库论文进入现有详情页，点击外部论文进入临�时详情页并可选择"加入论文库"（不点击不写入本地数据，加入时记录操作日志）；一路追溯经过的论文在图中金色高亮。数据来自 OpenAlex 与 Semantic Scholar 并行拉取、Crossref 兜底，DOI 归一化去重，字段取更完整一方；无 DOI 或信源未收录时显示"暂无谱系数据"，不伪造。
 - 新增论文详情阅读页：hash 路由 `#paper/<stable-key>` 可从今日论文、全部论文和个人收藏进入；浏览器前进/后退与直接刷新可恢复详情。
 - 新增只读接口 `GET /api/papers/by-key?key=...`：先查归档再回退收藏快照，支持 DOI/URL/ID/归一化标题，明确返回 not-found；不修改 archive/favorites，不写操作日志。
 - 详情页复用现有字段与收藏 / notes API，展示完整标题、作者、来源/期刊、日期、DOI/原文入口、摘要、AI 中文总结/推荐理由、引用和阅读状态操作；缺失元数据不伪造。
@@ -240,6 +241,7 @@
 
 ### 配置与数据
 
+- 新增谱系磁盘缓存 data/papers/lineage/（30 天有效期，损坏自动忽略重取）；该缓存可随时从外部信源重新计算，属于运行时缓存，不进入一键导出 ZIP，备份格式保持 paperhot-local-data v1 不变。追溯路径为会话内状态，不持久化、不导出。
 - 新增 `config/firecrawl.example.json`；真实 `config/firecrawl.json` 作为本机敏感配置被 Git 忽略。默认 ZIP 不包含 Firecrawl API Key，只有显式勾选接口密钥时才导出，导入仍需显式允许覆盖；旧 v1 ZIP 保持兼容。
 - 论文记录继续使用可选 `abstractStatus` 和 `abstractConsensusSources`；字段名为兼容旧数据保持不变，新记录允许保存一个已通过完整性与身份校验的信源。旧记录与旧 v1 ZIP 继续兼容，`paperhot-local-data` 版本保持 `1`。
 - 新抓取日志增加可选的 `afterDateEnrichment`、`finalDateMatched` 候选快照和 `dateConfirmed` 计数；旧日志无需迁移，包含日志的本地 ZIP 仍使用 `paperhot-local-data` v1。
@@ -277,6 +279,7 @@
 
 ### 测试与验证
 
+- 后端新增引文谱系测试：双信源并行与单信源失败降级、DOI 格式差异去重与字段合并、本地库优先加高被引排序、Crossref 兜底、缓存写入/过期/损坏容错、无 DOI 空谱系；前端新增谱系板块结构、#lineage 路由、外部论文加入论文库与亮暗主题样式测试。
 - 后端新增 `readPaperByKey` 覆盖归档优先、收藏快照回退、DOI/URL/ID/标题灵活匹配、not-found，以及只读无写 archive/favorites/operation-log。
 - 前端新增 `#paper/<stable-key>` 编解码、by-key 接口入口、详情加载/错误/返回路径与异步数据刷新后保持详情路由的回归，以及主题 `paperhot.theme.v1` localStorage 与暗色样式结构测试；语法检查覆盖全部 inline script。
 - 本轮文档审计通过 solution frontmatter、代码路径和相对链接机械校验，README 已索引 `docs/` 下全部 `23/23` 个 Markdown 文件；复跑后端 `242/242`、前端 `82/82`，`paperhot_backend.cjs` 与 `server.cjs` 语法检查通过，AGENTS 与 claude 规则逐字节一致。
