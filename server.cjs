@@ -5,11 +5,13 @@ const {
   addCandidatePaperToArchive,
   buildDiscoveryTaskContext,
   buildDiscoveryTaskDescriptor,
+  buildPaperLineage,
   buildTokenStats,
   clearUnstarredPaperArchive,
   dedupePaperArchive,
   exportLocalDataZip,
   fetchLast7DaysPapers,
+  fetchLineagePaperDetail,
   fetchRecentPapers,
   fetchTodayPapers,
   readArchivePayload,
@@ -517,6 +519,28 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && pathname === "/api/papers/by-key") {
     const key = url.searchParams.get("key") || "";
     const payload = await readPaperByKey(key);
+    if (!payload.ok) {
+      sendJson(res, 404, payload);
+      return true;
+    }
+    sendJson(res, 200, payload);
+    return true;
+  }
+
+  if (req.method === "GET" && pathname === "/api/lineage") {
+    const key = url.searchParams.get("key") || "";
+    const payload = await buildPaperLineage(key);
+    if (!payload.ok) {
+      sendJson(res, 404, payload);
+      return true;
+    }
+    sendJson(res, 200, payload);
+    return true;
+  }
+
+  if (req.method === "GET" && pathname === "/api/lineage/paper") {
+    const id = url.searchParams.get("id") || "";
+    const payload = await fetchLineagePaperDetail(id);
     if (!payload.ok) {
       sendJson(res, 404, payload);
       return true;

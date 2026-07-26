@@ -9751,3 +9751,11 @@ test("buildPaperLineage builds lineage for a bare DOI not in archive using seman
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("server exposes lineage routes backed by backend orchestrators", async () => {
+  const serverSource = await fs.readFile(path.join(__dirname, "..", "server.cjs"), "utf8");
+  assert.match(serverSource, /pathname === "\/api\/lineage"/);
+  assert.match(serverSource, /pathname === "\/api\/lineage\/paper"/);
+  assert.match(serverSource, /buildPaperLineage\(/);
+  assert.match(serverSource, /fetchLineagePaperDetail\(/);
+});
