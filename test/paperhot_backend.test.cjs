@@ -118,7 +118,9 @@ const {
   restoreOpenAlexAbstract,
   buildPaperLineage,
   fetchCrossrefLineagePredecessors,
-  lineageCacheFileName
+  fetchLineagePaperDetail,
+  lineageCacheFileName,
+  lineagePaperRecord
 } = require("../paperhot_backend.cjs");
 
 const llmPoolStateKey = (providerId, model) => `${providerId}::${model}`;
@@ -9658,6 +9660,93 @@ test("buildPaperLineage ignores corrupted and expired cache files", async () => 
     assert.equal(refetched.predecessors[0].title, "Fresh ref", "过期缓存触发重新拉取");
     const rewritten = JSON.parse(await fs.readFile(cacheFile, "utf8"));
     assert.ok(Date.parse(rewritten.fetchedAt) > Date.now() - 60000, "缓存已用新数据覆写");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("fetchLineagePaperDetail merges openalex and semantic scholar detail for a doi", async () => {
+  const payload = await fetchLineagePaperDetail("10.1234/w2", {
+    config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+    academicApis: { contactEmail: "" },
+    fetchImpl: async (url) => {
+      const target = String(url instanceof URL ? url.href : url);
+      if (target.includes("semanticscholar")) return { ok: true, status: 200, json: async () => ({
+        paperId: "s2-w2", title: "Ref A", year: 2020, venue: "CVPR",
+        abstract: "A much longer and more complete abstract", citationCount: 500,
+        externalIds: { DOI: "10.1234/W2" }, authors: [{ name: "Alice Chen" }]
+      }) };
+      if (target.includes("/doi:10.1234/w2")) return { ok: true, status: 200, json: async () => ({
+        id: "https://openalex.org/W2", doi: "10.1234/w2", title: "Ref A",
+        publication_year: 2020, publication_date: "", cited_by_count: 480,
+        abstract_inverted_index: { Short: [0] }, authorships: [], primary_location: {}, referenced_works: []
+      }) };
+      return { ok: false, status: 404, json: async () => ({}) };
+    }
+  });
+  assert.equal(payload.ok, true);
+  assert.equal(payload.paper.summary, "A much longer and more complete abstract");
+  assert.equal(payload.paper.citationCount, 500);
+  assert.equal(payload.paper.journal, "CVPR");
+  assert.equal(payload.paper.published, "2020");
+  assert.equal(payload.paper.publishedPrecision, "year", "只有年份时不得伪造完整日期");
+  assert.equal(payload.paper.url, "https://doi.org/10.1234/w2");
+  assert.equal(payload.paper.retrievalSource, "lineage");
+});
+
+test("fetchLineagePaperDetail resolves openalex work ids and reports not-found", async () => {
+  const byWorkId = await fetchLineagePaperDetail("W2", {
+    config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+    academicApis: { contactEmail: "" },
+    fetchImpl: async (url) => {
+      const target = String(url instanceof URL ? url.href : url);
+      if (target.endsWith("/W2") || target.includes("/W2?")) return { ok: true, status: 200, json: async () => ({
+        id: "https://openalex.org/W2", doi: "", title: "No doi work", publication_year: 2018,
+        publication_date: "2018-07-01", cited_by_count: 3, authorships: [], primary_location: {}, referenced_works: []
+      }) };
+      return { ok: false, status: 404, json: async () => ({}) };
+    }
+  });
+  assert.equal(byWorkId.ok, true);
+  assert.equal(byWorkId.paper.title, "No doi work");
+  assert.equal(byWorkId.paper.published, "2018-07-01");
+  assert.equal(byWorkId.paper.publishedPrecision, "day");
+
+  const missing = await fetchLineagePaperDetail("10.9999/none", {
+    config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+    academicApis: { contactEmail: "" },
+    fetchImpl: async () => ({ ok: false, status: 404, json: async () => ({}) })
+  });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error, "not-found");
+});
+
+test("buildPaperLineage builds lineage for a bare DOI not in archive using semantic scholar when openalex fails", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-lineage-bare-doi-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "archive.json"), JSON.stringify({
+      mode: "archive", papers: [{ id: "unrelated-paper", doi: "10.1111/unrelated", title: "Unrelated paper" }]
+    }), "utf8");
+    const result = await buildPaperLineage("10.7777/external", {
+      dataDir: tempDir,
+      skipCache: true,
+      config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+      academicApis: { contactEmail: "" },
+      fetchImpl: async (url) => {
+        const target = String(url instanceof URL ? url.href : url);
+        if (target.includes("semanticscholar") && target.includes("/references")) {
+          return { ok: true, status: 200, json: async () => ({ data: [
+            { isInfluential: false, citedPaper: { paperId: "p", title: "External ref", year: 2019, venue: "ICML", abstract: "", citationCount: 15, externalIds: { DOI: "10.5/ref" }, authors: [] } }
+          ] }) };
+        }
+        if (target.includes("semanticscholar")) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+        return { ok: false, status: 500, json: async () => ({}) };
+      }
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.center.doi, "10.7777/external");
+    assert.ok(result.predecessors.length > 0);
+    assert.equal(result.predecessors[0].title, "External ref");
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

@@ -967,6 +967,68 @@ async function buildPaperLineage(key, options = {}) {
   return payload;
 }
 
+function lineagePaperRecord(node) {
+  const published = node.published || (node.year ? String(node.year) : "");
+  return {
+    id: `lineage:${node.doi || node.openAlexId || node.semanticScholarId}`,
+    doi: node.doi,
+    title: node.title,
+    summary: node.abstract,
+    journal: node.journal,
+    published,
+    publishedPrecision: node.published ? "day" : (node.year ? "year" : ""),
+    citationCount: node.citationCount,
+    authors: node.authors,
+    url: node.doi ? `https://doi.org/${node.doi}` : "",
+    source: "引文谱系",
+    retrievalSource: "lineage"
+  };
+}
+
+async function fetchLineagePaperDetail(id, options = {}) {
+  const raw = String(id || "").trim();
+  if (!raw) return { ok: false, error: "missing-id", message: "缺少论文标识" };
+  const { config, fetchImpl, headers } = await openAlexRequestOptions(options);
+  const endpoint = String(config.endpoint || DEFAULT_OPENALEX_CONFIG.endpoint).replace(/\/$/, "");
+  const fetchOpenAlexNode = async pathPart => {
+    try {
+      const url = new URL(`${endpoint}/${pathPart}`);
+      if (config.apiKey) url.searchParams.set("api_key", config.apiKey);
+      const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(20000) });
+      if (!response.ok) return null;
+      return lineageNodeFromOpenAlex(await response.json());
+    } catch {
+      return null;
+    }
+  };
+  const fetchSemanticScholarNode = async doi => {
+    try {
+      const response = await (options.fetchImpl || fetch)(
+        `${SEMANTIC_SCHOLAR_PAPER_ENDPOINT}/DOI:${encodeURIComponent(doi)}?fields=${SEMANTIC_SCHOLAR_LINEAGE_FIELDS}`,
+        { headers: { "User-Agent": "paperHOT/0.1 (local research prototype)", Accept: "application/json" }, signal: AbortSignal.timeout(20000) }
+      );
+      if (!response.ok) return null;
+      return lineageNodeFromSemanticScholar(await response.json());
+    } catch {
+      return null;
+    }
+  };
+  let node = null;
+  if (/^W\d+$/i.test(raw)) {
+    node = await fetchOpenAlexNode(raw.toUpperCase());
+  } else {
+    const doi = normalizeDoi(raw);
+    if (!doi) return { ok: false, error: "invalid-id", message: "无法识别的论文标识" };
+    const [openAlexNode, semanticScholarNode] = await Promise.all([
+      fetchOpenAlexNode(`doi:${doi}`),
+      fetchSemanticScholarNode(doi)
+    ]);
+    node = mergeLineageNodes([[openAlexNode].filter(Boolean), [semanticScholarNode].filter(Boolean)])[0] || null;
+  }
+  if (!node) return { ok: false, error: "not-found", message: "未找到该论文的外部元数据" };
+  return { ok: true, paper: lineagePaperRecord(node) };
+}
+
 async function fetchOpenAlexAbstractByDoi(paper, options = {}) {
   const item = await fetchOpenAlexWorkByDoi(paper, options);
   if (!item) return null;
@@ -7875,6 +7937,7 @@ module.exports = {
   fetchCrossrefLineagePredecessors,
   fetchCrossrefWorkByDoi,
   fetchCrossrefWorkByTitle,
+  fetchLineagePaperDetail,
   fetchFirecrawlAbstractForPaper,
   fetchBioRxivPapers,
   fetchGoogleScholarPapers,
@@ -7898,6 +7961,7 @@ module.exports = {
   lineageNodeFromOpenAlex,
   lineageNodeFromSemanticScholar,
   lineageNodeKey,
+  lineagePaperRecord,
   mergeLineageNodes,
   parseZipEntries,
   testLlmConfig,
