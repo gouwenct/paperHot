@@ -89,6 +89,9 @@ const SEMANTIC_SCHOLAR_PAPER_ENDPOINT = "https://api.semanticscholar.org/graph/v
 const SEMANTIC_SCHOLAR_BATCH_ENDPOINT = `${SEMANTIC_SCHOLAR_PAPER_ENDPOINT}/batch`;
 const SEMANTIC_SCHOLAR_LINEAGE_FIELDS = "title,abstract,year,externalIds,citationCount,venue,authors";
 const OPENALEX_LINEAGE_SELECT = "id,doi,title,display_name,publication_year,publication_date,cited_by_count,abstract_inverted_index,authorships,primary_location,referenced_works";
+const LINEAGE_CACHE_DIR_NAME = "lineage";
+const LINEAGE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const LINEAGE_TARGET_COUNT = 6;
 const CROSSREF_WORKS_ENDPOINT = "https://api.crossref.org/works";
 const DEFAULT_ACADEMIC_APIS_CONFIG = { contactEmail: "" };
 const DEFAULT_OPENALEX_CONFIG = {
@@ -879,6 +882,89 @@ function rankLineageNodes(nodes, archivePapers, limit = 6) {
     (Number(b.isInfluential) - Number(a.isInfluential))
     || ((b.citationCount ?? -1) - (a.citationCount ?? -1)));
   return [...local, ...external.slice(0, Math.max(0, limit - local.length))];
+}
+
+function lineageCacheFileName(doi) {
+  return `${hashText(`lineage:${normalizeDoi(doi)}`)}.json`;
+}
+
+async function readLineageCache(doi, dataDir, ttlMs) {
+  try {
+    const file = path.join(dataDir, LINEAGE_CACHE_DIR_NAME, lineageCacheFileName(doi));
+    const payload = JSON.parse(await fs.readFile(file, "utf8"));
+    if (payload?.ok && Date.now() - Date.parse(payload.fetchedAt || 0) < ttlMs) return payload;
+  } catch {
+    // 缓存缺失或损坏时忽略，回落到重新拉取
+  }
+  return null;
+}
+
+async function fetchCrossrefLineagePredecessors(doi, options = {}) {
+  try {
+    const item = await fetchCrossrefWorkByDoi(doi, options);
+    const references = Array.isArray(item?.reference) ? item.reference : [];
+    const nodes = references.map(ref => {
+      const title = compactText(ref?.["article-title"] || ref?.unstructured || "");
+      const refDoi = normalizeDoi(ref?.DOI || "");
+      if (!title && !refDoi) return null;
+      return {
+        doi: refDoi, openAlexId: "", semanticScholarId: "",
+        title: title || refDoi,
+        year: Number.parseInt(ref?.year, 10) || null,
+        published: "", journal: compactText(ref?.["journal-title"] || ""),
+        abstract: "", citationCount: null, authors: [], isInfluential: false
+      };
+    }).filter(Boolean);
+    return nodes.length ? nodes : null;
+  } catch {
+    return null;
+  }
+}
+
+async function buildPaperLineage(key, options = {}) {
+  const dataDir = options.dataDir || DATA_DIR;
+  const lookup = await readPaperByKey(key, options);
+  const paper = lookup?.ok ? lookup.paper : null;
+  const doi = paper ? normalizeDoi(paper.doi || "") : normalizeDoi(key);
+  if (!paper && !/^10\./.test(doi)) return { ok: false, error: "not-found", message: "未找到论文" };
+  const centerKey = paper ? String(paper.id || paper.doi || paper.url || paper.title || "").trim() : doi;
+  const center = { title: compactText(paper?.displayTitle || paper?.title || ""), doi, key: centerKey };
+  if (!doi) {
+    return { ok: true, center, predecessors: [], successors: [], sources: [], reason: "no-doi", fetchedAt: new Date().toISOString() };
+  }
+  if (!options.skipCache) {
+    const cached = await readLineageCache(doi, dataDir, LINEAGE_CACHE_TTL_MS);
+    if (cached) return cached;
+  }
+  const [openAlex, semanticScholar] = (await Promise.allSettled([
+    fetchOpenAlexLineage(doi, options),
+    fetchSemanticScholarLineage(doi, options)
+  ])).map(result => (result.status === "fulfilled" ? result.value : null));
+  const sources = [];
+  if (openAlex) sources.push("openalex");
+  if (semanticScholar) sources.push("semanticscholar");
+  if (!center.title && openAlex?.center?.title) center.title = openAlex.center.title;
+  let predecessorLists = [openAlex?.predecessors || [], semanticScholar?.predecessors || []];
+  if (!openAlex && !semanticScholar) {
+    const crossref = await fetchCrossrefLineagePredecessors(doi, options);
+    if (crossref) {
+      predecessorLists = [crossref];
+      sources.push("crossref");
+    }
+  }
+  const archive = await readPaperArchive(dataDir);
+  const payload = {
+    ok: true,
+    center,
+    predecessors: rankLineageNodes(mergeLineageNodes(predecessorLists), archive.papers, LINEAGE_TARGET_COUNT),
+    successors: rankLineageNodes(mergeLineageNodes([openAlex?.successors || [], semanticScholar?.successors || []]), archive.papers, LINEAGE_TARGET_COUNT),
+    sources,
+    fetchedAt: new Date().toISOString()
+  };
+  if (sources.length) {
+    await writeJsonFile(path.join(dataDir, LINEAGE_CACHE_DIR_NAME, lineageCacheFileName(doi)), payload);
+  }
+  return payload;
 }
 
 async function fetchOpenAlexAbstractByDoi(paper, options = {}) {
@@ -4314,7 +4400,8 @@ function crossrefMetadataFromItem(item) {
       crossrefDate(item?.published),
       crossrefDate(item?.issued)
     ]),
-    title
+    title,
+    reference: Array.isArray(item?.reference) ? item.reference : []
   };
 }
 
@@ -7771,6 +7858,7 @@ module.exports = {
   buildDiscoveryTaskFingerprint,
   buildDiscoveryTaskDescriptor,
   buildDiscoveryTaskContext,
+  buildPaperLineage,
   buildSearchExpression,
   abstractMatchText,
   classifyPaper,
@@ -7784,6 +7872,7 @@ module.exports = {
   exportLocalData,
   exportLocalDataZip,
   fetchArxivPapers,
+  fetchCrossrefLineagePredecessors,
   fetchCrossrefWorkByDoi,
   fetchCrossrefWorkByTitle,
   fetchFirecrawlAbstractForPaper,
@@ -7805,6 +7894,7 @@ module.exports = {
   inferPaperShortTitle,
   importLocalData,
   importLocalDataZip,
+  lineageCacheFileName,
   lineageNodeFromOpenAlex,
   lineageNodeFromSemanticScholar,
   lineageNodeKey,

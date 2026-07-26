@@ -115,7 +115,10 @@ const {
   mergeLineageNodes,
   rankLineageNodes,
   recoverGeneratedSummaryPapers,
-  restoreOpenAlexAbstract
+  restoreOpenAlexAbstract,
+  buildPaperLineage,
+  fetchCrossrefLineagePredecessors,
+  lineageCacheFileName
 } = require("../paperhot_backend.cjs");
 
 const llmPoolStateKey = (providerId, model) => `${providerId}::${model}`;
@@ -9506,4 +9509,156 @@ test("rankLineageNodes keeps all archive papers first then fills with influentia
   assert.equal(ranked[2].title, "External influential", "isInfluential 优先于被引次数");
   assert.equal(ranked[3].title, "External high cites");
   assert.equal(ranked[4].title, "External mid");
+});
+
+test("buildPaperLineage merges parallel sources, ranks against archive and caches to disk", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-lineage-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "archive.json"), JSON.stringify({
+      mode: "archive", papers: [
+        { id: "local-main", doi: "10.1234/main", title: "Main paper" },
+        { id: "local-ref", doi: "10.1234/w2", title: "Ref A" }
+      ]
+    }), "utf8");
+    let fetchCalls = 0;
+    const options = {
+      dataDir: tempDir,
+      config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "", maxPages: 1, perPage: 100 },
+      academicApis: { contactEmail: "researcher@example.org" },
+      fetchImpl: async (url) => {
+        fetchCalls += 1;
+        const target = String(url instanceof URL ? url.href : url);
+        if (target.includes("semanticscholar")) {
+          if (target.includes("/references")) return { ok: true, status: 200, json: async () => ({ data: [
+            { isInfluential: true, citedPaper: { paperId: "s2-w2", title: "Ref A", year: 2020, venue: "", abstract: "Long shared abstract", citationCount: 500, externalIds: { DOI: "10.1234/W2" }, authors: [] } }
+          ] }) };
+          return { ok: true, status: 200, json: async () => ({ data: [] }) };
+        }
+        if (target.includes("/doi:10.1234/main")) return { ok: true, status: 200, json: async () => ({
+          id: "https://openalex.org/W1", doi: "https://doi.org/10.1234/main", title: "Main paper",
+          publication_year: 2024, publication_date: "2024-05-01", cited_by_count: 10,
+          referenced_works: ["https://openalex.org/W2"], authorships: [], primary_location: {}
+        }) };
+        if (target.includes("openalex_id")) return { ok: true, status: 200, json: async () => ({ results: [
+          { id: "https://openalex.org/W2", doi: "10.1234/w2", title: "Ref A", publication_year: 2020, cited_by_count: 480, authorships: [], primary_location: {}, referenced_works: [] }
+        ] }) };
+        if (target.includes("cites")) return { ok: true, status: 200, json: async () => ({ results: [
+          { id: "https://openalex.org/W9", doi: "10.9/z", title: "Citing paper", publication_year: 2025, cited_by_count: 7, authorships: [], primary_location: {}, referenced_works: [] }
+        ] }) };
+        return { ok: false, status: 500, json: async () => ({}) };
+      }
+    };
+    const payload = await buildPaperLineage("10.1234/main", options);
+    assert.equal(payload.ok, true);
+    assert.deepEqual([...payload.sources].sort(), ["openalex", "semanticscholar"]);
+    assert.equal(payload.predecessors.length, 1, "双信源同一篇 Ref A 去重为一个节点");
+    assert.equal(payload.predecessors[0].inArchive, true);
+    assert.equal(payload.predecessors[0].archiveKey, "local-ref");
+    assert.equal(payload.predecessors[0].abstract, "Long shared abstract");
+    assert.equal(payload.predecessors[0].citationCount, 500);
+    assert.equal(payload.successors[0].title, "Citing paper");
+    const cacheFiles = await fs.readdir(path.join(tempDir, "lineage"));
+    assert.equal(cacheFiles.length, 1);
+    const callsAfterFirst = fetchCalls;
+    const cached = await buildPaperLineage("10.1234/main", options);
+    assert.equal(cached.predecessors[0].archiveKey, "local-ref");
+    assert.equal(fetchCalls, callsAfterFirst, "第二次命中缓存，不再发外部请求");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("buildPaperLineage survives one failing source and falls back to crossref when both fail", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-lineage-fb-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "archive.json"), JSON.stringify({
+      mode: "archive", papers: [{ id: "local-main", doi: "10.1234/main", title: "Main paper" }]
+    }), "utf8");
+    const oneSourceDown = await buildPaperLineage("10.1234/main", {
+      dataDir: tempDir, skipCache: true,
+      config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+      academicApis: { contactEmail: "" },
+      fetchImpl: async (url) => {
+        const target = String(url instanceof URL ? url.href : url);
+        if (target.includes("semanticscholar")) return { ok: true, status: 200, json: async () => ({ data: [
+          { isInfluential: false, citedPaper: { paperId: "p", title: "Only S2 ref", year: 2019, venue: "", abstract: "", citationCount: 9, externalIds: {}, authors: [] } }
+        ] }) };
+        return { ok: false, status: 500, json: async () => ({}) };
+      }
+    });
+    assert.deepEqual(oneSourceDown.sources, ["semanticscholar"]);
+    assert.equal(oneSourceDown.predecessors[0].title, "Only S2 ref");
+
+    const crossrefFallback = await buildPaperLineage("10.1234/main", {
+      dataDir: tempDir, skipCache: true,
+      config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+      academicApis: { contactEmail: "" },
+      fetchImpl: async (url) => {
+        const target = String(url instanceof URL ? url.href : url);
+        if (target.includes("crossref")) return { ok: true, status: 200, json: async () => ({ message: {
+          reference: [{ DOI: "10.5/old", "article-title": "Crossref ref", year: "2001" }]
+        } }) };
+        return { ok: false, status: 503, json: async () => ({}) };
+      }
+    });
+    assert.deepEqual(crossrefFallback.sources, ["crossref"]);
+    assert.equal(crossrefFallback.predecessors[0].doi, "10.5/old");
+    assert.equal(crossrefFallback.predecessors[0].year, 2001);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("buildPaperLineage returns empty lineage without doi and not-found for unknown keys", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-lineage-nodoi-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "archive.json"), JSON.stringify({
+      mode: "archive", papers: [{ id: "no-doi-paper", doi: "", url: "https://x.test/p", title: "No doi paper" }]
+    }), "utf8");
+    const empty = await buildPaperLineage("no-doi-paper", { dataDir: tempDir, fetchImpl: async () => { throw new Error("不应发请求"); } });
+    assert.equal(empty.ok, true);
+    assert.equal(empty.reason, "no-doi");
+    assert.deepEqual(empty.predecessors, []);
+    const missing = await buildPaperLineage("totally-unknown-key", { dataDir: tempDir });
+    assert.equal(missing.ok, false);
+    assert.equal(missing.error, "not-found");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("buildPaperLineage ignores corrupted and expired cache files", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-lineage-cache-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "archive.json"), JSON.stringify({
+      mode: "archive", papers: [{ id: "local-main", doi: "10.1234/main", title: "Main paper" }]
+    }), "utf8");
+    await fs.mkdir(path.join(tempDir, "lineage"), { recursive: true });
+    await fs.writeFile(path.join(tempDir, "lineage", lineageCacheFileName("10.1234/main")), "{ corrupted", "utf8");
+    const options = {
+      dataDir: tempDir,
+      config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+      academicApis: { contactEmail: "" },
+      fetchImpl: async (url) => {
+        const target = String(url instanceof URL ? url.href : url);
+        if (target.includes("semanticscholar") && target.includes("/references")) return { ok: true, status: 200, json: async () => ({ data: [
+          { isInfluential: false, citedPaper: { paperId: "p", title: "Fresh ref", year: 2020, venue: "", abstract: "", citationCount: 1, externalIds: {}, authors: [] } }
+        ] }) };
+        if (target.includes("semanticscholar")) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+        return { ok: false, status: 500, json: async () => ({}) };
+      }
+    };
+    const fresh = await buildPaperLineage("10.1234/main", options);
+    assert.equal(fresh.predecessors[0].title, "Fresh ref", "损坏缓存被忽略并重新拉取");
+    const cacheFile = path.join(tempDir, "lineage", lineageCacheFileName("10.1234/main"));
+    const written = JSON.parse(await fs.readFile(cacheFile, "utf8"));
+    written.fetchedAt = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+    await fs.writeFile(cacheFile, JSON.stringify(written), "utf8");
+    const refetched = await buildPaperLineage("10.1234/main", options);
+    assert.equal(refetched.predecessors[0].title, "Fresh ref", "过期缓存触发重新拉取");
+    const rewritten = JSON.parse(await fs.readFile(cacheFile, "utf8"));
+    assert.ok(Date.parse(rewritten.fetchedAt) > Date.now() - 60000, "缓存已用新数据覆写");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
