@@ -111,6 +111,9 @@ const {
   fetchSemanticScholarLineage,
   lineageNodeFromOpenAlex,
   lineageNodeFromSemanticScholar,
+  lineageNodeKey,
+  mergeLineageNodes,
+  rankLineageNodes,
   recoverGeneratedSummaryPapers,
   restoreOpenAlexAbstract
 } = require("../paperhot_backend.cjs");
@@ -9453,4 +9456,54 @@ test("fetchSemanticScholarLineage returns null when paper is not indexed", async
     fetchImpl: async () => ({ ok: false, status: 404, json: async () => ({}) })
   });
   assert.equal(result, null);
+});
+
+test("mergeLineageNodes dedupes by normalized doi and keeps the most complete fields", () => {
+  const merged = mergeLineageNodes([
+    [{ doi: "10.1234/w2", openAlexId: "W2", semanticScholarId: "", title: "Ref A", year: 2020, published: "2020-03-15", journal: "Nature Methods", abstract: "Short", citationCount: 480, authors: ["Alice Chen"], isInfluential: false }],
+    [{ doi: "10.1234/W2", openAlexId: "", semanticScholarId: "s2-refa", title: "Ref A", year: null, published: "", journal: "", abstract: "A much longer and more complete abstract", citationCount: 500, authors: [], isInfluential: true }]
+  ]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].abstract, "A much longer and more complete abstract");
+  assert.equal(merged[0].citationCount, 500);
+  assert.equal(merged[0].isInfluential, true);
+  assert.equal(merged[0].openAlexId, "W2");
+  assert.equal(merged[0].semanticScholarId, "s2-refa");
+  assert.equal(merged[0].published, "2020-03-15");
+});
+
+test("mergeLineageNodes falls back to title+year matching when doi is missing", () => {
+  const merged = mergeLineageNodes([
+    [{ doi: "", openAlexId: "", semanticScholarId: "a", title: "Deep Ideas!", year: 2018, published: "", journal: "", abstract: "", citationCount: 3, authors: [], isInfluential: false }],
+    [{ doi: "", openAlexId: "", semanticScholarId: "b", title: "deep ideas", year: 2018, published: "", journal: "CVPR", abstract: "", citationCount: null, authors: [], isInfluential: false }],
+    [{ doi: "", openAlexId: "", semanticScholarId: "c", title: "deep ideas", year: 2021, published: "", journal: "", abstract: "", citationCount: null, authors: [], isInfluential: false }]
+  ]);
+  assert.equal(merged.length, 2, "同标题不同年份是两篇论文");
+  assert.equal(merged[0].journal, "CVPR");
+});
+
+test("rankLineageNodes keeps all archive papers first then fills with influential and high-citation nodes", () => {
+  const node = (doi, title, cites, influential = false) => ({ doi, openAlexId: "", semanticScholarId: "", title, year: 2020, published: "", journal: "", abstract: "", citationCount: cites, authors: [], isInfluential: influential });
+  const nodes = [
+    node("10.1/a", "In archive low cites", 1),
+    node("10.1/b", "External influential", 40, true),
+    node("10.1/c", "External high cites", 900),
+    node("10.1/d", "External mid", 100),
+    node("", "Archive matched by title", 2),
+    node("10.1/f", "External low", 5),
+    node("10.1/g", "External lower", 4),
+    node("10.1/h", "External lowest", 3)
+  ];
+  const archive = [
+    { id: "paper-a", doi: "https://doi.org/10.1/A", title: "In archive low cites" },
+    { doi: "", url: "https://x.test/t", title: "Archive Matched By Title" }
+  ];
+  const ranked = rankLineageNodes(nodes, archive, 6);
+  assert.equal(ranked.length, 6);
+  assert.deepEqual(ranked.slice(0, 2).map(n => n.inArchive), [true, true]);
+  assert.equal(ranked[0].archiveKey, "paper-a");
+  assert.equal(ranked[1].archiveKey, "https://x.test/t");
+  assert.equal(ranked[2].title, "External influential", "isInfluential 优先于被引次数");
+  assert.equal(ranked[3].title, "External high cites");
+  assert.equal(ranked[4].title, "External mid");
 });

@@ -828,6 +828,59 @@ async function fetchSemanticScholarLineage(doi, options = {}) {
   return { source: "semanticscholar", center: null, predecessors, successors };
 }
 
+function lineageNodeKey(node) {
+  if (!node) return "";
+  const normalizedDoi = normalizeDoi(node.doi);
+  if (normalizedDoi) return `doi:${normalizedDoi}`;
+  const titleKey = normalizedTitleKey(node.title);
+  return titleKey ? `title:${titleKey}:${node.year || ""}` : "";
+}
+
+function mergeLineageNodes(lists) {
+  const byKey = new Map();
+  lists.flat().filter(Boolean).forEach(node => {
+    const key = lineageNodeKey(node);
+    if (!key) return;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, { ...node });
+      return;
+    }
+    if (String(node.abstract || "").length > String(existing.abstract || "").length) existing.abstract = node.abstract;
+    if ((node.citationCount ?? -1) > (existing.citationCount ?? -1)) existing.citationCount = node.citationCount;
+    existing.isInfluential = existing.isInfluential || Boolean(node.isInfluential);
+    ["doi", "openAlexId", "semanticScholarId", "journal", "published"].forEach(field => {
+      if (!existing[field] && node[field]) existing[field] = node[field];
+    });
+    if (!existing.year && node.year) existing.year = node.year;
+    if ((node.authors?.length || 0) > (existing.authors?.length || 0)) existing.authors = node.authors;
+  });
+  return [...byKey.values()];
+}
+
+function rankLineageNodes(nodes, archivePapers, limit = 6) {
+  const archiveByDoi = new Map();
+  const archiveByTitle = new Map();
+  (archivePapers || []).forEach(paper => {
+    const doi = normalizeDoi(paper?.doi);
+    if (doi && !archiveByDoi.has(doi)) archiveByDoi.set(doi, paper);
+    const titleKey = normalizedTitleKey(paper?.title);
+    if (titleKey && !archiveByTitle.has(titleKey)) archiveByTitle.set(titleKey, paper);
+  });
+  const decorated = (nodes || []).map(node => {
+    const match = (node.doi && archiveByDoi.get(node.doi))
+      || archiveByTitle.get(normalizedTitleKey(node.title))
+      || null;
+    const archiveKey = match ? String(match.id || match.doi || match.url || match.title || "").trim() : "";
+    return { ...node, inArchive: Boolean(match), archiveKey };
+  });
+  const local = decorated.filter(node => node.inArchive);
+  const external = decorated.filter(node => !node.inArchive).sort((a, b) =>
+    (Number(b.isInfluential) - Number(a.isInfluential))
+    || ((b.citationCount ?? -1) - (a.citationCount ?? -1)));
+  return [...local, ...external.slice(0, Math.max(0, limit - local.length))];
+}
+
 async function fetchOpenAlexAbstractByDoi(paper, options = {}) {
   const item = await fetchOpenAlexWorkByDoi(paper, options);
   if (!item) return null;
@@ -7754,6 +7807,8 @@ module.exports = {
   importLocalDataZip,
   lineageNodeFromOpenAlex,
   lineageNodeFromSemanticScholar,
+  lineageNodeKey,
+  mergeLineageNodes,
   parseZipEntries,
   testLlmConfig,
   testFirecrawlConfig,
@@ -7803,6 +7858,7 @@ module.exports = {
   readOpenAlexConfig,
   readUserState,
   readWebOfScienceConfig,
+  rankLineageNodes,
   refinePaperPool,
   rescorePaperAfterEnrichment,
   selectMatchingAbstractCandidate,
