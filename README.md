@@ -436,6 +436,7 @@ flowchart TD
 | `docs/superpowers/specs/2026-07-17-aliyun-llm-model-pool-design.md` | 阿里百炼免费额度优先、本地估算兜底的 LLM 模型池自动切换设计 |
 | `docs/superpowers/specs/2026-07-17-aliyun-text-model-pool-manager-design.md` | 阿里百炼文本对话模型池管理器、25/页模型卡片、单模型测试和灰度切换设计 |
 | `docs/superpowers/specs/2026-07-22-paperhot-visual-optimization-design.md` | 以今日论文快速扫描为核心的视觉层级、语义状态、论文卡、响应式和性能验收设计 |
+| `docs/superpowers/specs/2026-07-26-citation-lineage-graph-design.md` | 论文详情页引文谱系点线图、多信源并行合并去重与外部论文临时详情页设计 |
 | `docs/superpowers/plans/2026-07-11-recent-paper-discovery.md` | 近期论文发现功能的分步实现、测试和验证计划 |
 | `docs/superpowers/plans/2026-07-15-archive-clear-and-existing-results.md` | 全部论文清理、收藏快照回退和今日论文已入库弱化展示的 TDD 实施计划 |
 | `docs/superpowers/plans/2026-07-15-wos-date-and-query.md` | WoS 查询和论文日期补全的 TDD 实施计划 |
