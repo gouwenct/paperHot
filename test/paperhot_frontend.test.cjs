@@ -2428,3 +2428,29 @@ test("lineageNodeHref routes archive nodes to paper detail and external nodes to
   assert.equal(api.lineageNodeHref({ inArchive: false, archiveKey: "", doi: "", openAlexId: "W3" }), `#lineage/W3`);
   assert.equal(api.lineageNodeHref({ inArchive: false, archiveKey: "", doi: "", openAlexId: "" }), "");
 });
+
+test("lineage hash route opens external paper page with archive button and recursive lineage", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /function renderLineagePaper\(/);
+  assert.match(html, /\/api\/lineage\/paper\?id=/);
+  assert.match(html, /data-lineage-archive/);
+  assert.match(html, /加入论文库/);
+  const parseSource = readNamedFunction(html, "parseLocationHash", "currentPageName");
+  const api = new Function(`
+    function decodePaperRouteKey(value) { try { return decodeURIComponent(String(value || "")); } catch { return String(value || ""); } }
+    ${parseSource}
+    return { parseLocationHash };
+  `)();
+  const parsed = api.parseLocationHash(`#lineage/${encodeURIComponent("10.1234/w2")}`);
+  assert.equal(parsed.page, "lineage");
+  assert.equal(parsed.key, "10.1234/w2");
+  const paperParsed = api.parseLocationHash("#paper/abc");
+  assert.equal(paperParsed.page, "paper", "既有 paper 路由不受影响");
+});
+
+test("external lineage paper joins archive through the existing candidate api", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const bindSource = readNamedFunction(html, "bindLineageArchiveButton", "loadLineagePaper");
+  assert.match(bindSource, /\/api\/archive\/candidate/);
+  assert.match(bindSource, /JSON\.stringify\(\{ paper/);
+});
