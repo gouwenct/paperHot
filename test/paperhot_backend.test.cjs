@@ -107,6 +107,10 @@ const {
   readDiscoveryTaskState,
   detectExactPaperInput,
   fetchCrossrefWorkByDoi,
+  fetchOpenAlexLineage,
+  fetchSemanticScholarLineage,
+  lineageNodeFromOpenAlex,
+  lineageNodeFromSemanticScholar,
   recoverGeneratedSummaryPapers,
   restoreOpenAlexAbstract
 } = require("../paperhot_backend.cjs");
@@ -9366,4 +9370,87 @@ test("uses archived llmUpdatedAt token usage as fallback for older manual LLM re
     { model: "qwen-plus", prompt: 15909, completion: 5638, total: 21547, papers: 32 }
   ]);
   await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("fetchOpenAlexLineage pulls referenced works and citing works in batches", async () => {
+  const requests = [];
+  const oaWork = (id, title, cites) => ({
+    id: `https://openalex.org/${id}`, doi: `https://doi.org/10.1234/${id.toLowerCase()}`,
+    title, publication_year: 2020, publication_date: "2020-03-15", cited_by_count: cites,
+    abstract_inverted_index: { Deep: [0], learning: [1] },
+    authorships: [{ author: { display_name: "Alice Chen" } }],
+    primary_location: { source: { display_name: "Nature Methods" } },
+    referenced_works: []
+  });
+  const result = await fetchOpenAlexLineage("10.1234/main", {
+    config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "", maxPages: 1, perPage: 100 },
+    academicApis: { contactEmail: "researcher@example.org" },
+    fetchImpl: async (url) => {
+      const target = url instanceof URL ? url : new URL(url);
+      requests.push(target);
+      if (target.pathname.endsWith("/doi:10.1234/main")) {
+        return { ok: true, status: 200, json: async () => ({
+          ...oaWork("W1", "Main paper", 10),
+          referenced_works: ["https://openalex.org/W2", "https://openalex.org/W3"]
+        }) };
+      }
+      if ((target.searchParams.get("filter") || "").startsWith("openalex_id:")) {
+        return { ok: true, status: 200, json: async () => ({ results: [oaWork("W2", "Ref A", 500), oaWork("W3", "Ref B", 50)] }) };
+      }
+      if ((target.searchParams.get("filter") || "").startsWith("cites:")) {
+        return { ok: true, status: 200, json: async () => ({ results: [oaWork("W9", "Citing paper", 7)] }) };
+      }
+      return { ok: false, status: 500, json: async () => ({}) };
+    }
+  });
+  assert.equal(result.source, "openalex");
+  assert.equal(result.center.title, "Main paper");
+  assert.equal(result.predecessors.length, 2);
+  assert.equal(result.predecessors[0].doi, "10.1234/w2");
+  assert.equal(result.predecessors[0].abstract, "Deep learning");
+  assert.equal(result.predecessors[0].journal, "Nature Methods");
+  assert.equal(result.predecessors[0].published, "2020-03-15");
+  assert.equal(result.successors[0].title, "Citing paper");
+  const citesRequest = requests.find(u => (u.searchParams.get("filter") || "").startsWith("cites:"));
+  assert.equal(citesRequest.searchParams.get("filter"), "cites:W1");
+  assert.equal(citesRequest.searchParams.get("sort"), "cited_by_count:desc");
+});
+
+test("fetchSemanticScholarLineage maps references and citations with isInfluential", async () => {
+  const s2Paper = (title, doi, cites) => ({
+    paperId: `s2-${title}`, title, year: 2019, venue: "CVPR",
+    abstract: `Abstract of ${title}`, citationCount: cites,
+    externalIds: doi ? { DOI: doi } : {}, authors: [{ name: "Bob Li" }]
+  });
+  const result = await fetchSemanticScholarLineage("10.1234/main", {
+    fetchImpl: async (url) => {
+      const target = String(url);
+      if (target.includes("/references")) {
+        return { ok: true, status: 200, json: async () => ({ data: [
+          { isInfluential: true, citedPaper: s2Paper("Ref A", "10.1234/W2", 480) },
+          { isInfluential: false, citedPaper: s2Paper("Ref C", "", 5) }
+        ] }) };
+      }
+      if (target.includes("/citations")) {
+        return { ok: true, status: 200, json: async () => ({ data: [
+          { isInfluential: false, citingPaper: s2Paper("Citing paper", "10.9/z", 7) }
+        ] }) };
+      }
+      return { ok: false, status: 500, json: async () => ({}) };
+    }
+  });
+  assert.equal(result.predecessors.length, 2);
+  assert.equal(result.predecessors[0].isInfluential, true);
+  assert.equal(result.predecessors[0].doi, "10.1234/w2");
+  assert.equal(result.predecessors[1].doi, "");
+  assert.equal(result.predecessors[1].year, 2019);
+  assert.equal(result.predecessors[1].published, "", "只有年份时不得伪造具体日期");
+  assert.equal(result.successors[0].title, "Citing paper");
+});
+
+test("fetchSemanticScholarLineage returns null when paper is not indexed", async () => {
+  const result = await fetchSemanticScholarLineage("10.1234/unknown", {
+    fetchImpl: async () => ({ ok: false, status: 404, json: async () => ({}) })
+  });
+  assert.equal(result, null);
 });

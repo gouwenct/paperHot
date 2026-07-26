@@ -87,6 +87,8 @@ const BIORXIV_ENDPOINT = "https://api.biorxiv.org/details/biorxiv";
 const SEMANTIC_SCHOLAR_ENDPOINT = "https://api.semanticscholar.org/graph/v1/paper/search";
 const SEMANTIC_SCHOLAR_PAPER_ENDPOINT = "https://api.semanticscholar.org/graph/v1/paper";
 const SEMANTIC_SCHOLAR_BATCH_ENDPOINT = `${SEMANTIC_SCHOLAR_PAPER_ENDPOINT}/batch`;
+const SEMANTIC_SCHOLAR_LINEAGE_FIELDS = "title,abstract,year,externalIds,citationCount,venue,authors";
+const OPENALEX_LINEAGE_SELECT = "id,doi,title,display_name,publication_year,publication_date,cited_by_count,abstract_inverted_index,authorships,primary_location,referenced_works";
 const CROSSREF_WORKS_ENDPOINT = "https://api.crossref.org/works";
 const DEFAULT_ACADEMIC_APIS_CONFIG = { contactEmail: "" };
 const DEFAULT_OPENALEX_CONFIG = {
@@ -707,6 +709,123 @@ async function fetchOpenAlexWorkByDoi(paper, options = {}) {
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`OpenAlex 字段补全失败：HTTP ${response.status}`);
   return response.json();
+}
+
+function lineageNodeFromOpenAlex(item) {
+  if (!item || typeof item !== "object") return null;
+  const title = compactText(item.title || item.display_name || "");
+  if (!title) return null;
+  const published = /^\d{4}-\d{2}-\d{2}$/.test(String(item.publication_date || "")) ? item.publication_date : "";
+  return {
+    doi: normalizeDoi(item.doi || ""),
+    openAlexId: String(item.id || "").split("/").pop() || "",
+    semanticScholarId: "",
+    title,
+    year: Number.isInteger(item.publication_year) ? item.publication_year : null,
+    published,
+    journal: compactText(item.primary_location?.source?.display_name || ""),
+    abstract: restoreOpenAlexAbstract(item.abstract_inverted_index),
+    citationCount: Number.isFinite(item.cited_by_count) ? item.cited_by_count : null,
+    authors: (Array.isArray(item.authorships) ? item.authorships : [])
+      .map(entry => compactText(entry?.author?.display_name || "")).filter(Boolean),
+    isInfluential: false
+  };
+}
+
+function lineageNodeFromSemanticScholar(item, isInfluential = false) {
+  if (!item || typeof item !== "object") return null;
+  const title = compactText(item.title || "");
+  if (!title) return null;
+  return {
+    doi: normalizeDoi(item.externalIds?.DOI || ""),
+    openAlexId: "",
+    semanticScholarId: String(item.paperId || ""),
+    title,
+    year: Number.isInteger(item.year) ? item.year : null,
+    published: "",
+    journal: compactText(item.venue || ""),
+    abstract: compactText(item.abstract || ""),
+    citationCount: Number.isFinite(item.citationCount) ? item.citationCount : null,
+    authors: (Array.isArray(item.authors) ? item.authors : [])
+      .map(entry => compactText(entry?.name || "")).filter(Boolean),
+    isInfluential: Boolean(isInfluential)
+  };
+}
+
+async function fetchOpenAlexLineage(doi, options = {}) {
+  const cleanDoi = normalizeDoi(doi);
+  if (!cleanDoi) return null;
+  const { config, fetchImpl, headers } = await openAlexRequestOptions(options);
+  const endpoint = String(config.endpoint || DEFAULT_OPENALEX_CONFIG.endpoint).replace(/\/$/, "");
+  const getJson = async url => {
+    if (config.apiKey) url.searchParams.set("api_key", config.apiKey);
+    const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(20000) });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`OpenAlex 谱系查询失败：HTTP ${response.status}`);
+    return response.json();
+  };
+  const work = await getJson(new URL(`${endpoint}/doi:${cleanDoi}`));
+  if (!work) return null;
+  const referencedIds = (Array.isArray(work.referenced_works) ? work.referenced_works : [])
+    .map(id => String(id || "").split("/").pop()).filter(Boolean).slice(0, 100);
+  const predecessors = [];
+  for (let start = 0; start < referencedIds.length; start += 50) {
+    const url = new URL(endpoint);
+    url.searchParams.set("filter", `openalex_id:${referencedIds.slice(start, start + 50).join("|")}`);
+    url.searchParams.set("per-page", "50");
+    url.searchParams.set("select", OPENALEX_LINEAGE_SELECT);
+    const payload = await getJson(url);
+    (payload?.results || []).forEach(item => {
+      const node = lineageNodeFromOpenAlex(item);
+      if (node) predecessors.push(node);
+    });
+  }
+  const workId = String(work.id || "").split("/").pop() || "";
+  let successors = [];
+  if (workId) {
+    const url = new URL(endpoint);
+    url.searchParams.set("filter", `cites:${workId}`);
+    url.searchParams.set("sort", "cited_by_count:desc");
+    url.searchParams.set("per-page", "25");
+    url.searchParams.set("select", OPENALEX_LINEAGE_SELECT);
+    const payload = await getJson(url);
+    successors = (payload?.results || []).map(lineageNodeFromOpenAlex).filter(Boolean);
+  }
+  return { source: "openalex", center: lineageNodeFromOpenAlex(work), predecessors, successors };
+}
+
+async function fetchSemanticScholarLineage(doi, options = {}) {
+  const cleanDoi = normalizeDoi(doi);
+  if (!cleanDoi) return null;
+  const fetchImpl = options.fetchImpl || fetch;
+  const getJson = async suffix => {
+    const request = () => fetchImpl(
+      `${SEMANTIC_SCHOLAR_PAPER_ENDPOINT}/DOI:${encodeURIComponent(cleanDoi)}${suffix}`,
+      {
+        headers: { "User-Agent": "paperHOT/0.1 (local research prototype)", Accept: "application/json" },
+        signal: AbortSignal.timeout(20000)
+      }
+    );
+    let response = await request();
+    for (let attempt = 0; response.status === 429 && attempt < 2; attempt += 1) {
+      const retryAfterSeconds = Number(response.headers?.get?.("retry-after") || 0);
+      await sleep(retryAfterSeconds > 0 ? Math.min(retryAfterSeconds * 1000, 30000) : 1500);
+      response = await request();
+    }
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`Semantic Scholar 谱系查询失败：HTTP ${response.status}`);
+    return response.json();
+  };
+  const [references, citations] = await Promise.all([
+    getJson(`/references?fields=${SEMANTIC_SCHOLAR_LINEAGE_FIELDS},isInfluential&limit=100`),
+    getJson(`/citations?fields=${SEMANTIC_SCHOLAR_LINEAGE_FIELDS},isInfluential&limit=100`)
+  ]);
+  if (!references && !citations) return null;
+  const predecessors = (references?.data || [])
+    .map(entry => lineageNodeFromSemanticScholar(entry?.citedPaper, entry?.isInfluential)).filter(Boolean);
+  const successors = (citations?.data || [])
+    .map(entry => lineageNodeFromSemanticScholar(entry?.citingPaper, entry?.isInfluential)).filter(Boolean);
+  return { source: "semanticscholar", center: null, predecessors, successors };
 }
 
 async function fetchOpenAlexAbstractByDoi(paper, options = {}) {
@@ -7620,9 +7739,11 @@ module.exports = {
   fetchGoogleSearchPapers,
   fetchJournalMetrics,
   fetchLast7DaysPapers,
+  fetchOpenAlexLineage,
   fetchOpenAlexPapers,
   fetchPaperPayload,
   fetchRecentPapers,
+  fetchSemanticScholarLineage,
   fetchSemanticScholarPapers,
   fetchTodayPapers,
   fetchWebOfSciencePapers,
@@ -7631,6 +7752,8 @@ module.exports = {
   inferPaperShortTitle,
   importLocalData,
   importLocalDataZip,
+  lineageNodeFromOpenAlex,
+  lineageNodeFromSemanticScholar,
   parseZipEntries,
   testLlmConfig,
   testFirecrawlConfig,
