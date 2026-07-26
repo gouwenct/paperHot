@@ -9570,6 +9570,49 @@ test("buildPaperLineage merges parallel sources, ranks against archive and cache
   }
 });
 
+test("buildPaperLineage re-ranks against the current archive on every cache hit instead of freezing inArchive status", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-lineage-fresh-archive-"));
+  try {
+    const archiveFile = path.join(tempDir, "archive.json");
+    await fs.writeFile(archiveFile, JSON.stringify({
+      mode: "archive", papers: [{ id: "local-main", doi: "10.1234/main", title: "Main paper" }]
+    }), "utf8");
+    let fetchCalls = 0;
+    const options = {
+      dataDir: tempDir, skipCache: false,
+      config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+      academicApis: { contactEmail: "" },
+      fetchImpl: async (url) => {
+        fetchCalls += 1;
+        const target = String(url instanceof URL ? url.href : url);
+        if (target.includes("semanticscholar")) {
+          if (target.includes("/references")) return { ok: true, status: 200, json: async () => ({ data: [
+            { isInfluential: false, citedPaper: { paperId: "s2-p", title: "Ref A", year: 2020, venue: "", abstract: "", citationCount: 3, externalIds: { DOI: "10.1234/w2" }, authors: [] } }
+          ] }) };
+          return { ok: true, status: 200, json: async () => ({ data: [] }) };
+        }
+        return { ok: false, status: 500, json: async () => ({}) };
+      }
+    };
+    const first = await buildPaperLineage("10.1234/main", options);
+    assert.equal(first.predecessors[0].inArchive, false, "首次抓取时 Ref A 尚未入库");
+    const callsAfterFirst = fetchCalls;
+
+    await fs.writeFile(archiveFile, JSON.stringify({
+      mode: "archive", papers: [
+        { id: "local-main", doi: "10.1234/main", title: "Main paper" },
+        { id: "local-ref", doi: "10.1234/w2", title: "Ref A" }
+      ]
+    }), "utf8");
+    const second = await buildPaperLineage("10.1234/main", options);
+    assert.equal(second.predecessors[0].inArchive, true, "缓存命中后仍需按最新论文库重新排名");
+    assert.equal(second.predecessors[0].archiveKey, "local-ref");
+    assert.equal(fetchCalls, callsAfterFirst, "第二次命中缓存，不再发外部请求");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("buildPaperLineage survives one failing source and falls back to crossref when both fail", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-lineage-fb-"));
   try {
@@ -9624,6 +9667,24 @@ test("buildPaperLineage returns empty lineage without doi and not-found for unkn
     const missing = await buildPaperLineage("totally-unknown-key", { dataDir: tempDir });
     assert.equal(missing.ok, false);
     assert.equal(missing.error, "not-found");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("buildPaperLineage returns empty lineage for an unarchived OpenAlex work id but not-found for other unknown keys", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-lineage-workid-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "archive.json"), JSON.stringify({ mode: "archive", papers: [] }), "utf8");
+    const byWorkId = await buildPaperLineage("W2241997964", { dataDir: tempDir, fetchImpl: async () => { throw new Error("不应发请求"); } });
+    assert.equal(byWorkId.ok, true);
+    assert.equal(byWorkId.reason, "no-doi");
+    assert.equal(byWorkId.center.key, "w2241997964");
+    assert.deepEqual(byWorkId.predecessors, []);
+    assert.deepEqual(byWorkId.successors, []);
+    const stillMissing = await buildPaperLineage("totally-unknown-key", { dataDir: tempDir });
+    assert.equal(stillMissing.ok, false);
+    assert.equal(stillMissing.error, "not-found");
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

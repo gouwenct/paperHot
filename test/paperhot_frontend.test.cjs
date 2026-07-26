@@ -2455,6 +2455,33 @@ test("external lineage paper joins archive through the existing candidate api", 
   assert.match(bindSource, /JSON\.stringify\(\{ paper/);
 });
 
+test("lineage archive button renders from state so async re-renders stay idempotent and cannot double-submit", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const bodySource = readNamedFunction(html, "lineagePaperBody", "renderLineagePaperView");
+  assert.match(bodySource, /lineagePaperState\.archiveStatus/, "按钮文案/禁用状态必须来自 lineagePaperState 而非只改 DOM");
+  const bindSource = readNamedFunction(html, "bindLineageArchiveButton", "loadLineagePaper");
+  assert.match(bindSource, /lineagePaperState\s*=\s*\{\s*\.\.\.lineagePaperState,\s*archiveStatus:\s*"pending"\s*\}/, "点击加入后必须把 pending 写回状态");
+  assert.match(bindSource, /archiveStatus:\s*payload\.existed\s*\?\s*"existed"\s*:\s*"added"/, "成功后必须把 added/existed 写回状态");
+  assert.match(bindSource, /lineagePaperState\.archiveStatus\s*!==\s*"idle"/, "非 idle 状态下再次点击必须被拦截，避免重复提交");
+});
+
+test("renderLineagePaper clears sidebar nav highlight and reports missing key instead of hanging on a spinner", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const renderSource = readNamedFunction(html, "renderLineagePaper", "renderPaperDetail");
+  assert.match(renderSource, /setActiveNav\(""\)/, "进入引文谱系外部论文页需清除侧边栏高亮，与 renderPaperDetail 一致");
+  assert.match(renderSource, /if\s*\(!cleanKey\)\s*\{[\s\S]*?error[\s\S]*?缺少论文标识/, "空 key 必须直接给出错误态，不能停留在 loading");
+  assert.doesNotMatch(renderSource, /if\s*\(cleanKey\)\s*loadLineagePaper/, "空 key 分支需提前 return，不应仍然尝试触发加载");
+});
+
+test("leaving a list through the lineage page still restores scroll and recent-title context", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(
+    html,
+    /\(lastRenderedPageName === "paper" \|\| lastRenderedPageName === "lineage"\) && normalized !== "paper"/,
+    "全部论文 -> #paper/X -> #lineage/Y -> 全部论文 不应丢失滚动/展开/最近标记上下文"
+  );
+});
+
 test("lineage graph styles cover light and dark themes with trail highlight", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /\.lineage-graph\s*\{[\s\S]*?width:\s*100%/);

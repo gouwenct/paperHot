@@ -7943,7 +7943,16 @@
       if (typeof renderLineagePaperView === "function" && currentPageName() === "lineage") renderLineagePaperView();
     }
 
-    let lineagePaperState = { status: "idle", key: "", paper: null, error: "", requestId: 0 };
+    let lineagePaperState = { status: "idle", key: "", paper: null, error: "", requestId: 0, archiveStatus: "idle" };
+
+    // archiveStatus 的渲染必须来自状态而非直接改 DOM，否则谱系图异步加载完成后的重渲染会
+    // 覆盖“加入中…”按钮，出现可重复点击的双提交窗口。
+    function lineageArchiveButtonLabel(archiveStatus) {
+      if (archiveStatus === "pending") return "加入中…";
+      if (archiveStatus === "added") return "已加入论文库";
+      if (archiveStatus === "existed") return "已在论文库";
+      return "＋ 加入论文库";
+    }
 
     function lineagePaperBody(paper) {
       const authors = (paper.authors || []).join(", ");
@@ -7953,6 +7962,8 @@
         paper.citationCount != null ? `被引：${paper.citationCount}` : "",
         paper.doi ? `<a href="https://doi.org/${encodeURIComponent(paper.doi)}" target="_blank" rel="noopener">DOI：${escapeHTML(paper.doi)}</a>` : ""
       ].filter(Boolean).join(" · ");
+      const archiveStatus = lineagePaperState.archiveStatus || "idle";
+      const archiveDisabled = archiveStatus !== "idle";
       return `<div class="paper-detail-page">
         <div class="paper-detail-toolbar"><a class="ghost-btn paper-detail-back" href="javascript:history.back()">← 返回</a></div>
         <article class="paper-detail">
@@ -7960,7 +7971,7 @@
           <h2 class="paper-detail-title">${escapeHTML(paper.displayTitle || paper.title || "")}</h2>
           ${authors ? `<div class="paper-authors">${escapeHTML(authors)}</div>` : ""}
           ${metaBits ? `<div class="paper-detail-meta">${metaBits}</div>` : ""}
-          <div class="paper-detail-actions"><button class="ghost-btn" data-lineage-archive>＋ 加入论文库</button></div>
+          <div class="paper-detail-actions"><button class="ghost-btn" data-lineage-archive${archiveDisabled ? " disabled" : ""}>${escapeHTML(lineageArchiveButtonLabel(archiveStatus))}</button></div>
           <section class="paper-detail-section"><h3>摘要</h3><p class="paper-detail-body">${escapeHTML(paper.summary || "暂无摘要")}</p></section>
           ${paperLineageBlock()}
         </article>
@@ -7988,9 +7999,10 @@
       if (!button) return;
       button.addEventListener("click", async () => {
         const paper = lineagePaperState.paper;
-        if (!paper || button.disabled) return;
+        if (!paper || lineagePaperState.archiveStatus !== "idle") return;
+        lineagePaperState = { ...lineagePaperState, archiveStatus: "pending" };
         button.disabled = true;
-        button.textContent = "加入中…";
+        button.textContent = lineageArchiveButtonLabel("pending");
         try {
           const response = await fetch("/api/archive/candidate", {
             method: "POST",
@@ -7999,12 +8011,14 @@
           });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const payload = await response.json();
+          lineagePaperState = { ...lineagePaperState, archiveStatus: payload.existed ? "existed" : "added" };
           showToast(payload.existed ? "这篇论文已存在于全部论文" : "已加入全部论文");
-          button.textContent = payload.existed ? "已在论文库" : "已加入论文库";
+          button.textContent = lineageArchiveButtonLabel(lineagePaperState.archiveStatus);
         } catch (error) {
+          lineagePaperState = { ...lineagePaperState, archiveStatus: "idle" };
           showToast("加入论文库失败，请稍后重试");
           button.disabled = false;
-          button.textContent = "＋ 加入论文库";
+          button.textContent = lineageArchiveButtonLabel("idle");
         }
       });
     }
@@ -8015,9 +8029,9 @@
         const payload = await response.json().catch(() => ({}));
         if (lineagePaperState.requestId !== requestId) return;
         if (!response.ok || payload.ok === false || !payload.paper) {
-          lineagePaperState = { status: "error", key, paper: null, error: payload.message || payload.error || `未找到论文（HTTP ${response.status}）`, requestId };
+          lineagePaperState = { status: "error", key, paper: null, error: payload.message || payload.error || `未找到论文（HTTP ${response.status}）`, requestId, archiveStatus: "idle" };
         } else {
-          lineagePaperState = { status: "ready", key, paper: payload.paper, error: "", requestId };
+          lineagePaperState = { status: "ready", key, paper: payload.paper, error: "", requestId, archiveStatus: "idle" };
           pushLineageTrail(payload.paper);
           const lineageRequestId = paperLineageState.requestId + 1;
           paperLineageState = { status: "loading", key: payload.paper.doi || key, data: null, error: "", requestId: lineageRequestId };
@@ -8025,7 +8039,7 @@
         }
       } catch (error) {
         if (lineagePaperState.requestId !== requestId) return;
-        lineagePaperState = { status: "error", key, paper: null, error: "无法连接本地服务", requestId };
+        lineagePaperState = { status: "error", key, paper: null, error: "无法连接本地服务", requestId, archiveStatus: "idle" };
       }
       if (currentPageName() === "lineage" && parseLocationHash().key === key) renderLineagePaperView();
     }
@@ -8033,9 +8047,15 @@
     function renderLineagePaper(key) {
       const cleanKey = String(key || "").trim();
       const requestId = lineagePaperState.requestId + 1;
-      lineagePaperState = { status: "loading", key: cleanKey, paper: null, error: "", requestId };
+      setActiveNav("");
+      if (!cleanKey) {
+        lineagePaperState = { status: "error", key: "", paper: null, error: "缺少论文标识", requestId, archiveStatus: "idle" };
+        renderLineagePaperView();
+        return;
+      }
+      lineagePaperState = { status: "loading", key: cleanKey, paper: null, error: "", requestId, archiveStatus: "idle" };
       renderLineagePaperView();
-      if (cleanKey) loadLineagePaper(cleanKey, requestId);
+      loadLineagePaper(cleanKey, requestId);
     }
 
     function renderPaperDetail(key) {
@@ -10085,7 +10105,7 @@
         return;
       }
       const normalized = ["today", "all", "favorites", "config", "tokens", "logs", "about"].includes(page) ? page : "today";
-      if (lastRenderedPageName === "paper" && normalized !== "paper") {
+      if ((lastRenderedPageName === "paper" || lastRenderedPageName === "lineage") && normalized !== "paper") {
         prepareReturnFromPaperDetail(normalized);
       }
       if (normalized !== "today" && todayAutoLoadObserver) {

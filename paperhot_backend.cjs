@@ -92,6 +92,7 @@ const OPENALEX_LINEAGE_SELECT = "id,doi,title,display_name,publication_year,publ
 const LINEAGE_CACHE_DIR_NAME = "lineage";
 const LINEAGE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LINEAGE_TARGET_COUNT = 6;
+const LINEAGE_CACHE_VERSION = 2;
 const CROSSREF_WORKS_ENDPOINT = "https://api.crossref.org/works";
 const DEFAULT_ACADEMIC_APIS_CONFIG = { contactEmail: "" };
 const DEFAULT_OPENALEX_CONFIG = {
@@ -892,7 +893,7 @@ async function readLineageCache(doi, dataDir, ttlMs) {
   try {
     const file = path.join(dataDir, LINEAGE_CACHE_DIR_NAME, lineageCacheFileName(doi));
     const payload = JSON.parse(await fs.readFile(file, "utf8"));
-    if (payload?.ok && Date.now() - Date.parse(payload.fetchedAt || 0) < ttlMs) return payload;
+    if (payload?.ok && payload.version === LINEAGE_CACHE_VERSION && Date.now() - Date.parse(payload.fetchedAt || 0) < ttlMs) return payload;
   } catch {
     // 缓存缺失或损坏时忽略，回落到重新拉取
   }
@@ -926,45 +927,54 @@ async function buildPaperLineage(key, options = {}) {
   const lookup = await readPaperByKey(key, options);
   const paper = lookup?.ok ? lookup.paper : null;
   const doi = paper ? normalizeDoi(paper.doi || "") : normalizeDoi(key);
-  if (!paper && !/^10\./.test(doi)) return { ok: false, error: "not-found", message: "未找到论文" };
+  const isOpenAlexWorkId = !paper && !/^10\./.test(doi) && /^w\d+$/i.test(String(key || "").trim());
+  if (!paper && !/^10\./.test(doi) && !isOpenAlexWorkId) return { ok: false, error: "not-found", message: "未找到论文" };
   const centerKey = paper ? String(paper.id || paper.doi || paper.url || paper.title || "").trim() : doi;
-  const center = { title: compactText(paper?.displayTitle || paper?.title || ""), doi, key: centerKey };
-  if (!doi) {
+  const center = { title: compactText(paper?.displayTitle || paper?.title || ""), doi: isOpenAlexWorkId ? "" : doi, key: centerKey };
+  if (!doi || isOpenAlexWorkId) {
     return { ok: true, center, predecessors: [], successors: [], sources: [], reason: "no-doi", fetchedAt: new Date().toISOString() };
   }
-  if (!options.skipCache) {
-    const cached = await readLineageCache(doi, dataDir, LINEAGE_CACHE_TTL_MS);
-    if (cached) return cached;
-  }
-  const [openAlex, semanticScholar] = (await Promise.allSettled([
-    fetchOpenAlexLineage(doi, options),
-    fetchSemanticScholarLineage(doi, options)
-  ])).map(result => (result.status === "fulfilled" ? result.value : null));
-  const sources = [];
-  if (openAlex) sources.push("openalex");
-  if (semanticScholar) sources.push("semanticscholar");
-  if (!center.title && openAlex?.center?.title) center.title = openAlex.center.title;
-  let predecessorLists = [openAlex?.predecessors || [], semanticScholar?.predecessors || []];
-  if (!openAlex && !semanticScholar) {
-    const crossref = await fetchCrossrefLineagePredecessors(doi, options);
-    if (crossref) {
-      predecessorLists = [crossref];
-      sources.push("crossref");
+  let rawPayload = !options.skipCache ? await readLineageCache(doi, dataDir, LINEAGE_CACHE_TTL_MS) : null;
+  if (!rawPayload) {
+    const [openAlex, semanticScholar] = (await Promise.allSettled([
+      fetchOpenAlexLineage(doi, options),
+      fetchSemanticScholarLineage(doi, options)
+    ])).map(result => (result.status === "fulfilled" ? result.value : null));
+    const sources = [];
+    if (openAlex) sources.push("openalex");
+    if (semanticScholar) sources.push("semanticscholar");
+    if (!center.title && openAlex?.center?.title) center.title = openAlex.center.title;
+    let predecessorLists = [openAlex?.predecessors || [], semanticScholar?.predecessors || []];
+    if (!openAlex && !semanticScholar) {
+      const crossref = await fetchCrossrefLineagePredecessors(doi, options);
+      if (crossref) {
+        predecessorLists = [crossref];
+        sources.push("crossref");
+      }
+    }
+    rawPayload = {
+      ok: true,
+      version: LINEAGE_CACHE_VERSION,
+      center,
+      predecessors: mergeLineageNodes(predecessorLists),
+      successors: mergeLineageNodes([openAlex?.successors || [], semanticScholar?.successors || []]),
+      sources,
+      fetchedAt: new Date().toISOString()
+    };
+    if (sources.length) {
+      await writeJsonFile(path.join(dataDir, LINEAGE_CACHE_DIR_NAME, lineageCacheFileName(doi)), rawPayload);
     }
   }
+  // 排名依赖论文库归档状态，每次请求都重新计算，避免缓存冻结 inArchive 归属
   const archive = await readPaperArchive(dataDir);
-  const payload = {
+  return {
     ok: true,
-    center,
-    predecessors: rankLineageNodes(mergeLineageNodes(predecessorLists), archive.papers, LINEAGE_TARGET_COUNT),
-    successors: rankLineageNodes(mergeLineageNodes([openAlex?.successors || [], semanticScholar?.successors || []]), archive.papers, LINEAGE_TARGET_COUNT),
-    sources,
-    fetchedAt: new Date().toISOString()
+    center: rawPayload.center,
+    predecessors: rankLineageNodes(rawPayload.predecessors, archive.papers, LINEAGE_TARGET_COUNT),
+    successors: rankLineageNodes(rawPayload.successors, archive.papers, LINEAGE_TARGET_COUNT),
+    sources: rawPayload.sources,
+    fetchedAt: rawPayload.fetchedAt
   };
-  if (sources.length) {
-    await writeJsonFile(path.join(dataDir, LINEAGE_CACHE_DIR_NAME, lineageCacheFileName(doi)), payload);
-  }
-  return payload;
 }
 
 function lineagePaperRecord(node) {
