@@ -2387,6 +2387,20 @@
       color: #0b94b2;
       text-decoration: underline;
     }
+    .paper-lineage-section { overflow-x: auto; }
+    .lineage-graph { width: 100%; min-width: 560px; height: auto; display: block; }
+    .lineage-graph line { stroke: #c9d6e2; stroke-width: 1.2; }
+    .lineage-row-label { font-size: 11px; fill: #65758b; }
+    .lineage-node circle { fill: #0b94b2; }
+    .lineage-node text { font-size: 11px; fill: #65758b; }
+    .lineage-node-external circle { fill: #ffffff; stroke: #0b94b2; stroke-width: 1.5; }
+    .lineage-node-center circle { fill: #1f2a40; }
+    .lineage-node-center text { font-weight: 600; fill: #1f2a40; }
+    .lineage-node-trail circle { stroke: #d4a017; stroke-width: 2.5; }
+    .lineage-influential { fill: #d4a017; }
+    .lineage-node-link { cursor: pointer; text-decoration: none; }
+    .lineage-node-link:hover circle { stroke: #0b94b2; stroke-width: 2.5; }
+    .lineage-tooltip { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e7eef3; font-size: 12px; line-height: 1.6; color: #65758b; min-height: 52px; }
     html[data-theme="dark"] body {
       color: #d7e0ec;
       background: linear-gradient(115deg, #10161f 0%, #121925 43%, #15131f 100%);
@@ -2526,6 +2540,14 @@
     }
     html[data-theme="dark"] .divider,
     html[data-theme="dark"] .paper-detail-section { border-color: #334456; }
+    html[data-theme="dark"] .lineage-graph line { stroke: #334456; }
+    html[data-theme="dark"] .lineage-row-label,
+    html[data-theme="dark"] .lineage-node text { fill: #9aabbf; }
+    html[data-theme="dark"] .lineage-node circle { fill: #4ec7e0; }
+    html[data-theme="dark"] .lineage-node-external circle { fill: #10161f; stroke: #4ec7e0; }
+    html[data-theme="dark"] .lineage-node-center circle { fill: #e8eef7; }
+    html[data-theme="dark"] .lineage-node-center text { fill: #e8eef7; }
+    html[data-theme="dark"] .lineage-tooltip { border-top-color: #334456; color: #a7b6c9; }
     html[data-theme="dark"] .timeline-date,
     html[data-theme="dark"] .timeline-source-type { color: #8c9db2; }
     html[data-theme="dark"] .timeline-time { color: #e8eef7; }

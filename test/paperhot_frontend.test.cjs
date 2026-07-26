@@ -2454,3 +2454,11 @@ test("external lineage paper joins archive through the existing candidate api", 
   assert.match(bindSource, /\/api\/archive\/candidate/);
   assert.match(bindSource, /JSON\.stringify\(\{ paper/);
 });
+
+test("lineage graph styles cover light and dark themes with trail highlight", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /\.lineage-graph\s*\{[\s\S]*?width:\s*100%/);
+  assert.match(html, /\.lineage-node-trail\s+circle\s*\{[\s\S]*?stroke:\s*#d4a017/);
+  assert.match(html, /html\[data-theme="dark"\][^\{]*\.lineage-graph\s+line/);
+  assert.match(html, /html\[data-theme="dark"\][^\{]*\.lineage-tooltip/);
+});
