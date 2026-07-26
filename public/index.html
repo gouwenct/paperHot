@@ -7689,6 +7689,7 @@
             <span class="match-pill">${escapeHTML(paperKeywordMatchLabel(paper))}</span>
             ${paperBibliography(paper)}
           </div>
+          ${paperLineageBlock()}
         </article>
       `;
     }
@@ -7711,6 +7712,7 @@
         );
         return;
       }
+      pushLineageTrail(paper);
       mainContent.innerHTML = pageShell(
         "论文详情",
         "适合连续阅读的单篇论文视图；收藏、标星、已读和短标题沿用现有本地状态。",
@@ -7731,6 +7733,7 @@
       document.querySelectorAll("[data-save-manual-abstract]").forEach(button => {
         button.addEventListener("click", () => saveManualPaperAbstract(button));
       });
+      bindLineageTooltips();
     }
 
     async function loadPaperDetail(key, requestId) {
@@ -7780,6 +7783,140 @@
       if (currentPageName() === "paper" && parseLocationHash().key === key) renderPaperDetailView();
     }
 
+    let paperLineageState = { status: "idle", key: "", data: null, error: "", requestId: 0 };
+    const paperLineageTrail = []; // session 内追溯路径，不写 localStorage、不进导出
+
+    function lineageNodeHref(node) {
+      if (node.inArchive && node.archiveKey) return `#paper/${encodePaperRouteKey(node.archiveKey)}`;
+      const external = node.doi || node.openAlexId || "";
+      return external ? `#lineage/${encodePaperRouteKey(external)}` : "";
+    }
+
+    function lineageTrailKeys() {
+      return new Set(paperLineageTrail.map(entry => entry.doi).filter(Boolean));
+    }
+
+    function pushLineageTrail(paper) {
+      const doi = String(paper?.doi || "").trim().toLowerCase().replace(/^https?:\/\/(?:dx\.)?doi\.org\//, "");
+      const title = paper?.displayTitle || paper?.title || "";
+      if (!doi && !title) return;
+      const last = paperLineageTrail[paperLineageTrail.length - 1];
+      if (last && last.doi === doi && last.title === title) return;
+      paperLineageTrail.push({ doi, title });
+      if (paperLineageTrail.length > 20) paperLineageTrail.shift();
+    }
+
+    function lineageNodeMarkup(entry, index, group, trail) {
+      const { node, x, y } = entry;
+      const href = lineageNodeHref(node);
+      const classes = [
+        "lineage-node",
+        node.inArchive ? "lineage-node-local" : "lineage-node-external",
+        node.doi && trail.has(node.doi) ? "lineage-node-trail" : ""
+      ].filter(Boolean).join(" ");
+      const title = String(node.title || "");
+      const label = title.length > 26 ? `${title.slice(0, 25)}…` : title;
+      const influentialMark = node.isInfluential
+        ? `<circle class="lineage-influential" cx="${x + 11}" cy="${y - 9}" r="3"></circle>`
+        : "";
+      const body = `<g class="${classes}" data-lineage-node="${group}-${index}">`
+        + `<circle cx="${x}" cy="${y}" r="8"></circle>${influentialMark}`
+        + `<text x="${x}" y="${y + 22}" text-anchor="middle">${escapeHTML(label)}</text></g>`;
+      return href ? `<a href="${href}" class="lineage-node-link">${body}</a>` : body;
+    }
+
+    function lineageGraphSvg(data) {
+      const width = 720;
+      const predY = 60;
+      const centerY = 170;
+      const succY = 280;
+      const centerX = width / 2;
+      const trail = lineageTrailKeys();
+      const place = (nodes, y) => nodes.map((node, index) => ({ node, x: Math.round(width * (index + 1) / (nodes.length + 1)), y }));
+      const preds = place(data.predecessors || [], predY);
+      const succs = place(data.successors || [], succY);
+      const lines = [
+        ...preds.map(p => `<line x1="${p.x}" y1="${p.y + 10}" x2="${centerX}" y2="${centerY - 12}"></line>`),
+        ...succs.map(p => `<line x1="${centerX}" y1="${centerY + 12}" x2="${p.x}" y2="${p.y - 10}"></line>`)
+      ].join("");
+      const centerTitle = String(data.center?.title || "");
+      const centerLabel = centerTitle.length > 30 ? `${centerTitle.slice(0, 29)}…` : centerTitle;
+      const centerMarkup = `<g class="lineage-node lineage-node-center">`
+        + `<circle cx="${centerX}" cy="${centerY}" r="10"></circle>`
+        + `<text x="${centerX}" y="${centerY + 26}" text-anchor="middle">${escapeHTML(centerLabel)}</text></g>`;
+      return `<svg class="lineage-graph" viewBox="0 0 ${width} 340" role="img" aria-label="引文谱系图">`
+        + `<text class="lineage-row-label" x="12" y="${predY - 24}">前置论文</text>`
+        + `<text class="lineage-row-label" x="12" y="${succY + 40}">后续论文</text>`
+        + lines
+        + preds.map((entry, index) => lineageNodeMarkup(entry, index, "pred", trail)).join("")
+        + centerMarkup
+        + succs.map((entry, index) => lineageNodeMarkup(entry, index, "succ", trail)).join("")
+        + `</svg>`;
+    }
+
+    function lineageTooltipHtml(node) {
+      const bits = [
+        `<strong>${escapeHTML(node.title || "")}</strong>`,
+        [node.journal, node.year, node.citationCount != null ? `被引 ${node.citationCount}` : "", node.isInfluential ? "高影响力引用" : "", node.inArchive ? "已在论文库" : "外部论文"]
+          .filter(Boolean).map(escapeHTML).join(" · ")
+      ];
+      const abstractText = String(node.abstract || "").trim();
+      if (abstractText) bits.push(escapeHTML(abstractText.length > 180 ? `${abstractText.slice(0, 179)}…` : abstractText));
+      return bits.filter(Boolean).join("<br>");
+    }
+
+    function paperLineageBlock() {
+      const state = paperLineageState;
+      let body = "";
+      if (state.status === "idle" || state.status === "loading") {
+        body = `<div class="empty">正在加载引文谱系…</div>`;
+      } else if (state.status === "error") {
+        body = `<div class="empty">${escapeHTML(state.error || "谱系加载失败")}</div>`;
+      } else if (!state.data || (!(state.data.predecessors || []).length && !(state.data.successors || []).length)) {
+        const reason = state.data?.reason === "no-doi" ? "（该论文缺少 DOI）" : "";
+        body = `<div class="empty">暂无谱系数据${reason}</div>`;
+      } else {
+        body = lineageGraphSvg(state.data)
+          + `<div class="lineage-tooltip" data-lineage-tooltip>悬停节点查看论文信息，点击节点进入详情。</div>`;
+      }
+      return `<section class="paper-detail-section paper-lineage-section"><h3>引文谱系</h3>${body}</section>`;
+    }
+
+    function bindLineageTooltips() {
+      const tooltip = document.querySelector("[data-lineage-tooltip]");
+      if (!tooltip || !paperLineageState.data) return;
+      const groups = { pred: paperLineageState.data.predecessors || [], succ: paperLineageState.data.successors || [] };
+      document.querySelectorAll("[data-lineage-node]").forEach(element => {
+        element.addEventListener("mouseenter", () => {
+          const [group, index] = String(element.dataset.lineageNode || "").split("-");
+          const node = (groups[group] || [])[Number(index)];
+          if (node) tooltip.innerHTML = lineageTooltipHtml(node);
+        });
+      });
+    }
+
+    async function loadPaperLineage(key, requestId) {
+      if (location.protocol === "file:") {
+        paperLineageState = { status: "error", key, data: null, error: "请通过本地服务访问后加载谱系", requestId };
+        return;
+      }
+      try {
+        const response = await fetch(`/api/lineage?key=${encodeURIComponent(key)}`);
+        const payload = await response.json().catch(() => ({}));
+        if (paperLineageState.requestId !== requestId) return;
+        if (!response.ok || payload.ok === false) {
+          paperLineageState = { status: "error", key, data: null, error: payload.message || payload.error || `谱系加载失败（HTTP ${response.status}）`, requestId };
+        } else {
+          paperLineageState = { status: "ready", key, data: payload, error: "", requestId };
+        }
+      } catch (error) {
+        if (paperLineageState.requestId !== requestId) return;
+        paperLineageState = { status: "error", key, data: null, error: "无法连接本地服务，谱系加载失败", requestId };
+      }
+      if (currentPageName() === "paper" && parseLocationHash().key === key) renderPaperDetailView();
+      if (typeof renderLineagePaperView === "function" && currentPageName() === "lineage") renderLineagePaperView();
+    }
+
     function renderPaperDetail(key) {
       const cleanKey = String(key || "").trim();
       const requestId = paperDetailState.requestId + 1;
@@ -7811,6 +7948,9 @@
           error: "",
           requestId
         };
+      const lineageRequestId = paperLineageState.requestId + 1;
+      paperLineageState = { status: "loading", key: cleanKey, data: null, error: "", requestId: lineageRequestId };
+      loadPaperLineage(cleanKey, lineageRequestId);
       renderPaperDetailView();
       loadPaperDetail(cleanKey, requestId);
     }

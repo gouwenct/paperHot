@@ -2401,3 +2401,30 @@ test("frontend embedded script has valid syntax", async () => {
     }
   });
 });
+
+test("paper detail renders lineage section with graph, tooltip and async load", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  assert.match(html, /\/api\/lineage\?key=/);
+  assert.match(html, /function paperLineageBlock\(/);
+  assert.match(html, /function lineageGraphSvg\(/);
+  assert.match(html, /function loadPaperLineage\(/);
+  assert.match(html, /paper-lineage-section/);
+  assert.match(html, /引文谱系/);
+  assert.match(html, /暂无谱系数据/);
+  assert.match(html, /data-lineage-tooltip/);
+  assert.doesNotMatch(html, /localStorage[^\n]*paperLineageTrail/, "追溯路径是 session 状态，不得持久化");
+});
+
+test("lineageNodeHref routes archive nodes to paper detail and external nodes to lineage page", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const hrefSource = readNamedFunction(html, "lineageNodeHref", "lineageTrailKeys");
+  const api = new Function(`
+    function encodePaperRouteKey(value) { return encodeURIComponent(String(value || "").trim()); }
+    ${hrefSource}
+    return { lineageNodeHref };
+  `)();
+  assert.equal(api.lineageNodeHref({ inArchive: true, archiveKey: "10.1/a", doi: "10.1/a" }), `#paper/${encodeURIComponent("10.1/a")}`);
+  assert.equal(api.lineageNodeHref({ inArchive: false, archiveKey: "", doi: "10.1/b", openAlexId: "W2" }), `#lineage/${encodeURIComponent("10.1/b")}`);
+  assert.equal(api.lineageNodeHref({ inArchive: false, archiveKey: "", doi: "", openAlexId: "W3" }), `#lineage/W3`);
+  assert.equal(api.lineageNodeHref({ inArchive: false, archiveKey: "", doi: "", openAlexId: "" }), "");
+});
