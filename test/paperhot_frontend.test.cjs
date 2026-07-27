@@ -2471,6 +2471,19 @@ test("lineage archive button renders from state so async re-renders stay idempot
   assert.match(catchBranch, /renderLineagePaperView\(\)/, "失败分支回退 idle 后也必须重渲染");
 });
 
+test("lineage archive button ignores late responses after navigating to another lineage paper", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const identitySource = readNamedFunction(html, "lineagePaperIdentity", "bindLineageArchiveButton");
+  assert.match(identitySource, /paper\?\.id \|\| paper\?\.doi \|\| paper\?\.openAlexId \|\| paper\?\.url \|\| paper\?\.title/, "归档请求必须使用稳定论文身份判断晚到响应是否仍属于当前页");
+  const bindSource = readNamedFunction(html, "bindLineageArchiveButton", "loadLineagePaper");
+  assert.match(bindSource, /const requestKey = lineagePaperState\.key/, "点击时必须捕获当前 lineage page key");
+  assert.match(bindSource, /const requestId = lineagePaperState\.requestId/, "点击时必须捕获当前 page requestId");
+  assert.match(bindSource, /const paperIdentity = lineagePaperIdentity\(paper\)/, "点击时必须捕获当前论文稳定身份");
+  assert.match(bindSource, /currentPageName\(\) === "lineage"[\s\S]*parseLocationHash\(\)\.key === requestKey[\s\S]*lineagePaperState\.requestId === requestId[\s\S]*lineagePaperIdentity\(lineagePaperState\.paper\) === paperIdentity/, "完成异步归档前必须确认仍停留在同一个外部论文页");
+  assert.match(bindSource, /const response = await fetch[\s\S]*if \(!isCurrentArchiveRequest\(\)\) return;[\s\S]*const payload = await response\.json\(\)[\s\S]*if \(!isCurrentArchiveRequest\(\)\) return;[\s\S]*lineagePaperState = \{ \.\.\.lineagePaperState, archiveStatus: payload\.existed \? "existed" : "added" \}/, "fetch 和 JSON await 之后、写成功状态前都必须阻止晚到请求污染新页面");
+  assert.match(bindSource, /catch \(error\) \{[\s\S]*if \(!isCurrentArchiveRequest\(\)\) return;[\s\S]*archiveStatus: "idle"/, "失败分支也不能把新页面 pending 状态重置为 idle");
+});
+
 test("renderLineagePaper clears sidebar nav highlight and reports missing key instead of hanging on a spinner", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   const renderSource = readNamedFunction(html, "renderLineagePaper", "renderPaperDetail");

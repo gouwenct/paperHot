@@ -938,16 +938,28 @@ async function enrichLineageNodesWithoutIdentifiers(nodes, options = {}) {
 function rankLineageNodes(nodes, archivePapers, limit = 6) {
   const archiveByDoi = new Map();
   const archiveByTitle = new Map();
+  const paperYear = paper => Number.parseInt(paper?.year || String(paper?.published || "").slice(0, 4), 10) || null;
+  const yearsCompatible = (left, right) => !left || !right || left === right;
   (archivePapers || []).forEach(paper => {
     const doi = normalizeDoi(paper?.doi);
     if (doi && !archiveByDoi.has(doi)) archiveByDoi.set(doi, paper);
     const titleKey = normalizedTitleKey(paper?.title);
-    if (titleKey && !archiveByTitle.has(titleKey)) archiveByTitle.set(titleKey, paper);
+    if (titleKey) {
+      const bucket = archiveByTitle.get(titleKey) || [];
+      bucket.push(paper);
+      archiveByTitle.set(titleKey, bucket);
+    }
   });
   const decorated = (nodes || []).map(node => {
-    const match = (node.doi && archiveByDoi.get(node.doi))
-      || archiveByTitle.get(normalizedTitleKey(node.title))
-      || null;
+    const nodeDoi = normalizeDoi(node?.doi);
+    const doiMatch = nodeDoi ? archiveByDoi.get(nodeDoi) : null;
+    const titleCandidates = archiveByTitle.get(normalizedTitleKey(node.title)) || [];
+    const titleMatch = titleCandidates.find(paper => {
+      const paperDoi = normalizeDoi(paper?.doi);
+      if (nodeDoi && paperDoi) return false;
+      return yearsCompatible(node.year || null, paperYear(paper));
+    }) || null;
+    const match = doiMatch || titleMatch || null;
     const archiveKey = match ? String(match.id || match.doi || match.url || match.title || "").trim() : "";
     return { ...node, inArchive: Boolean(match), archiveKey };
   });
@@ -1030,8 +1042,8 @@ async function buildPaperLineage(key, options = {}) {
     // 无 DOI 又无 OpenAlex Work ID 的节点先尝试跨信源补全，补不到再排除，避免伪条目挤占席位
     predecessors = await enrichLineageNodesWithoutIdentifiers(predecessors, options);
     successors = await enrichLineageNodesWithoutIdentifiers(successors, options);
-    predecessors = predecessors.filter(node => node.doi || node.openAlexId);
-    successors = successors.filter(node => node.doi || node.openAlexId);
+    predecessors = mergeLineageNodes([predecessors]).filter(node => node.doi || node.openAlexId);
+    successors = mergeLineageNodes([successors]).filter(node => node.doi || node.openAlexId);
     rawPayload = {
       ok: true,
       version: LINEAGE_CACHE_VERSION,

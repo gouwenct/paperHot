@@ -9503,7 +9503,7 @@ test("rankLineageNodes keeps all archive papers first then fills with influentia
   ];
   const archive = [
     { id: "paper-a", doi: "https://doi.org/10.1/A", title: "In archive low cites" },
-    { doi: "", url: "https://x.test/t", title: "Archive Matched By Title" }
+    { doi: "", url: "https://x.test/t", title: "Archive Matched By Title", year: 2020 }
   ];
   const ranked = rankLineageNodes(nodes, archive, 6);
   assert.equal(ranked.length, 6);
@@ -9513,6 +9513,29 @@ test("rankLineageNodes keeps all archive papers first then fills with influentia
   assert.equal(ranked[2].title, "External influential", "isInfluential 优先于被引次数");
   assert.equal(ranked[3].title, "External high cites");
   assert.equal(ranked[4].title, "External mid");
+});
+
+test("rankLineageNodes only uses title archive fallback when identifiers or years are compatible", () => {
+  const node = (doi, title, year) => ({ doi, openAlexId: "", semanticScholarId: "", title, year, published: "", journal: "", abstract: "", citationCount: 1, authors: [], isInfluential: false });
+  const ranked = rankLineageNodes([
+    node("10.1/external", "Shared Generic Title", 2020),
+    node("", "Same Title Different Year", 2021),
+    node("", "Valid Title Fallback", 2022),
+    node("10.1/known-node", "Archive Missing Identifier", 2023),
+    node("", "Missing Year Can Fallback", null)
+  ], [
+    { id: "archive-different-doi", doi: "10.1/archive", title: "Shared Generic Title", year: 2020 },
+    { id: "archive-different-year", doi: "", title: "Same Title Different Year", year: 2019 },
+    { id: "archive-valid-title", doi: "", title: "Valid Title Fallback", year: 2022 },
+    { id: "archive-missing-identifier", doi: "", title: "Archive Missing Identifier", year: 2023 },
+    { id: "archive-missing-year", doi: "", title: "Missing Year Can Fallback", year: 2017 }
+  ], 10);
+  const byTitle = new Map(ranked.map(entry => [entry.title, entry]));
+  assert.equal(byTitle.get("Shared Generic Title").inArchive, false, "两个非空 DOI 不同时不能按标题误配本地论文");
+  assert.equal(byTitle.get("Same Title Different Year").inArchive, false, "双方年份非空且不同时不能按标题误配");
+  assert.equal(byTitle.get("Valid Title Fallback").archiveKey, "archive-valid-title", "缺少标识且标题/年份兼容时仍可回退匹配");
+  assert.equal(byTitle.get("Archive Missing Identifier").archiveKey, "archive-missing-identifier", "归档侧缺少 DOI 时可用标题/年份回退");
+  assert.equal(byTitle.get("Missing Year Can Fallback").archiveKey, "archive-missing-year", "一侧年份缺失时保留合理标题回退");
 });
 
 test("buildPaperLineage merges parallel sources, ranks against archive and caches to disk", async () => {
@@ -10052,6 +10075,43 @@ test("buildPaperLineage enriches predecessors lacking identifiers when possible 
       result.predecessors.some(node => node.doi === "10.1/real-foundation"),
       "真正的带 DOI 前置论文不应被误删"
     );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("buildPaperLineage re-merges duplicate DOI nodes after identifier enrichment", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-lineage-enrich-dedupe-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "archive.json"), JSON.stringify({ mode: "archive", papers: [] }), "utf8");
+    const title = "Rescued duplicate foundational paper";
+    const options = {
+      dataDir: tempDir, skipCache: true,
+      config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+      academicApis: { contactEmail: "" },
+      fetchImpl: async (url) => {
+        const target = String(url instanceof URL ? url.href : url);
+        if (target.includes("semanticscholar")) {
+          if (target.includes("/references")) return { ok: true, status: 200, json: async () => ({ data: [
+            { isInfluential: false, citedPaper: { paperId: "s2-identified", title, year: 2015, venue: "", abstract: "short", citationCount: 5, externalIds: { DOI: "10.7/rescued-duplicate" }, authors: [] } },
+            { isInfluential: true, citedPaper: { paperId: "s2-missing", title, year: 2015, venue: "Nature", abstract: "a longer abstract from semantic scholar", citationCount: 99, externalIds: {}, authors: [{ name: "D. Author" }] } }
+          ] }) };
+          return { ok: true, status: 200, json: async () => ({ data: [] }) };
+        }
+        if (target.includes("title.search")) return { ok: true, status: 200, json: async () => ({ results: [] }) };
+        if (target.includes("query.bibliographic")) return { ok: true, status: 200, json: async () => ({ message: { items: [
+          { DOI: "10.7/rescued-duplicate", title: [title], "container-title": ["Nature"], author: [{ given: "D.", family: "Author" }], published: { "date-parts": [[2015, 6, 1]] } }
+        ] } }) };
+        return { ok: false, status: 500, json: async () => ({}) };
+      }
+    };
+    const result = await buildPaperLineage("10.1234/enrich-dedupe-main", options);
+    const matches = result.predecessors.filter(node => node.doi === "10.7/rescued-duplicate");
+    assert.equal(matches.length, 1, "补全到已有 DOI 后必须再次合并，避免缓存两个重复节点");
+    assert.equal(matches[0].citationCount, 99, "再次合并后应保留补全前无标识节点的更高被引数");
+    assert.equal(matches[0].abstract, "a longer abstract from semantic scholar", "再次合并后应保留更完整摘要");
+    assert.deepEqual(matches[0].authors, ["D. Author"], "再次合并后应保留更完整作者字段");
+    assert.equal(matches[0].journal, "Nature");
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

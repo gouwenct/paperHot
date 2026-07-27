@@ -7994,12 +7994,23 @@
       bindLineageTooltips();
     }
 
+    function lineagePaperIdentity(paper) {
+      return String(paper?.id || paper?.doi || paper?.openAlexId || paper?.url || paper?.title || "").trim();
+    }
+
     function bindLineageArchiveButton() {
       const button = document.querySelector("[data-lineage-archive]");
       if (!button) return;
       button.addEventListener("click", async () => {
         const paper = lineagePaperState.paper;
         if (!paper || lineagePaperState.archiveStatus !== "idle") return;
+        const requestKey = lineagePaperState.key;
+        const requestId = lineagePaperState.requestId;
+        const paperIdentity = lineagePaperIdentity(paper);
+        const isCurrentArchiveRequest = () => currentPageName() === "lineage"
+          && parseLocationHash().key === requestKey
+          && lineagePaperState.requestId === requestId
+          && lineagePaperIdentity(lineagePaperState.paper) === paperIdentity;
         lineagePaperState = { ...lineagePaperState, archiveStatus: "pending" };
         button.disabled = true;
         button.textContent = lineageArchiveButtonLabel("pending");
@@ -8009,14 +8020,17 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ paper })
           });
+          if (!isCurrentArchiveRequest()) return;
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const payload = await response.json();
+          if (!isCurrentArchiveRequest()) return;
           lineagePaperState = { ...lineagePaperState, archiveStatus: payload.existed ? "existed" : "added" };
           showToast(payload.existed ? "这篇论文已存在于全部论文" : "已加入全部论文");
           // 谱系图异步加载可能已把整个视图重渲染，捕获的 button 引用会失效；
           // 重渲染一次让按钮按最新 archiveStatus 重新生成，而不是写入可能已过期的 DOM 节点。
           renderLineagePaperView();
         } catch (error) {
+          if (!isCurrentArchiveRequest()) return;
           lineagePaperState = { ...lineagePaperState, archiveStatus: "idle" };
           showToast("加入论文库失败，请稍后重试");
           renderLineagePaperView();
