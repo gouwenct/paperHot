@@ -92,7 +92,8 @@ const OPENALEX_LINEAGE_SELECT = "id,doi,title,display_name,publication_year,publ
 const LINEAGE_CACHE_DIR_NAME = "lineage";
 const LINEAGE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LINEAGE_TARGET_COUNT = 6;
-const LINEAGE_CACHE_VERSION = 2;
+const LINEAGE_TITLE_LOOKUP_LIMIT = 10;
+const LINEAGE_CACHE_VERSION = 3;
 const CROSSREF_WORKS_ENDPOINT = "https://api.crossref.org/works";
 const DEFAULT_ACADEMIC_APIS_CONFIG = { contactEmail: "" };
 const DEFAULT_OPENALEX_CONFIG = {
@@ -862,6 +863,78 @@ function mergeLineageNodes(lists) {
   return [...byKey.values()];
 }
 
+// 谱系节点既无 DOI 又无 OpenAlex Work ID 时（例如 Semantic Scholar 的 PDF 解析伪条目），
+// 尝试用标题去 OpenAlex 和 Crossref 并行反查；只接受标题严格匹配且带 DOI 的结果，补不到返回 null。
+async function lookupLineageNodeByTitle(title, options = {}) {
+  const cleanTitle = compactText(title);
+  const titleKey = normalizedTitleKey(cleanTitle);
+  if (!titleKey) return null;
+
+  const lookupOpenAlex = async () => {
+    const { config, fetchImpl, headers } = await openAlexRequestOptions(options);
+    const endpoint = String(config.endpoint || DEFAULT_OPENALEX_CONFIG.endpoint).replace(/\/$/, "");
+    const url = new URL(endpoint);
+    url.searchParams.set("filter", `title.search:${cleanTitle}`);
+    url.searchParams.set("per-page", "3");
+    url.searchParams.set("select", OPENALEX_LINEAGE_SELECT);
+    if (config.apiKey) url.searchParams.set("api_key", config.apiKey);
+    const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(20000) });
+    if (!response.ok) throw new Error(`OpenAlex 标题反查失败：HTTP ${response.status}`);
+    const payload = await response.json();
+    const match = (payload?.results || [])
+      .map(lineageNodeFromOpenAlex)
+      .find(node => node?.doi && normalizedTitleKey(node.title) === titleKey);
+    return match || null;
+  };
+
+  const lookupCrossref = async () => {
+    const item = await fetchCrossrefWorkByTitle({ title: cleanTitle }, options);
+    const doi = normalizeDoi(item?.doi);
+    if (!doi || normalizedTitleKey(item.title) !== titleKey) return null;
+    // Crossref 的 published 可能只精确到年或月，只有完整日期才当作发表日期，避免伪造精度
+    const crossrefPublished = String(item.published || "");
+    return {
+      doi, openAlexId: "", semanticScholarId: "",
+      title: item.title || cleanTitle,
+      year: Number.parseInt(crossrefPublished.slice(0, 4), 10) || null,
+      published: /^\d{4}-\d{2}-\d{2}$/.test(crossrefPublished) ? crossrefPublished : "",
+      journal: item.journal || "",
+      abstract: item.abstract || "",
+      citationCount: null,
+      authors: Array.isArray(item.authors) ? item.authors : [],
+      isInfluential: false
+    };
+  };
+
+  const [openAlexResult, crossrefResult] = await Promise.allSettled([lookupOpenAlex(), lookupCrossref()]);
+  const openAlexNode = openAlexResult.status === "fulfilled" ? openAlexResult.value : null;
+  const crossrefNode = crossrefResult.status === "fulfilled" ? crossrefResult.value : null;
+  if (!openAlexNode && !crossrefNode) return null;
+  const merged = mergeLineageNodes([[openAlexNode].filter(Boolean), [crossrefNode].filter(Boolean)])[0] || null;
+  return merged?.doi ? merged : null;
+}
+
+// 对既无 DOI 又无 OpenAlex Work ID 的节点补全后再决定去留：补到 DOI 就合并保留，补不到留给调用方过滤。
+async function enrichLineageNodesWithoutIdentifiers(nodes, options = {}) {
+  const list = Array.isArray(nodes) ? nodes : [];
+  const targets = list
+    .map((node, index) => ({ node, index }))
+    .filter(({ node }) => node && !node.doi && !node.openAlexId && node.title)
+    .slice(0, LINEAGE_TITLE_LOOKUP_LIMIT);
+  if (!targets.length) return list;
+  const lookups = await Promise.all(targets.map(async ({ node, index }) => ({
+    index,
+    found: await lookupLineageNodeByTitle(node.title, options).catch(() => null)
+  })));
+  const foundByIndex = new Map(lookups.filter(entry => entry.found).map(entry => [entry.index, entry.found]));
+  return list.map((node, index) => {
+    const found = foundByIndex.get(index);
+    if (!found) return node;
+    const patchedNode = { ...node, doi: found.doi, openAlexId: found.openAlexId || node.openAlexId };
+    return mergeLineageNodes([[patchedNode], [found]])[0];
+  });
+}
+
 function rankLineageNodes(nodes, archivePapers, limit = 6) {
   const archiveByDoi = new Map();
   const archiveByTitle = new Map();
@@ -952,12 +1025,19 @@ async function buildPaperLineage(key, options = {}) {
         sources.push("crossref");
       }
     }
+    let predecessors = mergeLineageNodes(predecessorLists);
+    let successors = mergeLineageNodes([openAlex?.successors || [], semanticScholar?.successors || []]);
+    // 无 DOI 又无 OpenAlex Work ID 的节点先尝试跨信源补全，补不到再排除，避免伪条目挤占席位
+    predecessors = await enrichLineageNodesWithoutIdentifiers(predecessors, options);
+    successors = await enrichLineageNodesWithoutIdentifiers(successors, options);
+    predecessors = predecessors.filter(node => node.doi || node.openAlexId);
+    successors = successors.filter(node => node.doi || node.openAlexId);
     rawPayload = {
       ok: true,
       version: LINEAGE_CACHE_VERSION,
       center,
-      predecessors: mergeLineageNodes(predecessorLists),
-      successors: mergeLineageNodes([openAlex?.successors || [], semanticScholar?.successors || []]),
+      predecessors,
+      successors,
       sources,
       fetchedAt: new Date().toISOString()
     };
@@ -7936,6 +8016,7 @@ module.exports = {
   classifyPaper,
   cleanSearchLogic,
   cleanKeywords,
+  enrichLineageNodesWithoutIdentifiers,
   enrichPapersWithCrossref,
   enrichPapersWithPublisherDates,
   enrichPapersWithJournalMetrics,
@@ -7972,6 +8053,7 @@ module.exports = {
   lineageNodeFromSemanticScholar,
   lineageNodeKey,
   lineagePaperRecord,
+  lookupLineageNodeByTitle,
   mergeLineageNodes,
   parseZipEntries,
   testLlmConfig,

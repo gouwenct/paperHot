@@ -120,7 +120,9 @@ const {
   fetchCrossrefLineagePredecessors,
   fetchLineagePaperDetail,
   lineageCacheFileName,
-  lineagePaperRecord
+  lineagePaperRecord,
+  lookupLineageNodeByTitle,
+  enrichLineageNodesWithoutIdentifiers
 } = require("../paperhot_backend.cjs");
 
 const llmPoolStateKey = (providerId, model) => `${providerId}::${model}`;
@@ -9626,7 +9628,7 @@ test("buildPaperLineage survives one failing source and falls back to crossref w
       fetchImpl: async (url) => {
         const target = String(url instanceof URL ? url.href : url);
         if (target.includes("semanticscholar")) return { ok: true, status: 200, json: async () => ({ data: [
-          { isInfluential: false, citedPaper: { paperId: "p", title: "Only S2 ref", year: 2019, venue: "", abstract: "", citationCount: 9, externalIds: {}, authors: [] } }
+          { isInfluential: false, citedPaper: { paperId: "p", title: "Only S2 ref", year: 2019, venue: "", abstract: "", citationCount: 9, externalIds: { DOI: "10.2/only-s2-ref" }, authors: [] } }
         ] }) };
         return { ok: false, status: 500, json: async () => ({}) };
       }
@@ -9719,7 +9721,7 @@ test("buildPaperLineage ignores a well-formed pre-migration cache file lacking t
       fetchImpl: async (url) => {
         const target = String(url instanceof URL ? url.href : url);
         if (target.includes("semanticscholar") && target.includes("/references")) return { ok: true, status: 200, json: async () => ({ data: [
-          { isInfluential: false, citedPaper: { paperId: "p", title: "Fresh ref after migration", year: 2020, venue: "", abstract: "", citationCount: 1, externalIds: {}, authors: [] } }
+          { isInfluential: false, citedPaper: { paperId: "p", title: "Fresh ref after migration", year: 2020, venue: "", abstract: "", citationCount: 1, externalIds: { DOI: "10.2/fresh-after-migration" }, authors: [] } }
         ] }) };
         if (target.includes("semanticscholar")) return { ok: true, status: 200, json: async () => ({ data: [] }) };
         return { ok: false, status: 500, json: async () => ({}) };
@@ -9729,7 +9731,7 @@ test("buildPaperLineage ignores a well-formed pre-migration cache file lacking t
     assert.equal(result.ok, true);
     assert.equal(result.predecessors[0].title, "Fresh ref after migration", "无 version 字段的旧格式缓存必须被忽略并重新拉取，而不是直接返回陈旧数据");
     const rewritten = JSON.parse(await fs.readFile(path.join(tempDir, "lineage", lineageCacheFileName("10.1234/main")), "utf8"));
-    assert.equal(rewritten.version, 2, "重新拉取后写盘的缓存必须带上当前版本号");
+    assert.equal(rewritten.version, 3, "重新拉取后写盘的缓存必须带上当前版本号");
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
@@ -9750,7 +9752,7 @@ test("buildPaperLineage ignores corrupted and expired cache files", async () => 
       fetchImpl: async (url) => {
         const target = String(url instanceof URL ? url.href : url);
         if (target.includes("semanticscholar") && target.includes("/references")) return { ok: true, status: 200, json: async () => ({ data: [
-          { isInfluential: false, citedPaper: { paperId: "p", title: "Fresh ref", year: 2020, venue: "", abstract: "", citationCount: 1, externalIds: {}, authors: [] } }
+          { isInfluential: false, citedPaper: { paperId: "p", title: "Fresh ref", year: 2020, venue: "", abstract: "", citationCount: 1, externalIds: { DOI: "10.2/fresh-ref" }, authors: [] } }
         ] }) };
         if (target.includes("semanticscholar")) return { ok: true, status: 200, json: async () => ({ data: [] }) };
         return { ok: false, status: 500, json: async () => ({}) };
@@ -9856,6 +9858,228 @@ test("buildPaperLineage builds lineage for a bare DOI not in archive using seman
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
+});
+
+test("lookupLineageNodeByTitle finds an exact title match on OpenAlex and merges richer fields", async () => {
+  const title = "A garbage title that only openalex indexes precisely";
+  const fetchImpl = async (url) => {
+    const target = String(url instanceof URL ? url.href : url);
+    if (target.includes("title.search")) {
+      return { ok: true, status: 200, json: async () => ({ results: [
+        {
+          id: "https://openalex.org/W555", doi: "https://doi.org/10.9/found", title,
+          publication_year: 2018, cited_by_count: 40,
+          authorships: [{ author: { display_name: "A. Author" } }],
+          primary_location: { source: { display_name: "Nature" } }, referenced_works: []
+        }
+      ] }) };
+    }
+    if (target.includes("query.bibliographic")) return { ok: true, status: 200, json: async () => ({ message: { items: [] } }) };
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+  const result = await lookupLineageNodeByTitle(title, {
+    fetchImpl,
+    config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+    academicApis: { contactEmail: "" }
+  });
+  assert.ok(result, "应在 OpenAlex 精确命中带 DOI 的结果");
+  assert.equal(result.doi, "10.9/found");
+  assert.equal(result.journal, "Nature");
+  assert.deepEqual(result.authors, ["A. Author"]);
+});
+
+test("lookupLineageNodeByTitle falls back to Crossref when OpenAlex has no exact match", async () => {
+  const title = "Only crossref indexes this exact title";
+  const fetchImpl = async (url) => {
+    const target = String(url instanceof URL ? url.href : url);
+    if (target.includes("title.search")) return { ok: true, status: 200, json: async () => ({ results: [] }) };
+    if (target.includes("query.bibliographic")) {
+      return { ok: true, status: 200, json: async () => ({ message: { items: [
+        {
+          DOI: "10.11/crossref-found", title: [title], "container-title": ["Optica"],
+          author: [{ given: "B.", family: "Person" }], published: { "date-parts": [[2021, 3]] }
+        }
+      ] } }) };
+    }
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+  const result = await lookupLineageNodeByTitle(title, {
+    fetchImpl,
+    config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+    academicApis: { contactEmail: "" }
+  });
+  assert.ok(result, "OpenAlex 查不到时应接受 Crossref 的精确匹配");
+  assert.equal(result.doi, "10.11/crossref-found");
+  assert.equal(result.journal, "Optica");
+});
+
+test("lookupLineageNodeByTitle returns null when neither source has the title (garbage PDF-parse entry)", async () => {
+  const title = "Correspondence and requests for materials should be addressed to";
+  const fetchImpl = async (url) => {
+    const target = String(url instanceof URL ? url.href : url);
+    if (target.includes("title.search")) return { ok: true, status: 200, json: async () => ({ results: [] }) };
+    if (target.includes("query.bibliographic")) return { ok: true, status: 200, json: async () => ({ message: { items: [] } }) };
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+  const result = await lookupLineageNodeByTitle(title, {
+    fetchImpl,
+    config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+    academicApis: { contactEmail: "" }
+  });
+  assert.equal(result, null, "两个信源都查不到时必须返回 null，不能伪造补全");
+});
+
+test("lookupLineageNodeByTitle rejects a near match that only differs by a suffix", async () => {
+  const title = "Deep learning enables cross-domain super-resolution";
+  const candidateTitle = `${title} Supplementary Information`;
+  const fetchImpl = async (url) => {
+    const target = String(url instanceof URL ? url.href : url);
+    if (target.includes("title.search")) {
+      return { ok: true, status: 200, json: async () => ({ results: [
+        {
+          id: "https://openalex.org/W1", doi: "10.1/near", title: candidateTitle,
+          publication_year: 2022, cited_by_count: 1, authorships: [], primary_location: {}, referenced_works: []
+        }
+      ] }) };
+    }
+    if (target.includes("query.bibliographic")) return { ok: true, status: 200, json: async () => ({ message: { items: [] } }) };
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+  const result = await lookupLineageNodeByTitle(title, {
+    fetchImpl,
+    config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+    academicApis: { contactEmail: "" }
+  });
+  assert.equal(result, null, "标题只是近似（多了后缀）时应视为未找到，避免误配");
+});
+
+test("lookupLineageNodeByTitle still returns a match when one source throws", async () => {
+  const title = "Resilient title lookup despite one source failing";
+  const fetchImpl = async (url) => {
+    const target = String(url instanceof URL ? url.href : url);
+    if (target.includes("title.search")) throw new Error("openalex down");
+    if (target.includes("query.bibliographic")) {
+      return { ok: true, status: 200, json: async () => ({ message: { items: [
+        { DOI: "10.22/resilient", title: [title], "container-title": ["Cell"], author: [], published: { "date-parts": [[2020]] } }
+      ] } }) };
+    }
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+  const result = await lookupLineageNodeByTitle(title, {
+    fetchImpl,
+    config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+    academicApis: { contactEmail: "" }
+  });
+  assert.ok(result, "一个信源抛错时另一个仍应能补全");
+  assert.equal(result.doi, "10.22/resilient");
+});
+
+test("enrichLineageNodesWithoutIdentifiers only looks up up to LINEAGE_TITLE_LOOKUP_LIMIT nodes missing identifiers", async () => {
+  const withDoi = {
+    doi: "10.1/has-doi", openAlexId: "", semanticScholarId: "s1", title: "Already identified paper",
+    year: 2020, published: "", journal: "", abstract: "", citationCount: 5, authors: [], isInfluential: false
+  };
+  const missingNodes = Array.from({ length: 12 }, (_, i) => ({
+    doi: "", openAlexId: "", semanticScholarId: `s2-${i}`, title: `Missing identifier paper number ${i}`,
+    year: 2019, published: "", journal: "", abstract: "", citationCount: 3, authors: [], isInfluential: false
+  }));
+  let fetchCalls = 0;
+  const fetchImpl = async (url) => {
+    fetchCalls += 1;
+    // URL 查询串把空格编码成 +，decodeURIComponent 不还原，需要手动转回来才能取到序号
+    const target = decodeURIComponent(String(url instanceof URL ? url.href : url)).replace(/\+/g, " ");
+    const indexMatch = target.match(/Missing identifier paper number (\d+)/);
+    const index = indexMatch ? Number(indexMatch[1]) : -1;
+    if (target.includes("title.search")) {
+      return { ok: true, status: 200, json: async () => ({ results: [
+        {
+          id: `https://openalex.org/W${index}`, doi: `10.5/missing-${index}`,
+          title: `Missing identifier paper number ${index}`, publication_year: 2019, cited_by_count: 2,
+          authorships: [], primary_location: {}, referenced_works: []
+        }
+      ] }) };
+    }
+    if (target.includes("query.bibliographic")) return { ok: true, status: 200, json: async () => ({ message: { items: [] } }) };
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+  const nodes = [withDoi, ...missingNodes];
+  const result = await enrichLineageNodesWithoutIdentifiers(nodes, {
+    fetchImpl,
+    config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+    academicApis: { contactEmail: "" }
+  });
+  assert.equal(result.length, nodes.length, "补全后节点数量和顺序都不能变化");
+  assert.equal(result[0].doi, "10.1/has-doi", "已有 doi 的节点不应被重新查询");
+  for (let i = 1; i <= 10; i += 1) {
+    assert.equal(result[i].doi, `10.5/missing-${i - 1}`, `第 ${i - 1} 个缺失节点应在上限内被补全`);
+  }
+  assert.equal(result[1].citationCount, 3, "合并时应保留原有更优的 citationCount，而不是被补全值覆盖");
+  assert.equal(result[11].doi, "", "第 11 个缺失节点超出上限，不应发起补全请求");
+  assert.equal(result[12].doi, "", "第 12 个缺失节点超出上限，不应发起补全请求");
+  assert.equal(fetchCalls, 20, "只有前 10 个缺失节点应并行发起 OpenAlex + Crossref 两路请求");
+});
+
+test("buildPaperLineage enriches predecessors lacking identifiers when possible and drops the rest, end to end", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-lineage-enrich-e2e-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "archive.json"), JSON.stringify({ mode: "archive", papers: [] }), "utf8");
+    const garbageTitle = "Correspondence and requests for materials should be addressed to";
+    const options = {
+      dataDir: tempDir, skipCache: true,
+      config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+      academicApis: { contactEmail: "" },
+      fetchImpl: async (url) => {
+        const target = String(url instanceof URL ? url.href : url);
+        if (target.includes("semanticscholar")) {
+          if (target.includes("/references")) return { ok: true, status: 200, json: async () => ({ data: [
+            { isInfluential: false, citedPaper: { paperId: "s2-garbage", title: garbageTitle, year: null, venue: "", abstract: "", citationCount: 12403, externalIds: {}, authors: [] } },
+            { isInfluential: true, citedPaper: { paperId: "s2-real", title: "A real foundational paper", year: 2010, venue: "Nature Methods", abstract: "", citationCount: 300, externalIds: { DOI: "10.1/real-foundation" }, authors: [{ name: "R. Author" }] } }
+          ] }) };
+          return { ok: true, status: 200, json: async () => ({ data: [] }) };
+        }
+        if (target.includes("title.search")) return { ok: true, status: 200, json: async () => ({ results: [] }) };
+        if (target.includes("query.bibliographic")) return { ok: true, status: 200, json: async () => ({ message: { items: [] } }) };
+        return { ok: false, status: 500, json: async () => ({}) };
+      }
+    };
+    const result = await buildPaperLineage("10.1234/enrich-main", options);
+    assert.equal(result.ok, true);
+    assert.ok(
+      !result.predecessors.some(node => node.title === garbageTitle),
+      "缺少标识且两个信源都补不到 DOI 的伪条目应被排除"
+    );
+    assert.ok(
+      result.predecessors.some(node => node.doi === "10.1/real-foundation"),
+      "真正的带 DOI 前置论文不应被误删"
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("lookupLineageNodeByTitle keeps Crossref year-only dates out of the published field", async () => {
+  const title = "A paper Crossref only dates to a year";
+  const lookup = async publishedParts => lookupLineageNodeByTitle(title, {
+    config: { enabled: false, endpoint: "https://api.openalex.org/works", apiKey: "" },
+    academicApis: { contactEmail: "" },
+    fetchImpl: async (url) => {
+      const target = String(url instanceof URL ? url.href : url);
+      if (target.includes("title.search")) return { ok: true, status: 200, json: async () => ({ results: [] }) };
+      if (target.includes("query.bibliographic")) return { ok: true, status: 200, json: async () => ({ message: { items: [
+        { DOI: "10.3/year-only", title: [title], "container-title": ["Optics Express"], author: [], issued: { "date-parts": [publishedParts] } }
+      ] } }) };
+      return { ok: false, status: 500, json: async () => ({}) };
+    }
+  });
+
+  const yearOnly = await lookup([2017]);
+  assert.equal(yearOnly.doi, "10.3/year-only");
+  assert.equal(yearOnly.year, 2017, "只有年份时仍要保留年份");
+  assert.equal(yearOnly.published, "", "只有年份时不得把它当作完整发表日期");
+
+  const fullDate = await lookup([2017, 4, 9]);
+  assert.equal(fullDate.published, "2017-04-09", "完整日期应原样保留");
+  assert.equal(fullDate.year, 2017);
 });
 
 test("server exposes lineage routes backed by backend orchestrators", async () => {
