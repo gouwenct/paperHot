@@ -2504,7 +2504,89 @@ test("leaving a list through the lineage page still restores scroll and recent-t
 test("lineage graph styles cover light and dark themes with trail highlight", async () => {
   const html = await fs.readFile(htmlFile, "utf8");
   assert.match(html, /\.lineage-graph\s*\{[\s\S]*?width:\s*100%/);
+  assert.match(html, /\.paper-detail\s*\{[^}]*min-width:\s*0/);
+  assert.match(html, /\.paper-lineage-section\s*\{[^}]*max-width:\s*100%/);
   assert.match(html, /\.lineage-node-trail\s+circle\s*\{[\s\S]*?stroke:\s*#d4a017/);
   assert.match(html, /html\[data-theme="dark"\][^\{]*\.lineage-graph\s+line/);
   assert.match(html, /html\[data-theme="dark"\][^\{]*\.lineage-tooltip/);
+});
+
+test("lineage graph prefers short titles, wraps complete labels and scales nodes by citation count", async () => {
+  const html = await fs.readFile(htmlFile, "utf8");
+  const titleSource = readNamedFunction(html, "lineageNodeTitle", "lineageTitleUnits");
+  const unitsSource = readNamedFunction(html, "lineageTitleUnits", "lineageTitleLines");
+  const linesSource = readNamedFunction(html, "lineageTitleLines", "lineageNodeRadius");
+  const radiusSource = readNamedFunction(html, "lineageNodeRadius", "lineageNodeMarkup");
+  const markupSource = readNamedFunction(html, "lineageNodeMarkup", "lineageGraphSvg");
+  const graphSource = readNamedFunction(html, "lineageGraphSvg", "lineageTooltipHtml");
+  const api = new Function("paperNoteByKey", `
+    function escapeHTML(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+    function lineageNodeHref(node) { return node?.doi ? \`#lineage/\${node.doi}\` : ""; }
+    function lineageTrailKeys() { return new Set(); }
+    ${titleSource}
+    ${unitsSource}
+    ${linesSource}
+    ${radiusSource}
+    ${markupSource}
+    ${graphSource}
+    return { lineageNodeTitle, lineageTitleLines, lineageNodeRadius, lineageGraphSvg };
+  `)(new Map([
+    ["10.1/local", { shortTitle: "手工短标题" }],
+    ["10.1/default", { shortTitle: "2026@" }],
+    ["10.1/undated", { shortTitle: "n.d.@" }]
+  ]));
+
+  assert.equal(
+    api.lineageNodeTitle({ archiveKey: "10.1/local", shortTitle: "归档短标题", title: "完整标题" }),
+    "手工短标题",
+    "用户手工短标题优先级最高"
+  );
+  assert.equal(api.lineageNodeTitle({ shortTitle: "归档短标题", title: "完整标题" }), "归档短标题");
+  assert.equal(
+    api.lineageNodeTitle({ archiveKey: "10.1/default", shortTitle: "2026@", title: "默认占位符对应的完整标题" }),
+    "默认占位符对应的完整标题",
+    "只有年份和 @ 的默认短标题应视为未设置"
+  );
+  assert.equal(
+    api.lineageNodeTitle({ archiveKey: "10.1/undated", shortTitle: "n.d.@", title: "无年份论文的完整标题" }),
+    "无年份论文的完整标题",
+    "无年份默认短标题也应视为未设置"
+  );
+  assert.equal(api.lineageNodeTitle({ shortTitle: "2026@Hessian SIM", title: "完整标题" }), "2026@Hessian SIM");
+  assert.equal(api.lineageNodeTitle({ title: "Copper <SUP>2+</SUP> transport" }), "Copper 2+ transport");
+
+  const fullTitle = "A complete foundational microscopy paper title that must remain visible";
+  const wrapped = api.lineageTitleLines(fullTitle, 110);
+  assert.ok(wrapped.length > 1, "长标题需要换行");
+  assert.equal(wrapped.join(" "), fullTitle, "换行不得截断或改写标题");
+  assert.doesNotMatch(wrapped.join(" "), /…|\.\.\./, "标题不得以省略号截断");
+
+  const unknownRadius = api.lineageNodeRadius({ citationCount: null });
+  const lowRadius = api.lineageNodeRadius({ citationCount: 1 });
+  const mediumRadius = api.lineageNodeRadius({ citationCount: 100 });
+  const highRadius = api.lineageNodeRadius({ citationCount: 10000 });
+  assert.ok(unknownRadius <= lowRadius);
+  assert.ok(lowRadius < mediumRadius);
+  assert.ok(mediumRadius < highRadius);
+  assert.ok(highRadius <= 18, "高被引节点半径需设上限，避免破坏布局");
+
+  const svg = api.lineageGraphSvg({
+    center: { title: "Center paper", citationCount: 100 },
+    predecessors: [
+      { title: fullTitle, citationCount: 1, doi: "10.1/a" },
+      { shortTitle: "Short title in full", title: "Unused full title", citationCount: 10000, doi: "10.1/b" }
+    ],
+    successors: []
+  });
+  assert.match(svg, /<tspan/);
+  assert.match(svg, /data-citation-count="10000"/);
+  assert.match(svg, /Short title in full/);
+  assert.doesNotMatch(svg, /…|\.\.\./);
 });

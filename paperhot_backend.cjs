@@ -961,7 +961,8 @@ function rankLineageNodes(nodes, archivePapers, limit = 6) {
     }) || null;
     const match = doiMatch || titleMatch || null;
     const archiveKey = match ? String(match.id || match.doi || match.url || match.title || "").trim() : "";
-    return { ...node, inArchive: Boolean(match), archiveKey };
+    const shortTitle = compactText(match?.shortTitle || node?.shortTitle || "");
+    return { ...node, shortTitle, inArchive: Boolean(match), archiveKey };
   });
   const local = decorated.filter(node => node.inArchive);
   const external = decorated.filter(node => !node.inArchive).sort((a, b) =>
@@ -1015,7 +1016,13 @@ async function buildPaperLineage(key, options = {}) {
   const isOpenAlexWorkId = !paper && !/^10\./.test(doi) && /^w\d+$/i.test(String(key || "").trim());
   if (!paper && !/^10\./.test(doi) && !isOpenAlexWorkId) return { ok: false, error: "not-found", message: "未找到论文" };
   const centerKey = paper ? String(paper.id || paper.doi || paper.url || paper.title || "").trim() : doi;
-  const center = { title: compactText(paper?.displayTitle || paper?.title || ""), doi: isOpenAlexWorkId ? "" : doi, key: centerKey };
+  const center = {
+    title: compactText(paper?.displayTitle || paper?.title || ""),
+    shortTitle: compactText(paper?.shortTitle || ""),
+    citationCount: normalizeCitationCount(paper?.citationCount),
+    doi: isOpenAlexWorkId ? "" : doi,
+    key: centerKey
+  };
   if (!doi || isOpenAlexWorkId) {
     return { ok: true, center, predecessors: [], successors: [], sources: [], reason: "no-doi", fetchedAt: new Date().toISOString() };
   }
@@ -1029,6 +1036,9 @@ async function buildPaperLineage(key, options = {}) {
     if (openAlex) sources.push("openalex");
     if (semanticScholar) sources.push("semanticscholar");
     if (!center.title && openAlex?.center?.title) center.title = openAlex.center.title;
+    if (center.citationCount === null && openAlex?.center) {
+      center.citationCount = normalizeCitationCount(openAlex.center.citationCount);
+    }
     let predecessorLists = [openAlex?.predecessors || [], semanticScholar?.predecessors || []];
     if (!openAlex && !semanticScholar) {
       const crossref = await fetchCrossrefLineagePredecessors(doi, options);
@@ -1059,9 +1069,17 @@ async function buildPaperLineage(key, options = {}) {
   }
   // 排名依赖论文库归档状态，每次请求都重新计算，避免缓存冻结 inArchive 归属
   const archive = await readPaperArchive(dataDir);
+  const responseCenter = {
+    ...rawPayload.center,
+    title: compactText(center.title || rawPayload.center?.title || ""),
+    shortTitle: compactText(center.shortTitle || rawPayload.center?.shortTitle || ""),
+    citationCount: center.citationCount ?? normalizeCitationCount(rawPayload.center?.citationCount),
+    doi: normalizeDoi(center.doi || rawPayload.center?.doi || ""),
+    key: center.key || rawPayload.center?.key || ""
+  };
   return {
     ok: true,
-    center: rawPayload.center,
+    center: responseCenter,
     predecessors: rankLineageNodes(rawPayload.predecessors, archive.papers, LINEAGE_TARGET_COUNT),
     successors: rankLineageNodes(rawPayload.successors, archive.papers, LINEAGE_TARGET_COUNT),
     sources: rawPayload.sources,

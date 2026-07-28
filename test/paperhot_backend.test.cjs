@@ -9543,8 +9543,8 @@ test("buildPaperLineage merges parallel sources, ranks against archive and cache
   try {
     await fs.writeFile(path.join(tempDir, "archive.json"), JSON.stringify({
       mode: "archive", papers: [
-        { id: "local-main", doi: "10.1234/main", title: "Main paper" },
-        { id: "local-ref", doi: "10.1234/w2", title: "Ref A" }
+        { id: "local-main", doi: "10.1234/main", title: "Main paper", shortTitle: "2024@Main", citationCount: 12 },
+        { id: "local-ref", doi: "10.1234/w2", title: "Ref A", shortTitle: "2020@Ref" }
       ]
     }), "utf8");
     let fetchCalls = 0;
@@ -9581,14 +9581,20 @@ test("buildPaperLineage merges parallel sources, ranks against archive and cache
     assert.equal(payload.predecessors.length, 1, "双信源同一篇 Ref A 去重为一个节点");
     assert.equal(payload.predecessors[0].inArchive, true);
     assert.equal(payload.predecessors[0].archiveKey, "local-ref");
+    assert.equal(payload.predecessors[0].shortTitle, "2020@Ref");
     assert.equal(payload.predecessors[0].abstract, "Long shared abstract");
     assert.equal(payload.predecessors[0].citationCount, 500);
     assert.equal(payload.successors[0].title, "Citing paper");
+    assert.equal(payload.center.shortTitle, "2024@Main");
+    assert.equal(payload.center.citationCount, 12);
     const cacheFiles = await fs.readdir(path.join(tempDir, "lineage"));
     assert.equal(cacheFiles.length, 1);
     const callsAfterFirst = fetchCalls;
     const cached = await buildPaperLineage("10.1234/main", options);
     assert.equal(cached.predecessors[0].archiveKey, "local-ref");
+    assert.equal(cached.predecessors[0].shortTitle, "2020@Ref");
+    assert.equal(cached.center.shortTitle, "2024@Main");
+    assert.equal(cached.center.citationCount, 12);
     assert.equal(fetchCalls, callsAfterFirst, "第二次命中缓存，不再发外部请求");
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });

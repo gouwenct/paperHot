@@ -2330,6 +2330,7 @@
       outline-offset: 2px;
     }
     .paper-detail {
+      min-width: 0;
       padding: 18px 20px 22px;
       border: 1px solid rgba(222,232,238,0.92);
       border-radius: 13px;
@@ -2387,19 +2388,27 @@
       color: #0b94b2;
       text-decoration: underline;
     }
-    .paper-lineage-section { overflow-x: auto; }
-    .lineage-graph { width: 100%; min-width: 560px; height: auto; display: block; }
+    .paper-lineage-section { min-width: 0; max-width: 100%; overflow-x: auto; }
+    .lineage-graph { width: 100%; min-width: 940px; max-width: 1200px; height: auto; margin: 0 auto; display: block; }
     .lineage-graph line { stroke: #c9d6e2; stroke-width: 1.2; }
     .lineage-row-label { font-size: 11px; fill: #65758b; }
     .lineage-node circle { fill: #0b94b2; }
-    .lineage-node text { font-size: 11px; fill: #65758b; }
+    .lineage-node-label {
+      font-size: 11px;
+      fill: #65758b;
+      paint-order: stroke;
+      stroke: #ffffff;
+      stroke-width: 2.4px;
+      stroke-linejoin: round;
+    }
     .lineage-node-external circle { fill: #ffffff; stroke: #0b94b2; stroke-width: 1.5; }
     .lineage-node-center circle { fill: #1f2a40; }
-    .lineage-node-center text { font-weight: 600; fill: #1f2a40; }
+    .lineage-node-center .lineage-node-label { font-weight: 600; fill: #1f2a40; }
     .lineage-node-trail circle { stroke: #d4a017; stroke-width: 2.5; }
     .lineage-influential { fill: #d4a017; }
     .lineage-node-link { cursor: pointer; text-decoration: none; }
-    .lineage-node-link:hover circle { stroke: #0b94b2; stroke-width: 2.5; }
+    .lineage-node-link:hover circle,
+    .lineage-node-link:focus-visible circle { stroke: #0b94b2; stroke-width: 2.5; }
     .lineage-tooltip { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e7eef3; font-size: 12px; line-height: 1.6; color: #65758b; min-height: 52px; }
     html[data-theme="dark"] body {
       color: #d7e0ec;
@@ -2542,11 +2551,12 @@
     html[data-theme="dark"] .paper-detail-section { border-color: #334456; }
     html[data-theme="dark"] .lineage-graph line { stroke: #334456; }
     html[data-theme="dark"] .lineage-row-label,
-    html[data-theme="dark"] .lineage-node text { fill: #9aabbf; }
+    html[data-theme="dark"] .lineage-node-label { fill: #9aabbf; }
+    html[data-theme="dark"] .lineage-node-label { stroke: #18202d; }
     html[data-theme="dark"] .lineage-node circle { fill: #4ec7e0; }
     html[data-theme="dark"] .lineage-node-external circle { fill: #10161f; stroke: #4ec7e0; }
     html[data-theme="dark"] .lineage-node-center circle { fill: #e8eef7; }
-    html[data-theme="dark"] .lineage-node-center text { fill: #e8eef7; }
+    html[data-theme="dark"] .lineage-node-center .lineage-node-label { fill: #e8eef7; }
     html[data-theme="dark"] .lineage-tooltip { border-top-color: #334456; color: #a7b6c9; }
     html[data-theme="dark"] .timeline-date,
     html[data-theme="dark"] .timeline-source-type { color: #8c9db2; }
@@ -7832,50 +7842,178 @@
       if (paperLineageTrail.length > 20) paperLineageTrail.shift();
     }
 
+    function lineageNodeTitle(node) {
+      const note = [node?.archiveKey, node?.key, node?.doi, node?.openAlexId]
+        .map(value => String(value || "").trim().toLowerCase().replace(/\s+/g, " "))
+        .filter(Boolean)
+        .map(key => paperNoteByKey.get(key))
+        .find(Boolean);
+      const shortTitle = [note?.shortTitle, node?.shortTitle]
+        .map(value => String(value || "").replace(/\s+/g, " ").trim())
+        .find(value => value && !/^(?:(?:19|20)\d{2}|n\.d\.)@$/i.test(value));
+      const title = String(shortTitle || node?.title || "未命名论文");
+      return title
+        .replace(/<[^>]*>/g, "")
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+        .replace(/&lt;/gi, "<")
+        .replace(/&gt;/gi, ">")
+        .replace(/&quot;/gi, "\"")
+        .replace(/&#39;/gi, "'")
+        .replace(/\s+/g, " ")
+        .trim() || "未命名论文";
+    }
+
+    function lineageTitleUnits(value) {
+      return Array.from(String(value || "")).reduce((total, character) => {
+        if (/\s/u.test(character)) return total + 0.45;
+        if (/[\u2e80-\u9fff\uac00-\ud7af\u3040-\u30ff]/u.test(character)) return total + 1.8;
+        if (/[MW@%&]/.test(character)) return total + 1.45;
+        if (/[A-Z0-9]/.test(character)) return total + 1.15;
+        if (/[ilI.,'`:;!|]/.test(character)) return total + 0.5;
+        return total + 1;
+      }, 0);
+    }
+
+    function lineageTitleLines(title, maxWidth) {
+      const text = String(title || "").replace(/\s+/g, " ").trim() || "未命名论文";
+      const maxUnits = Math.max(4, Number(maxWidth || 0) / 5.1);
+      const lines = [];
+      let current = "";
+      text.split(" ").forEach(word => {
+        const candidate = current ? `${current} ${word}` : word;
+        if (lineageTitleUnits(candidate) <= maxUnits) {
+          current = candidate;
+          return;
+        }
+        if (current) {
+          lines.push(current);
+          current = "";
+        }
+        if (lineageTitleUnits(word) <= maxUnits) {
+          current = word;
+          return;
+        }
+        let chunk = "";
+        Array.from(word).forEach(character => {
+          const nextChunk = `${chunk}${character}`;
+          if (chunk && lineageTitleUnits(nextChunk) > maxUnits) {
+            lines.push(chunk);
+            chunk = character;
+          } else {
+            chunk = nextChunk;
+          }
+        });
+        current = chunk;
+      });
+      if (current) lines.push(current);
+      return lines.length ? lines : ["未命名论文"];
+    }
+
+    function lineageNodeRadius(node) {
+      const rawCount = node?.citationCount;
+      if (rawCount === null || rawCount === undefined || rawCount === "") return 8;
+      const citationCount = Number(rawCount);
+      if (!Number.isFinite(citationCount) || citationCount <= 0) return 8;
+      return Math.round((8 + Math.min(10, Math.log10(citationCount + 1) * 2.4)) * 10) / 10;
+    }
+
     function lineageNodeMarkup(entry, index, group, trail) {
-      const { node, x, y } = entry;
-      const href = lineageNodeHref(node);
+      const { node, x, y, radius, label, labelLines, labelY } = entry;
+      const isCenter = group === "center";
+      const href = isCenter ? "" : lineageNodeHref(node);
       const classes = [
         "lineage-node",
-        node.inArchive ? "lineage-node-local" : "lineage-node-external",
+        isCenter ? "lineage-node-center" : (node.inArchive ? "lineage-node-local" : "lineage-node-external"),
         node.doi && trail.has(node.doi) ? "lineage-node-trail" : ""
       ].filter(Boolean).join(" ");
-      const title = String(node.title || "");
-      const label = title.length > 26 ? `${title.slice(0, 25)}…` : title;
-      const influentialMark = node.isInfluential
-        ? `<circle class="lineage-influential" cx="${x + 11}" cy="${y - 9}" r="3"></circle>`
+      const rawCitationCount = node?.citationCount;
+      const citationCount = rawCitationCount === null || rawCitationCount === undefined || rawCitationCount === ""
+        ? null
+        : Number(rawCitationCount);
+      const citationText = Number.isFinite(citationCount) ? `，被引 ${citationCount}` : "，引用量未知";
+      const citationAttr = Number.isFinite(citationCount) ? ` data-citation-count="${citationCount}"` : "";
+      const nodeDataAttr = isCenter ? "" : ` data-lineage-node="${group}-${index}"`;
+      const influentialMark = node.isInfluential && !isCenter
+        ? `<circle class="lineage-influential" cx="${Math.round((x + radius * 0.72) * 10) / 10}" cy="${Math.round((y - radius * 0.72) * 10) / 10}" r="3"></circle>`
         : "";
-      const body = `<g class="${classes}" data-lineage-node="${group}-${index}">`
-        + `<circle cx="${x}" cy="${y}" r="8"></circle>${influentialMark}`
-        + `<text x="${x}" y="${y + 22}" text-anchor="middle">${escapeHTML(label)}</text></g>`;
+      const textMarkup = `<text class="lineage-node-label" x="${x}" y="${labelY}" text-anchor="middle">`
+        + labelLines.map((line, lineIndex) => `<tspan x="${x}"${lineIndex ? " dy=\"14\"" : ""}>${escapeHTML(line)}</tspan>`).join("")
+        + `</text>`;
+      const body = `<g class="${classes}"${nodeDataAttr}${citationAttr} data-node-radius="${radius}" aria-label="${escapeHTML(`${label}${citationText}`)}">`
+        + `<title>${escapeHTML(`${label}${citationText}`)}</title>`
+        + `<circle cx="${x}" cy="${y}" r="${radius}"></circle>${influentialMark}`
+        + `${textMarkup}</g>`;
       return href ? `<a href="${href}" class="lineage-node-link">${body}</a>` : body;
     }
 
     function lineageGraphSvg(data) {
-      const width = 720;
-      const predY = 60;
-      const centerY = 170;
-      const succY = 280;
+      const width = 960;
+      const lineHeight = 14;
       const centerX = width / 2;
       const trail = lineageTrailKeys();
-      const place = (nodes, y) => nodes.map((node, index) => ({ node, x: Math.round(width * (index + 1) / (nodes.length + 1)), y }));
-      const preds = place(data.predecessors || [], predY);
-      const succs = place(data.successors || [], succY);
+      const place = nodes => {
+        const list = Array.isArray(nodes) ? nodes : [];
+        const spacing = width / (list.length + 1);
+        const labelWidth = Math.max(96, Math.min(180, spacing - 16));
+        return list.map((node, index) => {
+          const label = lineageNodeTitle(node);
+          return {
+            node,
+            x: Math.round(width * (index + 1) / (list.length + 1)),
+            radius: lineageNodeRadius(node),
+            label,
+            labelLines: lineageTitleLines(label, labelWidth)
+          };
+        });
+      };
+      const maxRadius = entries => entries.reduce((value, entry) => Math.max(value, entry.radius), 0);
+      const maxLineCount = entries => entries.reduce((value, entry) => Math.max(value, entry.labelLines.length), 0);
+      let preds = place(data.predecessors);
+      let succs = place(data.successors);
+      const predLabelY = 52;
+      const predMaxRadius = maxRadius(preds);
+      const predY = preds.length
+        ? predLabelY + Math.max(0, maxLineCount(preds) - 1) * lineHeight + 14 + predMaxRadius
+        : 52;
+      preds = preds.map(entry => ({ ...entry, y: predY, labelY: predLabelY }));
+
+      const centerNode = data.center || {};
+      const centerRadius = lineageNodeRadius(centerNode);
+      const centerLabel = lineageNodeTitle(centerNode);
+      const centerLabelLines = lineageTitleLines(centerLabel, 360);
+      const centerY = predY + predMaxRadius + 82 + centerRadius;
+      const centerLabelY = centerY + centerRadius + 20;
+      const centerLabelBottom = centerLabelY + Math.max(0, centerLabelLines.length - 1) * lineHeight;
+      const centerEntry = {
+        node: centerNode,
+        x: centerX,
+        y: centerY,
+        radius: centerRadius,
+        label: centerLabel,
+        labelLines: centerLabelLines,
+        labelY: centerLabelY
+      };
+
+      const successorRowLabelY = centerLabelBottom + 42;
+      const succMaxRadius = maxRadius(succs);
+      const succY = successorRowLabelY + 30 + succMaxRadius;
+      const succLabelY = succY + succMaxRadius + 20;
+      succs = succs.map(entry => ({ ...entry, y: succY, labelY: succLabelY }));
+      const height = succs.length
+        ? succLabelY + Math.max(0, maxLineCount(succs) - 1) * lineHeight + 30
+        : successorRowLabelY + 20;
+
       const lines = [
-        ...preds.map(p => `<line x1="${p.x}" y1="${p.y + 10}" x2="${centerX}" y2="${centerY - 12}"></line>`),
-        ...succs.map(p => `<line x1="${centerX}" y1="${centerY + 12}" x2="${p.x}" y2="${p.y - 10}"></line>`)
+        ...preds.map(entry => `<line x1="${entry.x}" y1="${entry.y + entry.radius}" x2="${centerX}" y2="${centerY - centerRadius}"></line>`),
+        ...succs.map(entry => `<line x1="${centerX}" y1="${centerY + centerRadius}" x2="${entry.x}" y2="${entry.y - entry.radius}"></line>`)
       ].join("");
-      const centerTitle = String(data.center?.title || "");
-      const centerLabel = centerTitle.length > 30 ? `${centerTitle.slice(0, 29)}…` : centerTitle;
-      const centerMarkup = `<g class="lineage-node lineage-node-center">`
-        + `<circle cx="${centerX}" cy="${centerY}" r="10"></circle>`
-        + `<text x="${centerX}" y="${centerY + 26}" text-anchor="middle">${escapeHTML(centerLabel)}</text></g>`;
-      return `<svg class="lineage-graph" viewBox="0 0 ${width} 340" role="img" aria-label="引文谱系图">`
-        + `<text class="lineage-row-label" x="12" y="${predY - 24}">前置论文</text>`
-        + `<text class="lineage-row-label" x="12" y="${succY + 40}">后续论文</text>`
+      return `<svg class="lineage-graph" viewBox="0 0 ${width} ${height}" role="img" aria-label="引文谱系图">`
+        + `<text class="lineage-row-label" x="12" y="24">前置论文</text>`
+        + `<text class="lineage-row-label" x="12" y="${successorRowLabelY}">后续论文</text>`
         + lines
         + preds.map((entry, index) => lineageNodeMarkup(entry, index, "pred", trail)).join("")
-        + centerMarkup
+        + lineageNodeMarkup(centerEntry, 0, "center", trail)
         + succs.map((entry, index) => lineageNodeMarkup(entry, index, "succ", trail)).join("")
         + `</svg>`;
     }
