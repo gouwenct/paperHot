@@ -2,6 +2,7 @@
 
 - `AGENTS.md` 和 `claude.md` 是同一份项目协作规则的两个入口。
 - 修改 `AGENTS.md` 或 `claude.md` 任意一份时，必须同步更新另一份，保持两份文件内容一致。
+- `README.md` 的“补充文档”是详细文档索引的唯一入口；`AGENTS.md` 和 `claude.md` 只保留强制规则，不复制 `docs/` 文件用途清单。
 
 ## Imported Claude Cowork project instructions
 

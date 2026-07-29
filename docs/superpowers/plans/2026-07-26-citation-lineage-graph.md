@@ -1,5 +1,7 @@
 # 引文谱系图实现计划
 
+> 状态说明（2026-07-29）：引文谱系功能及后续可读性修复已经实现并验证。下方未勾选项和代码片段保留为原始实施计划，不代表当前完成度，也可能早于后续修复；当前行为以源码、测试、`CHANGELOG.md` 和 [引文谱系标题布局解决方案](../../solutions/ui-bugs/citation-lineage-title-layout-and-placeholder-fallback.md)为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 论文详情页下方新增引文谱系点线图：OpenAlex 与 Semantic Scholar 并行拉取前置/后续论文，DOI 归一化去重合并，节点可点击递归追溯，外部论文走临时详情页并可选加入论文库。

@@ -2567,6 +2567,8 @@ test("lineage graph prefers short titles, wraps complete labels and scales nodes
   assert.ok(wrapped.length > 1, "长标题需要换行");
   assert.equal(wrapped.join(" "), fullTitle, "换行不得截断或改写标题");
   assert.doesNotMatch(wrapped.join(" "), /…|\.\.\./, "标题不得以省略号截断");
+  const longWord = "SupercalifragilisticexpialidociousMicroscopy";
+  assert.equal(api.lineageTitleLines(longWord, 96).join(""), longWord, "无空格超长词拆行后也不得丢字");
 
   const unknownRadius = api.lineageNodeRadius({ citationCount: null });
   const lowRadius = api.lineageNodeRadius({ citationCount: 1 });
@@ -2589,4 +2591,39 @@ test("lineage graph prefers short titles, wraps complete labels and scales nodes
   assert.match(svg, /data-citation-count="10000"/);
   assert.match(svg, /Short title in full/);
   assert.doesNotMatch(svg, /…|\.\.\./);
+
+  const denseSvg = api.lineageGraphSvg({
+    center: { title: "Center paper", citationCount: 100 },
+    predecessors: Array.from({ length: 10 }, (_, index) => ({
+      title: `Complete predecessor title ${index + 1} with enough text to wrap`,
+      citationCount: 10000,
+      doi: `10.1/dense-${index + 1}`
+    })),
+    successors: []
+  });
+  const denseWidth = Number(denseSvg.match(/viewBox="0 0 ([\d.]+)/)?.[1]);
+  assert.ok(denseWidth >= 1232, "10 个节点时画布需动态扩展，保证每个标签至少 96 宽并保留间隔");
+  assert.match(denseSvg, new RegExp(`style="min-width:${denseWidth}px`), "实际 SVG 宽度需同步扩展，不能只放大 viewBox 后再被 CSS 压缩");
+  const denseXs = [...denseSvg.matchAll(/data-lineage-node="pred-\d+"[\s\S]*?<circle cx="([\d.]+)"/g)]
+    .map(match => Number(match[1]));
+  assert.equal(denseXs.length, 10);
+  denseXs.slice(1).forEach((x, index) => {
+    assert.ok(x - denseXs[index] >= 112, "相邻节点中心需为 96 宽标签保留至少 16 的间隔");
+  });
+
+  const crowdedSvg = api.lineageGraphSvg({
+    center: { title: "Center paper", citationCount: 100 },
+    predecessors: Array.from({ length: 26 }, (_, index) => ({
+      title: `P${index + 1}`,
+      citationCount: 100000,
+      doi: `10.1/crowded-${index + 1}`
+    })),
+    successors: []
+  });
+  const crowdedXs = [...crowdedSvg.matchAll(/data-lineage-node="pred-\d+"[\s\S]*?<circle cx="([\d.]+)" cy="[\d.]+" r="([\d.]+)"/g)]
+    .map(match => ({ x: Number(match[1]), radius: Number(match[2]) }));
+  assert.equal(crowdedXs.length, 26);
+  crowdedXs.slice(1).forEach((entry, index) => {
+    assert.ok(entry.x - crowdedXs[index].x > entry.radius + crowdedXs[index].radius, "高引用量节点再多也不能相互相交");
+  });
 });

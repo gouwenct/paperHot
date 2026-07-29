@@ -2389,7 +2389,7 @@
       text-decoration: underline;
     }
     .paper-lineage-section { min-width: 0; max-width: 100%; overflow-x: auto; }
-    .lineage-graph { width: 100%; min-width: 940px; max-width: 1200px; height: auto; margin: 0 auto; display: block; }
+    .lineage-graph { width: 100%; min-width: 940px; max-width: none; height: auto; margin: 0 auto; display: block; }
     .lineage-graph line { stroke: #c9d6e2; stroke-width: 1.2; }
     .lineage-row-label { font-size: 11px; fill: #65758b; }
     .lineage-node circle { fill: #0b94b2; }
@@ -7948,14 +7948,20 @@
     }
 
     function lineageGraphSvg(data) {
-      const width = 960;
+      const minLabelWidth = 96;
+      const labelGap = 16;
+      const maxRowCount = Math.max(
+        Array.isArray(data.predecessors) ? data.predecessors.length : 0,
+        Array.isArray(data.successors) ? data.successors.length : 0
+      );
+      const width = Math.max(960, (maxRowCount + 1) * (minLabelWidth + labelGap));
       const lineHeight = 14;
       const centerX = width / 2;
       const trail = lineageTrailKeys();
       const place = nodes => {
         const list = Array.isArray(nodes) ? nodes : [];
         const spacing = width / (list.length + 1);
-        const labelWidth = Math.max(96, Math.min(180, spacing - 16));
+        const labelWidth = Math.max(minLabelWidth, Math.min(180, spacing - labelGap));
         return list.map((node, index) => {
           const label = lineageNodeTitle(node);
           return {
@@ -8008,7 +8014,7 @@
         ...preds.map(entry => `<line x1="${entry.x}" y1="${entry.y + entry.radius}" x2="${centerX}" y2="${centerY - centerRadius}"></line>`),
         ...succs.map(entry => `<line x1="${centerX}" y1="${centerY + centerRadius}" x2="${entry.x}" y2="${entry.y - entry.radius}"></line>`)
       ].join("");
-      return `<svg class="lineage-graph" viewBox="0 0 ${width} ${height}" role="img" aria-label="引文谱系图">`
+      return `<svg class="lineage-graph" style="min-width:${width}px" viewBox="0 0 ${width} ${height}" role="img" aria-label="引文谱系图">`
         + `<text class="lineage-row-label" x="12" y="24">前置论文</text>`
         + `<text class="lineage-row-label" x="12" y="${successorRowLabelY}">后续论文</text>`
         + lines

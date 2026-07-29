@@ -9515,6 +9515,31 @@ test("rankLineageNodes keeps all archive papers first then fills with influentia
   assert.equal(ranked[4].title, "External mid");
 });
 
+test("rankLineageNodes keeps every local match even when they exceed the external target count", () => {
+  const nodes = Array.from({ length: 10 }, (_, index) => ({
+    doi: `10.1/local-${index + 1}`,
+    openAlexId: "",
+    semanticScholarId: "",
+    title: `Local paper ${index + 1}`,
+    year: 2020,
+    published: "",
+    journal: "",
+    abstract: "",
+    citationCount: index + 1,
+    authors: [],
+    isInfluential: false
+  }));
+  const archive = nodes.map((node, index) => ({
+    id: `archive-${index + 1}`,
+    doi: node.doi,
+    title: node.title,
+    year: node.year
+  }));
+  const ranked = rankLineageNodes(nodes, archive, 6);
+  assert.equal(ranked.length, 10, "目标数只能限制外部补位，不能截断本地论文");
+  assert.ok(ranked.every(node => node.inArchive));
+});
+
 test("rankLineageNodes only uses title archive fallback when identifiers or years are compatible", () => {
   const node = (doi, title, year) => ({ doi, openAlexId: "", semanticScholarId: "", title, year, published: "", journal: "", abstract: "", citationCount: 1, authors: [], isInfluential: false });
   const ranked = rankLineageNodes([
@@ -9721,17 +9746,18 @@ test("buildPaperLineage returns empty lineage for an unarchived OpenAlex work id
   }
 });
 
-test("buildPaperLineage ignores a well-formed pre-migration cache file lacking the version stamp and refetches", async () => {
+test("buildPaperLineage ignores a well-formed v3 cache missing center display fields and refetches", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperhot-lineage-premigration-"));
   try {
     await fs.writeFile(path.join(tempDir, "archive.json"), JSON.stringify({
       mode: "archive", papers: [{ id: "local-main", doi: "10.1234/main", title: "Main paper" }]
     }), "utf8");
     await fs.mkdir(path.join(tempDir, "lineage"), { recursive: true });
-    // 模拟旧版本缓存：结构完整、ok:true、且带有已排名字段（inArchive/archiveKey），
-    // 但没有新的 version 字段。必须被当作缓存未命中处理，不能崩溃或直接返回这份陈旧数据。
+    // 模拟 v3 缓存：结构完整且版本有效，但 center 缺少 shortTitle/citationCount。
+    // 必须被当作缓存未命中处理，不能让 fresh/cache 节点大小出现差异。
     const staleRankedPayload = {
       ok: true,
+      version: 3,
       center: { title: "Stale cached title", doi: "10.1234/main", key: "local-main" },
       predecessors: [{
         doi: "10.9/stale", openAlexId: "", semanticScholarId: "", title: "Stale predecessor",
@@ -9758,9 +9784,11 @@ test("buildPaperLineage ignores a well-formed pre-migration cache file lacking t
     };
     const result = await buildPaperLineage("10.1234/main", options);
     assert.equal(result.ok, true);
-    assert.equal(result.predecessors[0].title, "Fresh ref after migration", "无 version 字段的旧格式缓存必须被忽略并重新拉取，而不是直接返回陈旧数据");
+    assert.equal(result.predecessors[0].title, "Fresh ref after migration", "v3 缓存必须被忽略并重新拉取，而不是直接返回陈旧数据");
     const rewritten = JSON.parse(await fs.readFile(path.join(tempDir, "lineage", lineageCacheFileName("10.1234/main")), "utf8"));
-    assert.equal(rewritten.version, 3, "重新拉取后写盘的缓存必须带上当前版本号");
+    assert.equal(rewritten.version, 4, "重新拉取后写盘的缓存必须带上当前版本号");
+    assert.ok(Object.hasOwn(rewritten.center, "shortTitle"));
+    assert.ok(Object.hasOwn(rewritten.center, "citationCount"));
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

@@ -103,6 +103,8 @@ data/papers/operation-log.jsonl
 
 近期抓取断点 `data/papers/recent-fetch-cursors.json` 是只对当前设备和完全相同任务有效的短期运行态。Google、WoS、arXiv 等每个启用信源只保存 `nextPage` 和 `complete`；恢复时跳过已完成信源，从未完成信源的 `nextPage` 继续，全部启用信源完成后删除该任务。Google 的近期抓取和指定论文检索不与旧 `google-rolling-cursors.json` 同步。该文件不进入默认或任何可选导出。
 
+引文谱系目录 `data/papers/lineage/` 保存 30 天有效的外部信源合并缓存。它可以在另一台设备按 DOI/OpenAlex 数据重新生成，因此不进入默认导出或任何可选导出，也不在导入时恢复；该排除规则不改变 `paperhot-local-data` v1。
+
 `data/papers/web-of-science-usage.json` 只保存 PaperHot 本地聚合请求次数、日/月计数和最后状态，不保存请求 URL、查询表达式、Header 或 API Key。它只在 `includeStats=true` 时进入 ZIP，并通过导入白名单恢复。旧 v1 备份没有该可选文件时继续正常导入，因此备份版本保持 `1`。
 
 `data/papers/llm-model-pool-state.json` 保存阿里百炼模型池的本地 Token 估算、连续失败次数和当前状态，不保存 API Key、请求内容或阿里云控制台私有数据。运行时状态按 `providerId::model` 隔离，同一模型名可在多个阿里百炼 Provider 中独立计数；旧文件中的未分区模型键和 `activeModel` 仍可读取并在后续写入时兼容保留。它只在 `includeStats=true` 时进入 ZIP，并通过导入白名单恢复。旧 v1 备份没有该可选文件时继续正常导入，因此备份版本保持 `1`。

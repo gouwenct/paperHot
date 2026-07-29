@@ -232,7 +232,9 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 引文谱系：
 
 - 详情页下方展示论文的引文谱系图，分上排前置论文和下排后续论文，数据来自 OpenAlex 与 Semantic Scholar 并行拉取、Crossref 兜底；DOI 归一化去重，字段取更完整一方。
-- 本地论文库中命中的论文全部保留，其余外部论文按高影响力引用和被引次数补充，图中约保留 6 篇外部论文。
+- 本地论文库中命中的论文全部保留，其余外部论文按高影响力引用和被引次数补充到每排目标约 6 篇；本地命中超过目标时不截断。
+- 节点优先显示用户实际填写的短标题；精确的 `YYYY@` 或 `n.d.@` 默认占位符视为未设置并回退完整原标题。完整标题按节点可用宽度换行且不使用省略号截断，窄屏横向滚动只发生在谱系区域内。
+- 节点大小按引用量使用有上限的对数尺度变化，避免极高引用量破坏布局；悬停信息继续显示精确被引次数，引用量未知时使用基础大小。
 - 节点悬停显示标题、期刊、年份、被引次数和摘要片段；点击本地库论文进入现有详情页，点击外部论文进入临时详情页，可选择"加入论文库"（加入时记录操作日志；不点击则不写入本地数据）。
 - 一路追溯经过的论文在图中金色高亮，帮助用户沿着研究脉络查阅相关论文。无 DOI 或信源未收录时显示"暂无谱系数据"，不伪造元数据。
 - 谱系磁盘缓存 `data/papers/lineage/` 有 30 天有效期；缓存可随时从外部信源重新计算，属于运行时缓存，不进入一键导出 ZIP，追溯路径为会话内状态不持久化。
@@ -273,7 +275,7 @@ Copy-Item data\user\profile.example.json data\user\profile.json
 
 页面重点：
 
-- 短标题默认格式是 `年份@`，后面的技术缩写由用户填写。
+- 短标题默认格式是 `年份@`（无年份时为 `n.d.@`），后面的技术缩写由用户填写；只有默认前缀而没有实际内容时等同于尚未设置短标题。
 - LLM 按钮可以刷新收藏论文的大模型总结。
 
 ### 领域配置
@@ -458,6 +460,7 @@ flowchart TD
 | `docs/superpowers/plans/2026-07-26-citation-lineage-graph.md` | 引文谱系图后端信源合并、前端 SVG 图与外部论文临时详情页的 TDD 实施计划 |
 | `docs/solutions/runtime-errors/paperhot-service-restart-data-permission.md` | 固定端口旧进程与受限 Node 导致旧代码、断点 `EPERM` 的诊断和重启验收 |
 | `docs/solutions/ui-bugs/hash-routed-paper-detail-survives-async-rerenders.md` | 详情 hash 路由、上下文返回、列表状态恢复及最近标题标记的修复与防回归规则 |
+| `docs/solutions/ui-bugs/citation-lineage-title-layout-and-placeholder-fallback.md` | 引文谱系完整标题换行、默认短标题占位回退、引用量节点尺度与窄屏溢出的修复规则 |
 | `.superpowers/sdd/task-2-report.md` | Task 2 多信源元数据与正式版/预印本关联的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-3-report.md` | Task 3 近期抓取游标与 WoS 本地请求用量的实现、TDD 和验证报告 |
 | `.superpowers/sdd/task-4-report.md` | Task 4 日期感知、断点恢复、指定论文检索及独立审查修复的 TDD 和验证报告 |
