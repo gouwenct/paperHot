@@ -447,6 +447,7 @@ flowchart TD
 | `docs/superpowers/specs/2026-07-17-aliyun-text-model-pool-manager-design.md` | 阿里百炼文本对话模型池管理器、25/页模型卡片、单模型测试和灰度切换设计 |
 | `docs/superpowers/specs/2026-07-22-paperhot-visual-optimization-design.md` | 以今日论文快速扫描为核心的视觉层级、语义状态、论文卡、响应式和性能验收设计 |
 | `docs/superpowers/specs/2026-07-26-citation-lineage-graph-design.md` | 论文详情页引文谱系点线图、多信源并行合并去重与外部论文临时详情页设计 |
+| `docs/superpowers/specs/2026-07-28-paseo-agent-naming-design.md` | Paseo 全局会话命名权威来源、首轮冻结、局部重名和 provider 单向同步设计 |
 | `docs/superpowers/plans/2026-07-11-recent-paper-discovery.md` | 近期论文发现功能的分步实现、测试和验证计划 |
 | `docs/superpowers/plans/2026-07-15-archive-clear-and-existing-results.md` | 全部论文清理、收藏快照回退和今日论文已入库弱化展示的 TDD 实施计划 |
 | `docs/superpowers/plans/2026-07-15-wos-date-and-query.md` | WoS 查询和论文日期补全的 TDD 实施计划 |
@@ -458,6 +459,7 @@ flowchart TD
 | `docs/superpowers/plans/2026-07-17-aliyun-text-model-pool-manager.md` | 阿里百炼文本对话模型池管理器、单模型测试和 25/页卡片 UI 的 TDD 实施计划 |
 | `docs/superpowers/plans/2026-07-23-paperhot-visual-optimization.md` | 今日论文视觉令牌、结果层级、论文卡、移动端、性能测量和固定端口验收的分步实施计划 |
 | `docs/superpowers/plans/2026-07-26-citation-lineage-graph.md` | 引文谱系图后端信源合并、前端 SVG 图与外部论文临时详情页的 TDD 实施计划 |
+| `docs/superpowers/plans/2026-07-28-paseo-agent-naming.md` | Paseo 全局会话命名的能力门禁、状态机、CLI 对账与 provider adapter TDD 实施计划 |
 | `docs/solutions/runtime-errors/paperhot-service-restart-data-permission.md` | 固定端口旧进程与受限 Node 导致旧代码、断点 `EPERM` 的诊断和重启验收 |
 | `docs/solutions/ui-bugs/hash-routed-paper-detail-survives-async-rerenders.md` | 详情 hash 路由、上下文返回、列表状态恢复及最近标题标记的修复与防回归规则 |
 | `docs/solutions/ui-bugs/citation-lineage-title-layout-and-placeholder-fallback.md` | 引文谱系完整标题换行、默认短标题占位回退、引用量节点尺度与窄屏溢出的修复规则 |
